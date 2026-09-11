@@ -140,12 +140,16 @@ function App() {
   );
 }
 
+function BrandMark({ inverse = false }: { inverse?: boolean }) {
+  return <span className={`brand-mark ${inverse ? 'brand-mark-inverse' : ''}`}><img src="/NBG_LOGO.png" alt="Next Bridge Group" /></span>;
+}
+
 function Header({ view, navigate, mobileOpen, setMobileOpen }: { view: View; navigate: (view: View) => void; mobileOpen: boolean; setMobileOpen: (open: boolean) => void }) {
   return (
     <header className={`absolute top-0 z-30 w-full ${view === 'home' ? 'text-white' : 'text-[#17232b]'}`}>
       <div className="mx-auto flex max-w-[1440px] items-center justify-between px-5 py-5 md:px-10 md:py-7">
         <button onClick={() => navigate('home')} className="group flex items-center gap-3 text-left" aria-label="Next Bridge Group home">
-          <img src="/NBG_LOGO.png" alt="NBG" className="h-11 w-auto" />
+          <BrandMark inverse={view === 'home'} />
           <span className="hidden sm:block">
             <span className="block text-[11px] font-semibold tracking-[0.22em]">NEXT BRIDGE</span>
             <span className={`block text-[9px] tracking-[0.22em] ${view === 'home' ? 'text-white/65' : 'text-slate-500'}`}>GROUP LIMITED</span>
@@ -373,7 +377,7 @@ function Footer({ navigate }: { navigate: (view: View) => void }) {
         <div className="grid gap-12 border-b border-white/15 pb-14 md:grid-cols-[1.2fr_.8fr_.8fr] md:gap-8">
           <div>
             <div className="flex items-center gap-3">
-              <img src="/NBG_LOGO.png" alt="NBG" className="h-11 w-auto" />
+              <BrandMark inverse />
               <span>
                 <span className="block text-[11px] font-semibold tracking-[.22em]">NEXT BRIDGE</span>
                 <span className="block text-[9px] tracking-[.22em] text-white/50">GROUP LIMITED</span>

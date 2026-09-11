@@ -63,7 +63,7 @@ export default function AdminDashboard({ user, onSignOut }: { user: AdminUser; o
       {/* Sidebar */}
       <aside className={`fixed left-0 top-0 z-40 flex h-full w-64 flex-col bg-[#17232b] text-white transition-transform duration-300 md:translate-x-0 ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
         <div className="flex h-[72px] items-center gap-3 border-b border-white/10 px-5">
-          <img src="/NBG_LOGO.png" alt="NBG" className="h-9 w-auto" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+          <span className="brand-mark brand-mark-inverse"><img src="/NBG_LOGO.png" alt="Next Bridge Group" /></span>
           <div>
             <p className="text-[10px] font-bold tracking-[.2em] text-white">NBG ADMIN</p>
             <p className="text-[8px] tracking-[.16em] text-white/40">MANAGEMENT PORTAL</p>
@@ -1460,7 +1460,7 @@ export function AdminSignIn() {
     <div className="flex min-h-screen items-center justify-center bg-[#17232b] px-5">
       <div className="w-full max-w-md">
         <div className="mb-10 flex flex-col items-center gap-4">
-          <img src="/NBG_LOGO.png" alt="Next Bridge Group" className="h-16 w-auto" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+          <span className="brand-mark brand-mark-inverse brand-mark-auth"><img src="/NBG_LOGO.png" alt="Next Bridge Group" /></span>
           <div className="text-center">
             <p className="text-[11px] font-bold tracking-[.22em] text-white">NEXT BRIDGE</p>
             <p className="text-[9px] tracking-[.22em] text-white/40">GROUP LIMITED · ADMIN</p>
