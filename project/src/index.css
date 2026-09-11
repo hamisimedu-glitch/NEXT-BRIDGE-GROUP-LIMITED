@@ -21,7 +21,7 @@ button { cursor: pointer; }
 .section-pad { padding: 112px 20px; }
 .page-top { padding-top: 180px; min-height: 80vh; }
 @media (min-width: 768px) { .section-pad { padding: 144px 40px; } }
-.hero-shade { background: linear-gradient(90deg, rgba(15,143,159,.76) 0%, rgba(15,143,159,.24) 65%, rgba(15,143,159,.12) 100%), linear-gradient(0deg, rgba(15,143,159,.68) 0%, transparent 50%); }
+.hero-content { text-shadow: 0 2px 14px rgba(23,35,43,.5); }
 .nav-link { position: relative; opacity: .72; transition: opacity .25s ease; }
 .nav-link:hover, .nav-link-active { opacity: 1; }
 .nav-link-active::after { position: absolute; bottom: -10px; left: 0; height: 1px; width: 100%; background: #20afd1; content: ''; }

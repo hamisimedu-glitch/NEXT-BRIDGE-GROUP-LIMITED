@@ -172,11 +172,10 @@ function Header({ view, navigate, mobileOpen, setMobileOpen }: { view: View; nav
 
 function HomePage({ navigate, setGalleryIndex }: { navigate: (view: View) => void; setGalleryIndex: (index: number) => void }) {
   return <>
-    <section className="hero-section relative flex min-h-[780px] items-end overflow-hidden bg-[#0f8f9f] pb-16 md:min-h-screen md:pb-24">
-      <img src={images.hero} alt="Contemporary coastal architecture concept image" className="absolute inset-0 h-full w-full object-cover opacity-70" />
-      <div className="hero-shade absolute inset-0" />
+    <section className="hero-section relative flex min-h-[780px] items-end overflow-hidden bg-[#f4f1eb] pb-16 md:min-h-screen md:pb-24">
+      <img src={images.hero} alt="Contemporary coastal architecture concept image" className="absolute inset-0 h-full w-full object-cover" />
       <div className="relative mx-auto w-full max-w-[1440px] px-5 md:px-10">
-        <div className="max-w-3xl animate-rise">
+        <div className="hero-content max-w-3xl animate-rise">
           <p className="eyebrow mb-7 text-[#9edfeb]">Nyali · Mombasa · Kenya</p>
           <h1 className="max-w-4xl font-serif text-[clamp(3.5rem,9vw,8.6rem)] leading-[.86] tracking-[-.06em] text-white">A new standard<br /><em>of coastal living.</em></h1>
           <div className="mt-10 flex flex-col gap-4 sm:flex-row sm:items-center"><button onClick={() => navigate('projects')} className="btn-primary">Explore residences <ArrowRight size={16} /></button><button onClick={() => navigate('viewing')} className="btn-ghost">Book a private viewing</button></div>
