@@ -16,6 +16,7 @@ import {
   Mail,
   Menu,
   Phone,
+  Pencil,
   Plus,
   Search,
   TrendingUp,
@@ -528,6 +529,7 @@ function UnitsTab() {
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [showForm, setShowForm] = useState(false);
+  const [editing, setEditing] = useState<ProjectUnit | null>(null);
 
   const load = useCallback(async () => {
     const [ur, pr] = await Promise.all([
@@ -595,7 +597,7 @@ function UnitsTab() {
                   <StatusSelect value={u.status} options={UNIT_STATUSES} colors={{ AVAILABLE: 'bg-[#dceeea] text-[#3a6f69]', RESERVED: 'bg-[#f2e7c9] text-[#856b2e]', SOLD: 'bg-[#f5d4d4] text-[#7a2e2e]' }} onChange={(v) => updateStatus(u.id, v)} />
                 </td>
                 <td className="px-4 py-3"><button onClick={() => togglePublished(u)} className={`flex items-center gap-1 text-[10px] uppercase tracking-[.1em] ${u.is_published ? 'text-[#2e6b3e]' : 'text-slate-400'}`}>{u.is_published ? <Eye size={13} /> : <EyeOff size={13} />}{u.is_published ? 'Live' : 'Hidden'}</button></td>
-                <td className="px-4 py-3"><button onClick={() => remove(u.id)} className="text-slate-300 hover:text-[#a55445]" aria-label={`Delete unit ${u.unit_number}`}><Trash2 size={15} /></button></td>
+                <td className="px-4 py-3"><div className="flex items-center gap-3"><button onClick={() => setEditing(u)} className="text-slate-300 hover:text-[#20afd1]" aria-label={`Edit unit ${u.unit_number}`}><Pencil size={15} /></button><button onClick={() => remove(u.id)} className="text-slate-300 hover:text-[#a55445]" aria-label={`Delete unit ${u.unit_number}`}><Trash2 size={15} /></button></div></td>
               </tr>
             ))}
             {filtered.length === 0 && <EmptyRow cols={10} text="No units in inventory yet." />}
@@ -608,26 +610,31 @@ function UnitsTab() {
           <UnitForm projects={projects} onDone={(u) => { setUnits((p) => [u, ...p]); setShowForm(false); }} />
         </Modal>
       )}
+      {editing && <Modal title={`Edit ${editing.unit_number}`} onClose={() => setEditing(null)}><UnitForm projects={projects} initial={editing} onDone={(u) => { setUnits((p) => p.map((item) => item.id === u.id ? u : item)); setEditing(null); }} /></Modal>}
     </div>
   );
 }
 
-function UnitForm({ projects, onDone }: { projects: Project[]; onDone: (u: ProjectUnit) => void }) {
-  const [f, setF] = useState({ unit_number: '', project_id: '', type: '', bedrooms: '', size: '', floor: '', parking: '', view: '', price: '', status: 'AVAILABLE', is_published: false });
+function UnitForm({ projects, initial, onDone }: { projects: Project[]; initial?: ProjectUnit; onDone: (u: ProjectUnit) => void }) {
+  const [f, setF] = useState({ unit_number: initial?.unit_number ?? '', project_id: initial?.project_id ?? '', type: initial?.type ?? '', bedrooms: initial?.bedrooms?.toString() ?? '', size: initial?.size ?? '', floor: initial?.floor ?? '', parking: initial?.parking ?? '', view: initial?.view ?? '', price: initial?.price ?? '', status: initial?.status ?? 'AVAILABLE', is_published: initial?.is_published ?? false });
   const [image, setImage] = useState<File | null>(null);
   const [err, setErr] = useState('');
   const [saving, setSaving] = useState(false);
 
   const submit = async (e: FormEvent) => {
     e.preventDefault(); setSaving(true); setErr('');
-    let image_url: string | null = null;
+    let image_url: string | null = initial?.image_url ?? null;
     try { if (image) image_url = await uploadPublicMedia(image, 'units'); } catch { setErr('Image upload failed. Please try again.'); setSaving(false); return; }
-    const { data, error } = await supabase.from('project_units').insert({
-      unit_number: f.unit_number, project_id: f.project_id || null, type: f.type || null,
+    const values = {
+      unit_number: f.unit_number || 'AUTO', project_id: f.project_id || null, type: f.type || null,
       bedrooms: f.bedrooms ? parseInt(f.bedrooms) : null, size: f.size || null,
       floor: f.floor || null, parking: f.parking || null, view: f.view || null,
       price: f.price || null, status: f.status, image_url, is_published: f.is_published,
-    }).select().single();
+    };
+    const response = initial
+      ? await supabase.from('project_units').update(values).eq('id', initial.id).select().single()
+      : await supabase.from('project_units').insert(values).select().single();
+    const { data, error } = response;
     setSaving(false);
     if (error || !data) { setErr('Could not save. Please try again.'); return; }
     onDone(data as ProjectUnit);
@@ -636,7 +643,7 @@ function UnitForm({ projects, onDone }: { projects: Project[]; onDone: (u: Proje
   return (
     <form onSubmit={submit} className="grid gap-4">
       <div className="grid grid-cols-2 gap-4">
-        <AF label="Unit Number" value={f.unit_number} onChange={(v) => setF({ ...f, unit_number: v })} required />
+        <div className="rounded border border-[#c9c5bd] bg-[#f0ede6] px-3 py-2"><span className="eyebrow block text-slate-400">Unit Number</span><p className="mt-1 text-sm font-semibold text-[#17232b]">{f.unit_number || `F${(parseInt(f.floor) || 1).toString().padStart(2, '0')}-next`}</p><p className="mt-1 text-[10px] text-slate-500">Generated automatically from the floor</p></div>
         <label className="block">
           <span className="eyebrow mb-1.5 block text-slate-400">Project</span>
           <select value={f.project_id} onChange={(e) => setF({ ...f, project_id: e.target.value })} className="admin-input w-full">
@@ -645,7 +652,7 @@ function UnitForm({ projects, onDone }: { projects: Project[]; onDone: (u: Proje
           </select>
         </label>
       </div>
-      <label className="block"><span className="eyebrow mb-1.5 block text-slate-400">Unit image</span><span className="flex cursor-pointer items-center gap-2 border border-dashed border-[#b8b4ab] px-3 py-3 text-xs text-slate-500 hover:border-[#20afd1]"><Upload size={15} /> {image?.name ?? 'Choose image from computer'}<input type="file" accept="image/*" className="hidden" onChange={(e) => setImage(e.target.files?.[0] ?? null)} /></span></label>
+      <label className="block"><span className="eyebrow mb-1.5 block text-slate-400">Unit image</span>{initial?.image_url && !image && <img src={initial.image_url} alt="Current unit" className="mb-2 h-24 w-full object-cover" />}<span className="flex cursor-pointer items-center gap-2 border border-dashed border-[#20afd1] bg-[#f5fbfc] px-3 py-3 text-xs text-[#247b85] hover:bg-[#e8f7fa]"><Upload size={15} /> {image?.name ?? (initial?.image_url ? 'Replace current image' : 'Choose image from computer')}<input type="file" accept="image/*" className="hidden" onChange={(e) => setImage(e.target.files?.[0] ?? null)} /></span></label>
       <label className="flex items-center gap-2 text-xs text-slate-600"><input type="checkbox" checked={f.is_published} onChange={(e) => setF({ ...f, is_published: e.target.checked })} /> Publish this unit on the public website</label>
       <div className="grid grid-cols-2 gap-4">
         <AF label="Type (e.g. 3 Bedroom + DSQ)" value={f.type} onChange={(v) => setF({ ...f, type: v })} />
@@ -669,7 +676,7 @@ function UnitForm({ projects, onDone }: { projects: Project[]; onDone: (u: Proje
         </label>
       </div>
       {err && <p className="text-sm text-[#a55445]">{err}</p>}
-      <button disabled={saving} className="btn-primary disabled:opacity-60">{saving ? 'Saving…' : 'Add Unit'} <ArrowRight size={15} /></button>
+      <button disabled={saving} className="btn-primary disabled:opacity-60">{saving ? 'Saving…' : initial ? 'Save Unit Changes' : 'Add Unit'} <ArrowRight size={15} /></button>
     </form>
   );
 }
@@ -1116,6 +1123,7 @@ function ProjectsTab() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
+  const [editing, setEditing] = useState<Project | null>(null);
 
   const load = useCallback(async () => {
     const { data } = await supabase.from('projects').select('*').order('created_at', { ascending: false });
@@ -1151,19 +1159,19 @@ function ProjectsTab() {
       </div>
       <div className="grid gap-4 md:grid-cols-2">
         {projects.map((p) => (
-          <button key={p.id} onClick={() => togglePublished(p)} className="group relative rounded-lg border border-[#c9c5bd] bg-white p-6 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-[#20afd1] hover:shadow-md">
+          <div key={p.id} className="group relative rounded-lg border border-[#c9c5bd] bg-white p-6 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-[#20afd1] hover:shadow-md">
             {p.image_url && <img src={p.image_url} alt="" className="mb-5 h-36 w-full object-cover" />}
             <div className="flex items-start justify-between">
               <div>
                 <h3 className="font-serif text-xl">{p.name}</h3>
                 <p className="mt-1 text-xs text-slate-400">{p.location ?? 'Location not set'}</p>
               </div>
-              <StatusSelect value={p.status} options={PROJECT_STATUSES} colors={{ 'COMING SOON': 'bg-[#f2e7c9] text-[#856b2e]', 'UNDER CONSTRUCTION': 'bg-[#d4e8f5] text-[#2e5f7a]', 'COMPLETED': 'bg-[#d4f0dc] text-[#2e6b3e]', 'PLANNING': 'bg-[#e6e2da] text-[#5a564d]' }} onChange={(v) => updateStatus(p.id, v)} />
+              <div className="flex items-center gap-2"><button onClick={() => setEditing(p)} className="text-slate-300 hover:text-[#20afd1]" aria-label={`Edit ${p.name}`}><Pencil size={15} /></button><StatusSelect value={p.status} options={PROJECT_STATUSES} colors={{ 'COMING SOON': 'bg-[#f2e7c9] text-[#856b2e]', 'UNDER CONSTRUCTION': 'bg-[#d4e8f5] text-[#2e5f7a]', 'COMPLETED': 'bg-[#d4f0dc] text-[#2e6b3e]', 'PLANNING': 'bg-[#e6e2da] text-[#5a564d]' }} onChange={(v) => updateStatus(p.id, v)} /></div>
             </div>
             {p.description && <p className="mt-3 text-sm text-slate-500">{p.description}</p>}
-            <div className="mt-4 flex items-center justify-between text-xs"><span className="text-slate-300">Created {fmt(p.created_at)}</span><span className={`flex items-center gap-1 uppercase tracking-[.1em] ${p.is_published ? 'text-[#2e6b3e]' : 'text-slate-400'}`}>{p.is_published ? <Eye size={13} /> : <EyeOff size={13} />}{p.is_published ? 'Live' : 'Hidden'}</span></div>
-            <span onClick={(event) => { event.stopPropagation(); remove(p.id); }} className="absolute right-4 bottom-4 text-slate-300 hover:text-[#a55445]" role="button" aria-label={`Delete ${p.name}`}><Trash2 size={15} /></span>
-          </button>
+            <div className="mt-4 flex items-center justify-between text-xs"><span className="text-slate-300">Created {fmt(p.created_at)}</span><button onClick={() => togglePublished(p)} className={`flex items-center gap-1 uppercase tracking-[.1em] ${p.is_published ? 'text-[#2e6b3e]' : 'text-slate-400'}`}>{p.is_published ? <Eye size={13} /> : <EyeOff size={13} />}{p.is_published ? 'Live' : 'Hidden'}</button></div>
+            <button onClick={() => remove(p.id)} className="absolute right-4 bottom-4 text-slate-300 hover:text-[#a55445]" aria-label={`Delete ${p.name}`}><Trash2 size={15} /></button>
+          </div>
         ))}
         {projects.length === 0 && <div className="rounded-lg border border-dashed border-[#b8b4ab] p-12 text-center text-sm text-slate-400">No projects yet.</div>}
       </div>
@@ -1173,21 +1181,26 @@ function ProjectsTab() {
           <ProjectForm onDone={(p) => { setProjects((prev) => [p, ...prev]); setShowForm(false); }} />
         </Modal>
       )}
+      {editing && <Modal title={`Edit ${editing.name}`} onClose={() => setEditing(null)}><ProjectForm initial={editing} onDone={(p) => { setProjects((prev) => prev.map((item) => item.id === p.id ? p : item)); setEditing(null); }} /></Modal>}
     </div>
   );
 }
 
-function ProjectForm({ onDone }: { onDone: (p: Project) => void }) {
-  const [f, setF] = useState({ name: '', location: '', status: 'COMING SOON', description: '', is_published: false });
+function ProjectForm({ initial, onDone }: { initial?: Project; onDone: (p: Project) => void }) {
+  const [f, setF] = useState({ name: initial?.name ?? '', location: initial?.location ?? '', status: initial?.status ?? 'COMING SOON', description: initial?.description ?? '', is_published: initial?.is_published ?? false });
   const [image, setImage] = useState<File | null>(null);
   const [err, setErr] = useState('');
   const [saving, setSaving] = useState(false);
 
   const submit = async (e: FormEvent) => {
     e.preventDefault(); setSaving(true); setErr('');
-    let image_url: string | null = null;
+    let image_url: string | null = initial?.image_url ?? null;
     try { if (image) image_url = await uploadPublicMedia(image, 'projects'); } catch { setErr('Image upload failed. Please try again.'); setSaving(false); return; }
-    const { data, error } = await supabase.from('projects').insert({ name: f.name, location: f.location || null, status: f.status, description: f.description || null, image_url, is_published: f.is_published }).select().single();
+    const values = { name: f.name, location: f.location || null, status: f.status, description: f.description || null, image_url, is_published: f.is_published };
+    const response = initial
+      ? await supabase.from('projects').update(values).eq('id', initial.id).select().single()
+      : await supabase.from('projects').insert(values).select().single();
+    const { data, error } = response;
     setSaving(false);
     if (error || !data) { setErr('Could not save. Please try again.'); return; }
     onDone(data as Project);
@@ -1203,14 +1216,14 @@ function ProjectForm({ onDone }: { onDone: (p: Project) => void }) {
           {PROJECT_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
         </select>
       </label>
-      <label className="block"><span className="eyebrow mb-1.5 block text-slate-400">Project image</span><span className="flex cursor-pointer items-center gap-2 border border-dashed border-[#b8b4ab] px-3 py-3 text-xs text-slate-500 hover:border-[#20afd1]"><Upload size={15} /> {image?.name ?? 'Choose image from computer'}<input type="file" accept="image/*" className="hidden" onChange={(e) => setImage(e.target.files?.[0] ?? null)} /></span></label>
+      <label className="block"><span className="eyebrow mb-1.5 block text-slate-400">Project image</span>{initial?.image_url && !image && <img src={initial.image_url} alt="Current project" className="mb-2 h-24 w-full object-cover" />}<span className="flex cursor-pointer items-center gap-2 border border-dashed border-[#20afd1] bg-[#f5fbfc] px-3 py-3 text-xs text-[#247b85] hover:bg-[#e8f7fa]"><Upload size={15} /> {image?.name ?? (initial?.image_url ? 'Replace current image' : 'Choose image from computer')}<input type="file" accept="image/*" className="hidden" onChange={(e) => setImage(e.target.files?.[0] ?? null)} /></span></label>
       <label className="flex items-center gap-2 text-xs text-slate-600"><input type="checkbox" checked={f.is_published} onChange={(e) => setF({ ...f, is_published: e.target.checked })} /> Publish this project on the public website</label>
       <label className="block">
         <span className="eyebrow mb-1.5 block text-slate-400">Description</span>
         <textarea value={f.description} onChange={(e) => setF({ ...f, description: e.target.value })} rows={3} className="admin-input w-full resize-none" />
       </label>
       {err && <p className="text-sm text-[#a55445]">{err}</p>}
-      <button disabled={saving} className="btn-primary disabled:opacity-60">{saving ? 'Saving…' : 'Save Project'} <ArrowRight size={15} /></button>
+      <button disabled={saving} className="btn-primary disabled:opacity-60">{saving ? 'Saving…' : initial ? 'Save Project Changes' : 'Save Project'} <ArrowRight size={15} /></button>
     </form>
   );
 }
