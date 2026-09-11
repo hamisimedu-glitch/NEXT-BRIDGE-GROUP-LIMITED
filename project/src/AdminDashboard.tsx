@@ -3,6 +3,7 @@ import {
   ArrowRight,
   Award,
   BarChart3,
+  Calculator,
   Building2,
   CalendarDays,
   Check,
@@ -51,11 +52,11 @@ import {
   type Sale,
 } from '@/lib/types';
 
-type AdminTab = 'overview' | 'leads' | 'sales' | 'units' | 'realtors' | 'commissions' | 'investments' | 'projects' | 'updates';
+type AdminTab = 'overview' | 'leads' | 'sales' | 'units' | 'realtors' | 'commissions' | 'investments' | 'projects' | 'updates' | 'calculator';
 
 const WA = '254741121575';
 
-async function uploadPublicMedia(file: File, folder: 'projects' | 'units') {
+async function uploadPublicMedia(file: File, folder: 'projects' | 'units' | 'updates') {
   const extension = file.name.split('.').pop()?.toLowerCase() || 'jpg';
   const path = `${folder}/${crypto.randomUUID()}.${extension}`;
   const { error } = await supabase.storage.from('public-media').upload(path, file, { upsert: false, contentType: file.type });
@@ -79,6 +80,7 @@ export default function AdminDashboard({ user, onSignOut }: { user: AdminUser; o
     { id: 'commissions', label: 'Commissions', icon: DollarSign, group: 'agents' },
     { id: 'projects', label: 'Projects', icon: Construction, group: 'ops' },
     { id: 'updates', label: 'Site Updates', icon: BarChart3, group: 'ops' },
+    { id: 'calculator', label: 'Investment Calculator', icon: Calculator, group: 'ops' },
   ];
 
   const groups = [
@@ -161,6 +163,7 @@ export default function AdminDashboard({ user, onSignOut }: { user: AdminUser; o
           {tab === 'commissions' && <CommissionsTab />}
           {tab === 'projects' && <ProjectsTab />}
           {tab === 'updates' && <UpdatesTab />}
+          {tab === 'calculator' && <CalculatorTab />}
         </div>
       </div>
     </div>
@@ -1063,6 +1066,10 @@ function CommissionForm({ realtors, sales, onDone }: { realtors: Realtor[]; sale
   const selectedRealtor = realtors.find((r) => r.id === f.realtor_id);
   const selectedSale = sales.find((s) => s.id === f.sale_id);
 
+  useEffect(() => {
+    if (selectedSale?.sale_price) setF((prev) => ({ ...prev, rate: '5', amount: String((selectedSale.sale_price! * 5) / 100) }));
+  }, [selectedSale?.id, selectedSale?.sale_price]);
+
   const autoCalc = () => {
     if (selectedSale?.sale_price && f.rate) {
       const calc = (selectedSale.sale_price * parseFloat(f.rate)) / 100;
@@ -1098,9 +1105,9 @@ function CommissionForm({ realtors, sales, onDone }: { realtors: Realtor[]; sale
         </select>
       </label>
       <div className="grid grid-cols-2 gap-4">
-        <AF label="Commission Rate (%)" type="number" value={f.rate} onChange={(v) => setF({ ...f, rate: v })} />
+        <div><span className="eyebrow mb-1.5 block text-slate-400">Commission Rate</span><div className="rounded border border-[#c9c5bd] bg-[#f0ede6] px-3 py-2 text-sm font-semibold text-[#17232b]">5% fixed</div></div>
         <div>
-          <AF label="Amount (KSh)" type="number" value={f.amount} onChange={(v) => setF({ ...f, amount: v })} required />
+          <AF label="Commission Amount (KSh)" type="number" value={f.amount} onChange={(v) => setF({ ...f, amount: v })} required />
           {selectedSale?.sale_price && (
             <button type="button" onClick={autoCalc} className="mt-1 text-[10px] text-[#20afd1] hover:underline">Auto-calculate from sale price</button>
           )}
@@ -1114,6 +1121,36 @@ function CommissionForm({ realtors, sales, onDone }: { realtors: Realtor[]; sale
       {err && <p className="text-sm text-[#a55445]">{err}</p>}
       <button disabled={saving} className="btn-primary disabled:opacity-60">{saving ? 'Saving…' : 'Save Commission'} <ArrowRight size={15} /></button>
     </form>
+  );
+}
+
+// ─── Investment calculator ──────────────────────────────
+
+function CalculatorTab() {
+  const [price, setPrice] = useState('');
+  const [deposit, setDeposit] = useState('20');
+  const [term, setTerm] = useState('12');
+  const amount = Number(price) || 0;
+  const depositAmount = amount * ((Number(deposit) || 0) / 100);
+  const balance = Math.max(amount - depositAmount, 0);
+  const monthly = balance / Math.max(Number(term) || 1, 1);
+  const commission = amount * 0.05;
+
+  return (
+    <div className="space-y-6">
+      <div className="max-w-2xl"><p className="eyebrow text-[#20afd1]">Sales tool</p><h2 className="mt-3 font-serif text-4xl">Investment calculator</h2><p className="mt-3 text-sm leading-6 text-slate-500">Estimate the deposit, payment plan, and realtor commission before recording a sale.</p></div>
+      <div className="grid gap-6 lg:grid-cols-[1fr_1.2fr]">
+        <div className="rounded-lg border border-[#c9c5bd] bg-white p-6 shadow-sm">
+          <div className="grid gap-5"><AF label="Property price (KSh)" type="number" value={price} onChange={setPrice} /><AF label="Deposit (%)" type="number" value={deposit} onChange={setDeposit} /><AF label="Payment term (months)" type="number" value={term} onChange={setTerm} /></div>
+        </div>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <StatMini label="Deposit required" value={fmtKes(depositAmount)} color="text-[#2e5f7a]" />
+          <StatMini label="Balance" value={fmtKes(balance)} color="text-[#856b2e]" />
+          <StatMini label="Estimated monthly" value={fmtKes(monthly)} color="text-[#3a6f69]" />
+          <StatMini label="Realtor commission (5%)" value={fmtKes(commission)} color="text-[#2e6b3e]" />
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -1235,6 +1272,7 @@ function UpdatesTab() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
+  const [editing, setEditing] = useState<ConstructionUpdate | null>(null);
 
   const load = useCallback(async () => {
     const [ur, pr] = await Promise.all([
@@ -1263,6 +1301,7 @@ function UpdatesTab() {
       <div className="space-y-4">
         {updates.map((u) => (
           <div key={u.id} className="rounded-lg border border-[#c9c5bd] bg-white p-6 shadow-sm">
+            {u.image_url && <img src={u.image_url} alt="" className="mb-5 h-48 w-full object-cover" />}
             <div className="flex items-start justify-between">
               <div>
                 <h3 className="font-serif text-lg">{u.title}</h3>
@@ -1270,6 +1309,7 @@ function UpdatesTab() {
               </div>
               <div className="flex items-center gap-3">
                 <span className="rounded-md bg-[#dceeea] px-3 py-1.5 text-xs font-semibold text-[#3a6f69]">{u.progress_pct}%</span>
+                <button onClick={() => setEditing(u)} className="text-slate-300 hover:text-[#20afd1]" aria-label={`Edit ${u.title}`}><Pencil size={16} /></button>
                 <button onClick={() => remove(u.id)} className="text-slate-300 hover:text-[#a55445]" aria-label="Delete"><X size={16} /></button>
               </div>
             </div>
@@ -1284,21 +1324,29 @@ function UpdatesTab() {
           <UpdateForm projects={projects} onDone={(u) => { setUpdates((p) => [u, ...p]); setShowForm(false); }} />
         </Modal>
       )}
+      {editing && <Modal title={`Edit ${editing.title}`} onClose={() => setEditing(null)}><UpdateForm projects={projects} initial={editing} onDone={(u) => { setUpdates((p) => p.map((item) => item.id === u.id ? u : item)); setEditing(null); }} /></Modal>}
     </div>
   );
 }
 
-function UpdateForm({ projects, onDone }: { projects: Project[]; onDone: (u: ConstructionUpdate) => void }) {
-  const [f, setF] = useState({ project_id: '', title: '', body: '', progress_pct: '0', image_url: '' });
+function UpdateForm({ projects, initial, onDone }: { projects: Project[]; initial?: ConstructionUpdate; onDone: (u: ConstructionUpdate) => void }) {
+  const [f, setF] = useState({ project_id: initial?.project_id ?? '', title: initial?.title ?? '', body: initial?.body ?? '', progress_pct: String(initial?.progress_pct ?? 0), image_url: initial?.image_url ?? '' });
+  const [image, setImage] = useState<File | null>(null);
   const [err, setErr] = useState('');
   const [saving, setSaving] = useState(false);
 
   const submit = async (e: FormEvent) => {
     e.preventDefault(); setSaving(true); setErr('');
-    const { data, error } = await supabase.from('construction_updates').insert({
+    let image_url = f.image_url || null;
+    try { if (image) image_url = await uploadPublicMedia(image, 'updates'); } catch { setErr('Image upload failed. Please try again.'); setSaving(false); return; }
+    const values = {
       project_id: f.project_id || null, title: f.title,
-      body: f.body || null, progress_pct: parseInt(f.progress_pct) || 0, image_url: f.image_url || null,
-    }).select().single();
+      body: f.body || null, progress_pct: parseInt(f.progress_pct) || 0, image_url,
+    };
+    const response = initial
+      ? await supabase.from('construction_updates').update(values).eq('id', initial.id).select().single()
+      : await supabase.from('construction_updates').insert(values).select().single();
+    const { data, error } = response;
     setSaving(false);
     if (error || !data) { setErr('Could not post. Please try again.'); return; }
     onDone(data as ConstructionUpdate);
@@ -1315,13 +1363,13 @@ function UpdateForm({ projects, onDone }: { projects: Project[]; onDone: (u: Con
         </select>
       </label>
       <AF label="Progress (%)" type="number" value={f.progress_pct} onChange={(v) => setF({ ...f, progress_pct: v })} />
+      <label className="block"><span className="eyebrow mb-1.5 block text-slate-400">Site image</span>{initial?.image_url && !image && <img src={initial.image_url} alt="Current update" className="mb-2 h-24 w-full object-cover" />}<span className="flex cursor-pointer items-center gap-2 border border-dashed border-[#20afd1] bg-[#f5fbfc] px-3 py-3 text-xs text-[#247b85] hover:bg-[#e8f7fa]"><Upload size={15} /> {image?.name ?? (initial?.image_url ? 'Replace current image' : 'Upload site image from computer')}<input type="file" accept="image/*" className="hidden" onChange={(e) => setImage(e.target.files?.[0] ?? null)} /></span></label>
       <label className="block">
         <span className="eyebrow mb-1.5 block text-slate-400">Update Body</span>
         <textarea value={f.body} onChange={(e) => setF({ ...f, body: e.target.value })} rows={4} className="admin-input w-full resize-none" />
       </label>
-      <AF label="Image URL (optional)" value={f.image_url} onChange={(v) => setF({ ...f, image_url: v })} />
       {err && <p className="text-sm text-[#a55445]">{err}</p>}
-      <button disabled={saving} className="btn-primary disabled:opacity-60">{saving ? 'Posting…' : 'Post Update'} <ArrowRight size={15} /></button>
+      <button disabled={saving} className="btn-primary disabled:opacity-60">{saving ? 'Saving…' : initial ? 'Save Update Changes' : 'Post Update'} <ArrowRight size={15} /></button>
     </form>
   );
 }
