@@ -7,6 +7,10 @@ import { COMMISSION_STATUS_COLORS, COMMISSION_STATUSES, INVESTMENT_STATUS_COLORS
 type AdminTab = 'overview' | 'leads' | 'sales' | 'units' | 'realtors' | 'commissions' | 'investments' | 'projects' | 'updates' | 'calculator';
 const LEAD_PRIORITIES = ['LOW', 'NORMAL', 'HIGH', 'URGENT'] as const;
 const LEAD_ACTIONS = ['Call lead', 'Send project details', 'Schedule viewing', 'Send quotation', 'Follow up', 'No action'];
+const UNIT_TYPES = ['1 Bedroom', '2 Bedroom', '3 Bedroom', '3 Bedroom + DSQ', '4 Bedroom', 'Penthouse', 'Commercial'];
+const FLOOR_OPTIONS = Array.from({ length: 30 }, (_, index) => String(index + 1));
+const PARKING_OPTIONS = ['No parking', '1 space', '2 spaces', '3 spaces', '4 spaces'];
+const VIEW_OPTIONS = ['Garden view', 'Pool view', 'Sea view', 'Ocean view', 'City view', 'Courtyard view'];
 
 const WA = '254741121575';
 
@@ -672,16 +676,16 @@ function UnitForm({ projects, initial, onDone }: { projects: Project[]; initial?
       <label className="block"><span className="eyebrow mb-1.5 block text-slate-400">Unit image</span>{initial?.image_url && !image && <img src={initial.image_url} alt="Current unit" className="mb-2 h-24 w-full object-cover" />}<span className="flex cursor-pointer items-center gap-2 border border-dashed border-[#20afd1] bg-[#f5fbfc] px-3 py-3 text-xs text-[#247b85] hover:bg-[#e8f7fa]"><Upload size={15} /> {image?.name ?? (initial?.image_url ? 'Replace current image' : 'Choose image from computer')}<input type="file" accept="image/*" className="hidden" onChange={(e) => setImage(e.target.files?.[0] ?? null)} /></span></label>
       <label className="flex items-center gap-2 text-xs text-slate-600"><input type="checkbox" checked={f.is_published} onChange={(e) => setF({ ...f, is_published: e.target.checked })} /> Publish this unit on the public website</label>
       <div className="grid grid-cols-2 gap-4">
-        <AF label="Type (e.g. 3 Bedroom + DSQ)" value={f.type} onChange={(v) => setF({ ...f, type: v })} />
+        <label className="block"><span className="eyebrow mb-1.5 block text-slate-400">Unit type</span><select value={f.type} onChange={(e) => setF({ ...f, type: e.target.value })} className="admin-input w-full"><option value="">— Select type —</option>{UNIT_TYPES.map((item) => <option key={item}>{item}</option>)}</select></label>
         <AF label="Bedrooms" type="number" value={f.bedrooms} onChange={(v) => setF({ ...f, bedrooms: v })} />
       </div>
       <div className="grid grid-cols-2 gap-4">
         <AF label="Size (sq ft)" value={f.size} onChange={(v) => setF({ ...f, size: v })} />
-        <AF label="Floor" value={f.floor} onChange={(v) => setF({ ...f, floor: v })} />
+        <label className="block"><span className="eyebrow mb-1.5 block text-slate-400">Floor</span><select value={f.floor} onChange={(e) => setF({ ...f, floor: e.target.value })} className="admin-input w-full"><option value="">— Select floor —</option>{FLOOR_OPTIONS.map((item) => <option key={item} value={item}>Floor {item}</option>)}</select></label>
       </div>
       <div className="grid grid-cols-2 gap-4">
-        <AF label="Parking" value={f.parking} onChange={(v) => setF({ ...f, parking: v })} />
-        <AF label="View" value={f.view} onChange={(v) => setF({ ...f, view: v })} />
+        <label className="block"><span className="eyebrow mb-1.5 block text-slate-400">Parking</span><select value={f.parking} onChange={(e) => setF({ ...f, parking: e.target.value })} className="admin-input w-full"><option value="">— Select parking —</option>{PARKING_OPTIONS.map((item) => <option key={item}>{item}</option>)}</select></label>
+        <label className="block"><span className="eyebrow mb-1.5 block text-slate-400">View</span><select value={f.view} onChange={(e) => setF({ ...f, view: e.target.value })} className="admin-input w-full"><option value="">— Select view —</option>{VIEW_OPTIONS.map((item) => <option key={item}>{item}</option>)}</select></label>
       </div>
       <div className="grid grid-cols-2 gap-4">
         <AF label="Price (KSh)" value={f.price} onChange={(v) => setF({ ...f, price: v })} />
@@ -840,6 +844,7 @@ function RealtorsTab() {
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [selected, setSelected] = useState<Realtor | null>(null);
+  const [editing, setEditing] = useState<Realtor | null>(null);
   const [statusFilter, setStatusFilter] = useState('ALL');
 
   const load = useCallback(async () => {
@@ -892,7 +897,7 @@ function RealtorsTab() {
                 </td>
                 <td className="px-4 py-3 text-xs text-slate-400">{fmt(r.joined_at)}</td>
                 <td className="px-4 py-3">
-                  <button onClick={() => setSelected(r)} className="text-xs text-[#20afd1] hover:underline">View</button>
+                  <div className="flex gap-3"><button onClick={() => setSelected(r)} className="text-xs text-[#20afd1] hover:underline">View</button><button onClick={() => setEditing(r)} className="text-xs text-[#247b85] hover:underline">Edit</button></div>
                 </td>
               </tr>
             ))}
@@ -927,21 +932,23 @@ function RealtorsTab() {
           )}
         </Drawer>
       )}
+      {editing && <Modal title={`Edit ${editing.name}`} onClose={() => setEditing(null)}><RealtorForm initial={editing} onDone={(r) => { setRealtors((p) => p.map((item) => item.id === r.id ? r : item)); setEditing(null); }} /></Modal>}
     </div>
   );
 }
 
-function RealtorForm({ onDone }: { onDone: (r: Realtor) => void }) {
-  const [f, setF] = useState({ name: '', email: '', phone: '', id_number: '', commission_rate: '5', status: 'PENDING', notes: '' });
+function RealtorForm({ initial, onDone }: { initial?: Realtor; onDone: (r: Realtor) => void }) {
+  const [f, setF] = useState({ name: initial?.name ?? '', email: initial?.email ?? '', phone: initial?.phone ?? '', id_number: initial?.id_number ?? '', status: initial?.status ?? 'PENDING', notes: initial?.notes ?? '' });
   const [err, setErr] = useState('');
   const [saving, setSaving] = useState(false);
 
   const submit = async (e: FormEvent) => {
     e.preventDefault(); setSaving(true); setErr('');
-    const { data, error } = await supabase.from('realtors').insert({
-      name: f.name, email: f.email, phone: f.phone || null, id_number: f.id_number || null,
-      commission_rate: parseFloat(f.commission_rate) || 5, status: f.status, notes: f.notes || null,
-    }).select().single();
+    const values = { name: f.name, email: f.email, phone: f.phone || null, id_number: f.id_number || null, commission_rate: 5, status: f.status, notes: f.notes || null };
+    const response = initial
+      ? await supabase.from('realtors').update(values).eq('id', initial.id).select().single()
+      : await supabase.from('realtors').insert(values).select().single();
+    const { data, error } = response;
     setSaving(false);
     if (error || !data) { setErr(error?.message?.includes('unique') ? 'A realtor with that email already exists.' : 'Could not save. Please try again.'); return; }
     onDone(data as Realtor);
@@ -956,7 +963,7 @@ function RealtorForm({ onDone }: { onDone: (r: Realtor) => void }) {
         <AF label="National ID Number" value={f.id_number} onChange={(v) => setF({ ...f, id_number: v })} />
       </div>
       <div className="grid grid-cols-2 gap-4">
-        <AF label="Commission Rate (%)" type="number" value={f.commission_rate} onChange={(v) => setF({ ...f, commission_rate: v })} />
+        <div className="rounded border border-[#c9c5bd] bg-[#f0ede6] px-3 py-2"><span className="eyebrow block text-slate-400">Commission rate</span><p className="mt-1 text-sm font-semibold text-[#17232b]">5% fixed</p><p className="mt-1 text-[10px] text-slate-500">Applied automatically to linked sales</p></div>
         <label className="block">
           <span className="eyebrow mb-1.5 block text-slate-400">Status</span>
           <select value={f.status} onChange={(e) => setF({ ...f, status: e.target.value })} className="admin-input w-full">
@@ -969,7 +976,7 @@ function RealtorForm({ onDone }: { onDone: (r: Realtor) => void }) {
         <textarea value={f.notes} onChange={(e) => setF({ ...f, notes: e.target.value })} rows={2} className="admin-input w-full resize-none" />
       </label>
       {err && <p className="text-sm text-[#a55445]">{err}</p>}
-      <button disabled={saving} className="btn-primary disabled:opacity-60">{saving ? 'Saving…' : 'Add Realtor'} <ArrowRight size={15} /></button>
+      <button disabled={saving} className="btn-primary disabled:opacity-60">{saving ? 'Saving…' : initial ? 'Save Realtor Changes' : 'Add Realtor'} <ArrowRight size={15} /></button>
     </form>
   );
 }
