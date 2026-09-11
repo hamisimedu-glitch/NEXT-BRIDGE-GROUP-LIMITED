@@ -28,6 +28,8 @@ export type Project = {
   location: string | null;
   status: string;
   description: string | null;
+  image_url: string | null;
+  is_published: boolean;
   created_at: string;
 };
 
@@ -43,6 +45,8 @@ export type ProjectUnit = {
   view: string | null;
   price: string | null;
   status: string;
+  image_url: string | null;
+  is_published: boolean;
   created_at: string;
 };
 
