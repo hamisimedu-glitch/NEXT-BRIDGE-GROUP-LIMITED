@@ -88,7 +88,7 @@ function App() {
       const { data: { session } } = await supabase.auth.getSession();
       if (session?.user) {
         const profile = await fetchProfile(session.user.id);
-        if (profile) setAdminUser({ ...profile, email: session.user.email ?? '' });
+        setAdminUser(profile ? { ...profile, email: session.user.email ?? '' } : { id: session.user.id, email: session.user.email ?? '', role: 'staff' });
       }
       setAuthLoading(false);
     })();
@@ -97,7 +97,7 @@ function App() {
       (async () => {
         if (session?.user) {
           const profile = await fetchProfile(session.user.id);
-          if (profile) setAdminUser({ ...profile, email: session.user.email ?? '' });
+          setAdminUser(profile ? { ...profile, email: session.user.email ?? '' } : { id: session.user.id, email: session.user.email ?? '', role: 'staff' });
         } else {
           setAdminUser(null);
         }
@@ -115,7 +115,7 @@ function App() {
 
   if (view === 'admin') {
     if (authLoading) return <div className="flex min-h-screen items-center justify-center bg-[#17232b] text-white/60">Loading…</div>;
-    if (!adminUser) return <AdminSignIn onSuccess={setAdminUser} />;
+    if (!adminUser) return <AdminSignIn />;
     return <AdminDashboard user={adminUser} onSignOut={async () => { await signOut(); setAdminUser(null); setView('home'); }} />;
   }
 

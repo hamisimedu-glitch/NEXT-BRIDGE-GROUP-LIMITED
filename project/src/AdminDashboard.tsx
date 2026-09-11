@@ -27,7 +27,7 @@ import {
   X,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
-import { signIn, signUp, type AdminUser } from '@/lib/auth';
+import { resetPassword, signIn, signUp, type AdminUser } from '@/lib/auth';
 import {
   COMMISSION_STATUS_COLORS,
   COMMISSION_STATUSES,
@@ -60,8 +60,14 @@ async function uploadPublicMedia(file: File, folder: 'projects' | 'units' | 'upd
   const extension = file.name.split('.').pop()?.toLowerCase() || 'jpg';
   const path = `${folder}/${crypto.randomUUID()}.${extension}`;
   const { error } = await supabase.storage.from('public-media').upload(path, file, { upsert: false, contentType: file.type });
-  if (error) throw error;
+  if (error) throw new Error(error.message || 'Storage upload failed');
   return supabase.storage.from('public-media').getPublicUrl(path).data.publicUrl;
+}
+
+function uploadErrorMessage(error: unknown) {
+  const message = error instanceof Error ? error.message : '';
+  if (/bucket|not found|row-level|permission|policy/i.test(message)) return 'Uploads are not enabled yet. Run the public content media migration in Supabase, then sign in again.';
+  return message ? `Image upload failed: ${message}` : 'Image upload failed. Please try again.';
 }
 
 // ─── Shell ───────────────────────────────────────────────
@@ -640,7 +646,7 @@ function UnitForm({ projects, initial, onDone }: { projects: Project[]; initial?
   const submit = async (e: FormEvent) => {
     e.preventDefault(); setSaving(true); setErr('');
     let image_url: string | null = initial?.image_url ?? null;
-    try { if (image) image_url = await uploadPublicMedia(image, 'units'); } catch { setErr('Image upload failed. Please try again.'); setSaving(false); return; }
+    try { if (image) image_url = await uploadPublicMedia(image, 'units'); } catch (error) { setErr(uploadErrorMessage(error)); setSaving(false); return; }
     const values = {
       unit_number: f.unit_number || 'AUTO', project_id: f.project_id || null, type: f.type || null,
       bedrooms: f.bedrooms ? parseInt(f.bedrooms) : null, size: f.size || null,
@@ -1245,7 +1251,7 @@ function ProjectForm({ initial, onDone }: { initial?: Project; onDone: (p: Proje
   const submit = async (e: FormEvent) => {
     e.preventDefault(); setSaving(true); setErr('');
     let image_url: string | null = initial?.image_url ?? null;
-    try { if (image) image_url = await uploadPublicMedia(image, 'projects'); } catch { setErr('Image upload failed. Please try again.'); setSaving(false); return; }
+    try { if (image) image_url = await uploadPublicMedia(image, 'projects'); } catch (error) { setErr(uploadErrorMessage(error)); setSaving(false); return; }
     const values = { name: f.name, location: f.location || null, status: f.status, description: f.description || null, image_url, is_published: f.is_published };
     const response = initial
       ? await supabase.from('projects').update(values).eq('id', initial.id).select().single()
@@ -1351,7 +1357,7 @@ function UpdateForm({ projects, initial, onDone }: { projects: Project[]; initia
   const submit = async (e: FormEvent) => {
     e.preventDefault(); setSaving(true); setErr('');
     let image_url = f.image_url || null;
-    try { if (image) image_url = await uploadPublicMedia(image, 'updates'); } catch { setErr('Image upload failed. Please try again.'); setSaving(false); return; }
+    try { if (image) image_url = await uploadPublicMedia(image, 'updates'); } catch (error) { setErr(uploadErrorMessage(error)); setSaving(false); return; }
     const values = {
       project_id: f.project_id || null, title: f.title,
       body: f.body || null, progress_pct: parseInt(f.progress_pct) || 0, image_url,
@@ -1389,25 +1395,37 @@ function UpdateForm({ projects, initial, onDone }: { projects: Project[]; initia
 
 // ─── Sign-in ─────────────────────────────────────────────
 
-export function AdminSignIn({ onSuccess }: { onSuccess: (user: AdminUser) => void }) {
+export function AdminSignIn() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [mode, setMode] = useState<'signin' | 'signup'>('signin');
+  const [notice, setNotice] = useState('');
 
   const submit = async (e: FormEvent) => {
     e.preventDefault(); setLoading(true); setError('');
     const result = mode === 'signin' ? await signIn(email, password) : await signUp(email, password);
     setLoading(false);
     if (result.error) {
-      setError(mode === 'signin' ? 'Invalid email or password.' : 'Could not create account. This email may already be registered.');
+      const message = result.error.message.toLowerCase();
+      setError(message.includes('email not confirmed') ? 'Confirm your email from Supabase before signing in.' : mode === 'signin' ? 'Sign in failed. Check the email and password, or use password recovery below.' : result.error.message);
       return;
     }
     if (mode === 'signup' && result.data?.user) {
-      onSuccess({ id: result.data.user.id, email, role: 'staff' });
+      setNotice(result.data.session ? 'Account created. You can now enter the dashboard.' : 'Account created. Check your email to confirm the account, then sign in.');
+      setMode('signin');
     }
     // signin: onAuthStateChange fires and parent updates
+  };
+
+  const recover = async () => {
+    if (!email) { setError('Enter your email first.'); return; }
+    setLoading(true); setError(''); setNotice('');
+    const { error: resetError } = await resetPassword(email);
+    setLoading(false);
+    if (resetError) setError(resetError.message);
+    else setNotice('Password recovery email sent. Check your inbox.');
   };
 
   return (
@@ -1427,8 +1445,10 @@ export function AdminSignIn({ onSuccess }: { onSuccess: (user: AdminUser) => voi
             <AF label="Email" type="email" value={email} onChange={setEmail} required />
             <AF label="Password" type="password" value={password} onChange={setPassword} required />
             {error && <p className="text-sm text-[#a55445]">{error}</p>}
+            {notice && <p className="text-sm text-[#2e6b3e]">{notice}</p>}
             <button disabled={loading} className="btn-primary disabled:opacity-60">{loading ? 'Please wait…' : mode === 'signin' ? 'Sign in' : 'Create account'} <ArrowRight size={15} /></button>
           </form>
+          {mode === 'signin' && <button onClick={recover} disabled={loading} className="mt-4 w-full text-center text-xs text-slate-500 hover:text-[#20afd1]">Forgot password? Send recovery email</button>}
           <button onClick={() => { setMode(mode === 'signin' ? 'signup' : 'signin'); setError(''); }} className="mt-5 w-full text-center text-xs text-[#20afd1] hover:underline">
             {mode === 'signin' ? "Don't have an account? Create one" : 'Already have an account? Sign in'}
           </button>
