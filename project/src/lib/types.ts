@@ -19,6 +19,10 @@ export type Lead = {
   status: string;
   assigned_consultant: string | null;
   notes: string | null;
+  priority: string;
+  next_action: string | null;
+  next_action_at: string | null;
+  last_contacted_at: string | null;
   created_at: string;
 };
 

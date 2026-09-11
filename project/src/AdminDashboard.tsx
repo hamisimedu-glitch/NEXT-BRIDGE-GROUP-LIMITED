@@ -1,58 +1,12 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
-import {
-  ArrowRight,
-  Award,
-  BarChart3,
-  Calculator,
-  Building2,
-  CalendarDays,
-  Check,
-  ChevronRight,
-  Construction,
-  DollarSign,
-  Eye,
-  EyeOff,
-  LayoutDashboard,
-  LogOut,
-  Mail,
-  Menu,
-  Phone,
-  Pencil,
-  Plus,
-  Search,
-  TrendingUp,
-  Trash2,
-  Upload,
-  Users,
-  X,
-} from 'lucide-react';
+import { ArrowRight, Award, BarChart3, Building2, CalendarDays, Calculator, Check, ChevronRight, Construction, DollarSign, Eye, EyeOff, LayoutDashboard, LogOut, Mail, Menu, Pencil, Phone, Plus, Search, TrendingUp, Trash2, Upload, Users, X } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { resetPassword, signIn, signUp, type AdminUser } from '@/lib/auth';
-import {
-  COMMISSION_STATUS_COLORS,
-  COMMISSION_STATUSES,
-  INVESTMENT_STATUS_COLORS,
-  INVESTMENT_STATUSES,
-  LEAD_STATUSES,
-  LEAD_STATUS_COLORS,
-  PROJECT_STATUSES,
-  REALTOR_STATUS_COLORS,
-  REALTOR_STATUSES,
-  SALE_STATUS_COLORS,
-  SALE_STATUSES,
-  UNIT_STATUSES,
-  fmtKes,
-  type Commission,
-  type ConstructionUpdate,
-  type Investment,
-  type Lead,
-  type Project,
-  type ProjectUnit,
-  type Realtor,
-  type Sale,
-} from '@/lib/types';
+import { COMMISSION_STATUS_COLORS, COMMISSION_STATUSES, INVESTMENT_STATUS_COLORS, INVESTMENT_STATUSES, LEAD_STATUSES, LEAD_STATUS_COLORS, PROJECT_STATUSES, REALTOR_STATUS_COLORS, REALTOR_STATUSES, SALE_STATUS_COLORS, SALE_STATUSES, UNIT_STATUSES, fmtKes, type Commission, type ConstructionUpdate, type Investment, type Lead, type Project, type ProjectUnit, type Realtor, type Sale } from '@/lib/types';
 
 type AdminTab = 'overview' | 'leads' | 'sales' | 'units' | 'realtors' | 'commissions' | 'investments' | 'projects' | 'updates' | 'calculator';
+const LEAD_PRIORITIES = ['LOW', 'NORMAL', 'HIGH', 'URGENT'] as const;
+const LEAD_ACTIONS = ['Call lead', 'Send project details', 'Schedule viewing', 'Send quotation', 'Follow up', 'No action'];
 
 const WA = '254741121575';
 
@@ -187,7 +141,7 @@ function OverviewTab({ goTo }: { goTo: (tab: AdminTab) => void }) {
   useEffect(() => {
     (async () => {
       const [leadsR, salesR, unitsR, realtorsR, investR, commR] = await Promise.all([
-        supabase.from('leads').select('id,status,created_at,name,source').order('created_at', { ascending: false }),
+        supabase.from('leads').select('id,status,created_at,name,source,priority,next_action,next_action_at').order('created_at', { ascending: false }),
         supabase.from('sales').select('id,status,sale_price,sale_date,unit_number,buyer_name').order('created_at', { ascending: false }),
         supabase.from('project_units').select('id,status'),
         supabase.from('realtors').select('id,status,total_earned,name').order('total_earned', { ascending: false }),
@@ -211,6 +165,7 @@ function OverviewTab({ goTo }: { goTo: (tab: AdminTab) => void }) {
   const pipeline = data.sales.filter((s) => ['RESERVED', 'DEPOSIT_PAID'].includes(s.status)).reduce((a, s) => a + (s.sale_price ?? 0), 0);
   const committedInvest = data.investments.filter((i) => i.status === 'COMMITTED').reduce((a, i) => a + (i.amount_interested ?? 0), 0);
   const pendingComm = data.commissions.filter((c) => c.status === 'PENDING').reduce((a, c) => a + c.amount, 0);
+  const dueFollowUps = data.leads.filter((lead) => lead.next_action_at && new Date(lead.next_action_at).getTime() <= Date.now() && !['CONVERTED', 'LOST'].includes(lead.status)).length;
 
   const statCards = [
     { label: 'Completed Revenue', value: fmtKes(revenue), sub: `${data.sales.filter((s) => s.status === 'COMPLETED').length} sales`, color: 'text-[#2e6b3e]', tab: 'sales' as AdminTab },
@@ -221,6 +176,7 @@ function OverviewTab({ goTo }: { goTo: (tab: AdminTab) => void }) {
     { label: 'Commissions Pending', value: fmtKes(pendingComm), sub: `${data.commissions.filter((c) => c.status === 'PENDING').length} unpaid`, color: 'text-[#7a4e2e]', tab: 'commissions' as AdminTab },
     { label: 'Available Units', value: String(data.units.filter((u) => u.status === 'AVAILABLE').length), sub: `${data.units.filter((u) => u.status === 'SOLD').length} sold`, color: 'text-[#20afd1]', tab: 'units' as AdminTab },
     { label: 'Investment Inquiries', value: String(data.investments.filter((i) => i.status === 'INQUIRY').length), sub: 'need follow-up', color: 'text-slate-500', tab: 'investments' as AdminTab },
+    { label: 'Follow-ups Due', value: String(dueFollowUps), sub: 'action required', color: 'text-[#a55445]', tab: 'leads' as AdminTab },
   ];
 
   return (
@@ -363,7 +319,7 @@ function LeadsTab() {
         <table className="w-full text-left text-sm">
           <thead className="border-b border-[#c9c5bd] bg-[#f0ede6] text-[10px] uppercase tracking-[.12em] text-slate-400">
             <tr>
-              {['Name', 'Contact', 'Source', 'Project', 'Status', 'Date', ''].map((h) => (
+              {['Name', 'Contact', 'Source', 'Status', 'Next action', 'Date', ''].map((h) => (
                 <th key={h} className="px-4 py-3 font-semibold">{h}</th>
               ))}
             </tr>
@@ -374,10 +330,10 @@ function LeadsTab() {
                 <td className="px-4 py-3 font-medium">{lead.name}</td>
                 <td className="px-4 py-3 text-xs text-slate-500">{lead.email ?? lead.phone ?? '—'}</td>
                 <td className="px-4 py-3 text-xs text-slate-500">{lead.source ?? '—'}</td>
-                <td className="px-4 py-3 text-xs text-slate-500">{lead.project ?? '—'}</td>
                 <td className="px-4 py-3">
                   <StatusSelect value={lead.status} options={LEAD_STATUSES} colors={LEAD_STATUS_COLORS} onChange={(v) => updateStatus(lead.id, v)} />
                 </td>
+                <td className="px-4 py-3 text-xs"><span className={lead.priority === 'URGENT' ? 'font-semibold text-[#a55445]' : lead.priority === 'HIGH' ? 'font-semibold text-[#856b2e]' : 'text-slate-500'}>{lead.next_action ?? 'Set action'}</span>{lead.next_action_at && <span className="mt-1 block text-[10px] text-slate-400">Due {fmt(lead.next_action_at)}</span>}</td>
                 <td className="px-4 py-3 text-xs text-slate-400">{fmt(lead.created_at)}</td>
                 <td className="px-4 py-3">
                   <button onClick={() => setSelected(lead)} className="text-xs text-[#20afd1] hover:underline">View</button>
@@ -411,11 +367,45 @@ function LeadsTab() {
             <p className="eyebrow text-slate-400">Status</p>
             <StatusSelect value={selected.status} options={LEAD_STATUSES} colors={LEAD_STATUS_COLORS} onChange={(v) => updateStatus(selected.id, v)} className="mt-2 w-full" />
           </div>
+          <LeadActionPanel lead={selected} onUpdate={(changes) => {
+            setLeads((p) => p.map((lead) => lead.id === selected.id ? { ...lead, ...changes } : lead));
+            setSelected((lead) => lead ? { ...lead, ...changes } : lead);
+          }} />
           <NotesField defaultValue={selected.notes ?? ''} onSave={(n) => saveNotes(selected.id, n)} />
         </Drawer>
       )}
     </div>
   );
+}
+
+function LeadActionPanel({ lead, onUpdate }: { lead: Lead; onUpdate: (changes: Partial<Lead>) => void }) {
+  const [f, setF] = useState({ assigned_consultant: lead.assigned_consultant ?? '', priority: lead.priority ?? 'NORMAL', next_action: lead.next_action ?? 'Call lead', next_action_at: lead.next_action_at ? lead.next_action_at.slice(0, 16) : '' });
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState('');
+
+  const save = async () => {
+    setSaving(true); setMessage('');
+    const changes = { assigned_consultant: f.assigned_consultant || null, priority: f.priority, next_action: f.next_action || null, next_action_at: f.next_action_at ? new Date(f.next_action_at).toISOString() : null };
+    const { error } = await supabase.from('leads').update(changes).eq('id', lead.id);
+    setSaving(false);
+    if (error) { setMessage(error.message); return; }
+    onUpdate(changes); setMessage('Action plan saved.');
+  };
+
+  const markContacted = async () => {
+    const last_contacted_at = new Date().toISOString();
+    const { error } = await supabase.from('leads').update({ status: 'CONTACTED', last_contacted_at }).eq('id', lead.id);
+    if (!error) onUpdate({ status: 'CONTACTED', last_contacted_at });
+  };
+
+  return <div className="space-y-4 border-y border-[#c9c5bd] py-5">
+    <div className="flex items-center justify-between"><p className="eyebrow text-[#20afd1]">Next action</p><button onClick={markContacted} className="text-[10px] font-semibold uppercase tracking-[.1em] text-[#247b85] hover:underline">Mark contacted</button></div>
+    <div className="grid grid-cols-2 gap-3"><label className="block"><span className="eyebrow mb-1.5 block text-slate-400">Owner</span><input value={f.assigned_consultant} onChange={(e) => setF({ ...f, assigned_consultant: e.target.value })} placeholder="Consultant name" className="admin-input w-full" /></label><label className="block"><span className="eyebrow mb-1.5 block text-slate-400">Priority</span><select value={f.priority} onChange={(e) => setF({ ...f, priority: e.target.value })} className="admin-input w-full">{LEAD_PRIORITIES.map((item) => <option key={item}>{item}</option>)}</select></label></div>
+    <div className="grid grid-cols-2 gap-3"><label className="block"><span className="eyebrow mb-1.5 block text-slate-400">Action</span><select value={f.next_action} onChange={(e) => setF({ ...f, next_action: e.target.value })} className="admin-input w-full">{LEAD_ACTIONS.map((item) => <option key={item}>{item}</option>)}</select></label><label className="block"><span className="eyebrow mb-1.5 block text-slate-400">Due date</span><input type="datetime-local" value={f.next_action_at} onChange={(e) => setF({ ...f, next_action_at: e.target.value })} className="admin-input w-full" /></label></div>
+    {lead.last_contacted_at && <p className="text-[10px] text-slate-400">Last contacted {fmt(lead.last_contacted_at)}</p>}
+    {message && <p className={`text-xs ${message === 'Action plan saved.' ? 'text-[#2e6b3e]' : 'text-[#a55445]'}`}>{message}</p>}
+    <button onClick={save} disabled={saving} className="btn-primary disabled:opacity-60">{saving ? 'Saving…' : 'Save action plan'} <Check size={15} /></button>
+  </div>;
 }
 
 // ─── Sales ───────────────────────────────────────────────
