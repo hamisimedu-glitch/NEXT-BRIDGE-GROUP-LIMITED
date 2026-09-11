@@ -33,6 +33,7 @@ function uploadErrorMessage(error: unknown) {
 export default function AdminDashboard({ user, onSignOut }: { user: AdminUser; onSignOut: () => void }) {
   const [tab, setTab] = useState<AdminTab>('overview');
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const isAdmin = user.role === 'admin' || user.role === 'owner';
 
   const navItems: { id: AdminTab; label: string; icon: typeof LayoutDashboard; group: string }[] = [
     { id: 'overview', label: 'Overview', icon: LayoutDashboard, group: 'main' },
@@ -45,7 +46,7 @@ export default function AdminDashboard({ user, onSignOut }: { user: AdminUser; o
     { id: 'projects', label: 'Projects', icon: Construction, group: 'ops' },
     { id: 'updates', label: 'Site Updates', icon: BarChart3, group: 'ops' },
     { id: 'calculator', label: 'Investment Calculator', icon: Calculator, group: 'ops' },
-    { id: 'audit', label: 'Audit Trail', icon: ClipboardList, group: 'ops' },
+    ...(isAdmin ? [{ id: 'audit' as AdminTab, label: 'Audit Trail', icon: ClipboardList, group: 'ops' }] : []),
   ];
 
   const groups = [
