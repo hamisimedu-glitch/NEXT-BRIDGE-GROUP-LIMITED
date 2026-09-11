@@ -61,7 +61,7 @@ export default function AdminDashboard({ user, onSignOut }: { user: AdminUser; o
   return (
     <div className="min-h-screen bg-[#f0ede6] font-sans">
       {/* Sidebar */}
-      <aside className={`fixed left-0 top-0 z-40 flex h-full w-64 flex-col bg-[#17232b] text-white transition-transform duration-300 md:translate-x-0 ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
+      <aside className={`fixed left-0 top-0 z-40 flex h-full w-64 flex-col bg-[#0f8f9f] text-white transition-transform duration-300 md:translate-x-0 ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
         <div className="flex h-[72px] items-center gap-3 border-b border-white/10 px-5">
           <span className="brand-mark brand-mark-inverse"><img src="/NBG_LOGO-removebg-preview.png" alt="Next Bridge Group" /></span>
           <div>
@@ -79,7 +79,7 @@ export default function AdminDashboard({ user, onSignOut }: { user: AdminUser; o
                   <button
                     key={id}
                     onClick={() => go(id)}
-                    className={`mb-0.5 flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-left text-[11px] font-medium tracking-wide transition-all ${tab === id ? 'bg-[#20afd1] text-white shadow-sm' : 'text-white/55 hover:bg-white/6 hover:text-white'}`}
+                    className={`mb-0.5 flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-left text-[11px] font-medium tracking-wide transition-all ${tab === id ? 'bg-[#ef7c68] text-white shadow-sm' : 'text-white/75 hover:bg-white/15 hover:text-white'}`}
                   >
                     <Icon size={15} strokeWidth={1.6} />
                     {l}
