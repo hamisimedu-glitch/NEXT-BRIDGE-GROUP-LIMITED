@@ -229,6 +229,19 @@ function OverviewTab({ goTo }: { goTo: (tab: AdminTab) => void }) {
         ))}
       </div>
 
+      <section>
+        <div className="mb-4 flex items-end justify-between"><div><p className="eyebrow text-[#20afd1]">Quick management</p><h2 className="mt-2 font-serif text-3xl">Content and people</h2></div><p className="text-xs text-slate-500">Open a section to manage records and publish changes.</p></div>
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+          {[
+            { tab: 'projects' as AdminTab, title: 'Projects', detail: 'Upload hero images and publish developments.', icon: Construction },
+            { tab: 'units' as AdminTab, title: 'Units & prices', detail: 'Manage floor sequence, prices, photos, and status.', icon: Building2 },
+            { tab: 'updates' as AdminTab, title: 'Site updates', detail: 'Upload progress photos and edit published notes.', icon: Upload },
+            { tab: 'realtors' as AdminTab, title: 'Realtors', detail: 'Register agents and track their 5% earnings.', icon: Award },
+            { tab: 'investments' as AdminTab, title: 'Investors', detail: 'Record interest, amounts, and follow-up status.', icon: TrendingUp },
+          ].map(({ tab, title, detail, icon: Icon }) => <button key={tab} onClick={() => goTo(tab)} className="group rounded-lg border border-[#c9c5bd] bg-white p-5 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-[#20afd1] hover:shadow-md"><Icon size={20} className="text-[#20afd1]" /><h3 className="mt-8 text-lg">{title}</h3><p className="mt-2 text-xs leading-5 text-slate-500">{detail}</p><span className="mt-5 flex items-center gap-1 text-[10px] font-semibold uppercase tracking-[.12em] text-[#247b85]">Open section <ArrowRight size={13} className="transition group-hover:translate-x-1" /></span></button>)}
+        </div>
+      </section>
+
       <div className="grid gap-6 lg:grid-cols-3">
         {/* Lead funnel */}
         <div className="rounded-lg border border-[#c9c5bd] bg-white p-6 shadow-sm">
@@ -574,10 +587,10 @@ function UnitsTab() {
       </div>
 
       <div className="flex items-center justify-between mb-5">
-        <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="admin-input">
+        <div><select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="admin-input">
           <option value="ALL">All statuses</option>
           {UNIT_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
-        </select>
+        </select><p className="mt-1 flex items-center gap-1 text-[10px] text-[#247b85]"><Upload size={12} /> Add or replace unit photos in the editor</p></div>
         <button onClick={() => setShowForm(true)} className="admin-add-btn flex items-center gap-2"><Plus size={16} /> Add Unit</button>
       </div>
 
@@ -1191,7 +1204,7 @@ function ProjectsTab() {
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
-        <p className="text-xs text-slate-400">{projects.length} project{projects.length !== 1 ? 's' : ''}</p>
+        <div><p className="text-xs text-slate-400">{projects.length} project{projects.length !== 1 ? 's' : ''}</p><p className="mt-1 flex items-center gap-1 text-[10px] text-[#247b85]"><Upload size={12} /> Add or replace images inside the project editor</p></div>
         <button onClick={() => setShowForm(true)} className="admin-add-btn flex items-center gap-2"><Plus size={16} /> Add Project</button>
       </div>
       <div className="grid gap-4 md:grid-cols-2">
@@ -1295,7 +1308,7 @@ function UpdatesTab() {
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
-        <p className="text-xs text-slate-400">{updates.length} update{updates.length !== 1 ? 's' : ''}</p>
+        <div><p className="text-xs text-slate-400">{updates.length} update{updates.length !== 1 ? 's' : ''}</p><p className="mt-1 flex items-center gap-1 text-[10px] text-[#247b85]"><Upload size={12} /> Upload or replace construction photos</p></div>
         <button onClick={() => setShowForm(true)} className="admin-add-btn flex items-center gap-2"><Plus size={16} /> Post Update</button>
       </div>
       <div className="space-y-4">

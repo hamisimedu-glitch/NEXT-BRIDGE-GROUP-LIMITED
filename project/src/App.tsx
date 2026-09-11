@@ -76,7 +76,7 @@ const navItems: { label: string; view: View }[] = [
 ];
 
 function App() {
-  const [view, setView] = useState<View>('home');
+  const [view, setView] = useState<View>(() => window.location.pathname === '/admin' ? 'admin' : 'home');
   const [mobileOpen, setMobileOpen] = useState(false);
   const [selectedUnit, setSelectedUnit] = useState<Unit | null>(null);
   const [galleryIndex, setGalleryIndex] = useState<number | null>(null);
@@ -109,6 +109,7 @@ function App() {
   const navigate = (nextView: View) => {
     setView(nextView);
     setMobileOpen(false);
+    window.history.pushState({}, '', nextView === 'home' ? '/' : `/${nextView}`);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
@@ -154,12 +155,13 @@ function Header({ view, navigate, mobileOpen, setMobileOpen }: { view: View; nav
           {navItems.map((item) => <button key={item.view} onClick={() => navigate(item.view)} className={`nav-link text-[11px] font-medium uppercase tracking-[0.16em] ${view === item.view ? 'nav-link-active' : ''}`}>{item.label}</button>)}
         </nav>
         <div className="hidden items-center gap-5 lg:flex">
+          <button onClick={() => navigate('admin')} className={`text-[10px] font-semibold uppercase tracking-[.15em] ${view === 'home' ? 'text-white/75' : 'text-[#17232b]'}`}>Admin</button>
           <button onClick={() => navigate('contact')} className={`flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.15em] ${view === 'home' ? 'text-white' : 'text-[#17232b]'}`}><Phone size={14} strokeWidth={1.5} /> Talk to us</button>
           <button onClick={() => navigate('viewing')} className="btn-primary px-5 py-3 text-[10px]">Book a private viewing <ArrowRight size={14} /></button>
         </div>
         <button className="lg:hidden" onClick={() => setMobileOpen(!mobileOpen)} aria-label={mobileOpen ? 'Close menu' : 'Open menu'}>{mobileOpen ? <X /> : <Menu />}</button>
       </div>
-      {mobileOpen && <div className="mx-4 border border-white/20 bg-[#17232b]/95 p-5 backdrop-blur-xl lg:hidden"><div className="grid gap-1">{navItems.map((item) => <button key={item.view} onClick={() => navigate(item.view)} className="border-b border-white/10 px-2 py-4 text-left text-xs uppercase tracking-[0.16em] text-white">{item.label}</button>)}<button onClick={() => navigate('viewing')} className="mt-4 bg-[#20afd1] px-4 py-4 text-left text-xs font-semibold uppercase tracking-[0.16em] text-white">Book a private viewing</button></div></div>}
+      {mobileOpen && <div className="mx-4 border border-white/20 bg-[#17232b]/95 p-5 backdrop-blur-xl lg:hidden"><div className="grid gap-1">{navItems.map((item) => <button key={item.view} onClick={() => navigate(item.view)} className="border-b border-white/10 px-2 py-4 text-left text-xs uppercase tracking-[0.16em] text-white">{item.label}</button>)}<button onClick={() => navigate('admin')} className="border-b border-white/10 px-2 py-4 text-left text-xs uppercase tracking-[0.16em] text-[#9edfeb]">Admin dashboard</button><button onClick={() => navigate('viewing')} className="mt-4 bg-[#20afd1] px-4 py-4 text-left text-xs font-semibold uppercase tracking-[0.16em] text-white">Book a private viewing</button></div></div>}
     </header>
   );
 }
