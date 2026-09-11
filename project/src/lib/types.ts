@@ -5,6 +5,19 @@ export type ProjectStatus = 'COMING SOON' | 'UNDER CONSTRUCTION' | 'COMPLETED' |
 export type RealtorStatus = 'PENDING' | 'ACTIVE' | 'SUSPENDED';
 export type CommissionStatus = 'PENDING' | 'APPROVED' | 'PAID';
 export type InvestmentStatus = 'INQUIRY' | 'SOFT_COMMIT' | 'COMMITTED' | 'WITHDRAWN';
+export type AuditLog = {
+  id: string;
+  actor_id: string | null;
+  actor_email: string | null;
+  category: string;
+  action: string;
+  entity_type: string;
+  entity_id: string | null;
+  entity_label: string | null;
+  old_data: Record<string, unknown> | null;
+  new_data: Record<string, unknown> | null;
+  created_at: string;
+};
 
 export type Lead = {
   id: string;
