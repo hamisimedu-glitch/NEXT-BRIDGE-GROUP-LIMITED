@@ -114,7 +114,7 @@ function App() {
   };
 
   if (view === 'admin') {
-    if (authLoading) return <div className="flex min-h-screen items-center justify-center bg-[#17232b] text-white/60">Loading…</div>;
+    if (authLoading) return <div className="flex min-h-screen items-center justify-center bg-[#0f8f9f] text-white/75">Loading…</div>;
     if (!adminUser) return <AdminSignIn />;
     return <AdminDashboard user={adminUser} onSignOut={async () => { await signOut(); setAdminUser(null); setView('home'); }} />;
   }
@@ -141,7 +141,7 @@ function App() {
 }
 
 function BrandMark({ inverse = false }: { inverse?: boolean }) {
-  return <span className={`brand-mark ${inverse ? 'brand-mark-inverse' : ''}`}><img src="/NBG_LOGO.png" alt="Next Bridge Group" /></span>;
+  return <span className={`brand-mark ${inverse ? 'brand-mark-inverse' : ''}`}><img src="/NBG_LOGO-removebg-preview.png" alt="Next Bridge Group" /></span>;
 }
 
 function Header({ view, navigate, mobileOpen, setMobileOpen }: { view: View; navigate: (view: View) => void; mobileOpen: boolean; setMobileOpen: (open: boolean) => void }) {
@@ -165,14 +165,14 @@ function Header({ view, navigate, mobileOpen, setMobileOpen }: { view: View; nav
         </div>
         <button className="lg:hidden" onClick={() => setMobileOpen(!mobileOpen)} aria-label={mobileOpen ? 'Close menu' : 'Open menu'}>{mobileOpen ? <X /> : <Menu />}</button>
       </div>
-      {mobileOpen && <div className="mx-4 border border-white/20 bg-[#17232b]/95 p-5 backdrop-blur-xl lg:hidden"><div className="grid gap-1">{navItems.map((item) => <button key={item.view} onClick={() => navigate(item.view)} className="border-b border-white/10 px-2 py-4 text-left text-xs uppercase tracking-[0.16em] text-white">{item.label}</button>)}<button onClick={() => navigate('admin')} className="border-b border-white/10 px-2 py-4 text-left text-xs uppercase tracking-[0.16em] text-[#9edfeb]">Admin dashboard</button><button onClick={() => navigate('viewing')} className="mt-4 bg-[#20afd1] px-4 py-4 text-left text-xs font-semibold uppercase tracking-[0.16em] text-white">Book a private viewing</button></div></div>}
+      {mobileOpen && <div className="mx-4 border border-white/35 bg-[#0f8f9f]/95 p-5 backdrop-blur-xl lg:hidden"><div className="grid gap-1">{navItems.map((item) => <button key={item.view} onClick={() => navigate(item.view)} className="border-b border-white/20 px-2 py-4 text-left text-xs uppercase tracking-[0.16em] text-white">{item.label}</button>)}<button onClick={() => navigate('admin')} className="border-b border-white/20 px-2 py-4 text-left text-xs uppercase tracking-[0.16em] text-[#fff1b8]">Admin dashboard</button><button onClick={() => navigate('viewing')} className="mt-4 bg-[#ef7c68] px-4 py-4 text-left text-xs font-semibold uppercase tracking-[0.16em] text-white">Book a private viewing</button></div></div>}
     </header>
   );
 }
 
 function HomePage({ navigate, setGalleryIndex }: { navigate: (view: View) => void; setGalleryIndex: (index: number) => void }) {
   return <>
-    <section className="hero-section relative flex min-h-[780px] items-end overflow-hidden bg-[#17232b] pb-16 md:min-h-screen md:pb-24">
+    <section className="hero-section relative flex min-h-[780px] items-end overflow-hidden bg-[#0f8f9f] pb-16 md:min-h-screen md:pb-24">
       <img src={images.hero} alt="Contemporary coastal architecture concept image" className="absolute inset-0 h-full w-full object-cover opacity-70" />
       <div className="hero-shade absolute inset-0" />
       <div className="relative mx-auto w-full max-w-[1440px] px-5 md:px-10">

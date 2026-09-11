@@ -13,7 +13,7 @@ button { cursor: pointer; }
 .font-serif em { font-style: italic; font-weight: 400; }
 .brand-mark { display: inline-flex; width: 54px; height: 48px; align-items: center; justify-content: center; overflow: hidden; flex: 0 0 auto; }
 .brand-mark img { display: block; width: 58px; height: 58px; object-fit: contain; mix-blend-mode: multiply; }
-.brand-mark-inverse { width: 56px; height: 50px; border: 1px solid rgba(255,255,255,.28); background: rgba(255,255,255,.92); padding: 2px; }
+.brand-mark-inverse { width: 56px; height: 50px; border: 0; background: transparent; padding: 0; filter: drop-shadow(0 2px 8px rgba(7,17,22,.2)); }
 .brand-mark-inverse img { mix-blend-mode: normal; }
 .brand-mark-auth { width: 82px; height: 74px; }
 .brand-mark-auth img { width: 86px; height: 86px; }
@@ -21,15 +21,15 @@ button { cursor: pointer; }
 .section-pad { padding: 112px 20px; }
 .page-top { padding-top: 180px; min-height: 80vh; }
 @media (min-width: 768px) { .section-pad { padding: 144px 40px; } }
-.hero-shade { background: linear-gradient(90deg, rgba(7,17,22,.78) 0%, rgba(7,17,22,.3) 65%, rgba(7,17,22,.2) 100%), linear-gradient(0deg, rgba(7,17,22,.78) 0%, transparent 50%); }
+.hero-shade { background: linear-gradient(90deg, rgba(15,143,159,.76) 0%, rgba(15,143,159,.24) 65%, rgba(15,143,159,.12) 100%), linear-gradient(0deg, rgba(15,143,159,.68) 0%, transparent 50%); }
 .nav-link { position: relative; opacity: .72; transition: opacity .25s ease; }
 .nav-link:hover, .nav-link-active { opacity: 1; }
 .nav-link-active::after { position: absolute; bottom: -10px; left: 0; height: 1px; width: 100%; background: #20afd1; content: ''; }
 .btn-primary, .btn-dark, .btn-ghost { display: inline-flex; align-items: center; justify-content: center; gap: 12px; padding: 16px 22px; font-size: 10px; font-weight: 600; letter-spacing: .16em; text-transform: uppercase; transition: transform .25s ease, background-color .25s ease, color .25s ease; }
 .btn-primary { background: #20afd1; color: white; box-shadow: 0 10px 24px rgba(32,175,209,.16); }
 .btn-primary:hover { background: #1596b3; transform: translateY(-2px); }
-.btn-dark { background: #17232b; color: white; }
-.btn-dark:hover { background: #20afd1; transform: translateY(-2px); }
+.btn-dark { background: #0f8f9f; color: white; box-shadow: 0 10px 24px rgba(15,143,159,.16); }
+.btn-dark:hover { background: #ef7c68; transform: translateY(-2px); }
 .btn-ghost { border: 1px solid rgba(255,255,255,.46); color: white; }
 .btn-ghost:hover { background: white; color: #17232b; }
 .link-arrow { display: inline-flex; align-items: center; gap: 12px; font-size: 10px; font-weight: 600; letter-spacing: .16em; text-transform: uppercase; transition: gap .25s ease, color .25s ease; }
@@ -45,3 +45,12 @@ button { cursor: pointer; }
 .admin-input::placeholder { color: #a19d95; }
 .admin-add-btn { background: #20afd1; color: white; border-radius: 6px; padding: 10px 16px; font-size: 10px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; transition: background .2s ease; }
 .admin-add-btn:hover { background: #1596b3; }
+
+/* Bright public surfaces replace the former navy blocks while preserving readable text. */
+.bg-\[\#17232b\] { background-color: #0f8f9f !important; }
+.bg-\[\#17232b\]\/80 { background-color: rgba(15,143,159,.8) !important; }
+.bg-\[\#17232b\]\/70 { background-color: rgba(15,143,159,.7) !important; }
+.bg-\[\#17232b\]\/35 { background-color: rgba(15,143,159,.35) !important; }
+.bg-\[\#17232b\]\/25 { background-color: rgba(15,143,159,.25) !important; }
+.bg-\[\#17232b\]\/20 { background-color: rgba(15,143,159,.2) !important; }
+.bg-\[\#071116\]\/95, .bg-\[\#071116\]\/70, .bg-\[\#071116\]\/60, .bg-\[\#071116\]\/50 { background-color: rgba(15,143,159,.92) !important; }
