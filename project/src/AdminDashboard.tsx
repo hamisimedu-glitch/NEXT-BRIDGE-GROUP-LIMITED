@@ -422,13 +422,18 @@ function LeadsTab() {
 
 function SalesTab() {
   const [sales, setSales] = useState<Sale[]>([]);
+  const [availableUnits, setAvailableUnits] = useState<ProjectUnit[]>([]);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [showForm, setShowForm] = useState(false);
 
   const load = useCallback(async () => {
-    const { data } = await supabase.from('sales').select('*').order('created_at', { ascending: false });
+    const [{ data }, { data: units }] = await Promise.all([
+      supabase.from('sales').select('*').order('created_at', { ascending: false }),
+      supabase.from('project_units').select('*').eq('status', 'AVAILABLE').order('unit_number'),
+    ]);
     setSales((data ?? []) as Sale[]);
+    setAvailableUnits((units ?? []) as ProjectUnit[]);
     setLoading(false);
   }, []);
   useEffect(() => { load(); }, [load]);
@@ -488,22 +493,22 @@ function SalesTab() {
 
       {showForm && (
         <Modal title="Record Sale" onClose={() => setShowForm(false)}>
-          <SaleForm onDone={(s) => { setSales((p) => [s, ...p]); setShowForm(false); }} />
+          <SaleForm availableUnits={availableUnits} onDone={(s) => { setSales((p) => [s, ...p]); setShowForm(false); }} />
         </Modal>
       )}
     </div>
   );
 }
 
-function SaleForm({ onDone }: { onDone: (s: Sale) => void }) {
-  const [f, setF] = useState({ unit_number: '', buyer_name: '', buyer_phone: '', buyer_email: '', sale_price: '', status: 'RESERVED', sale_date: '', notes: '' });
+function SaleForm({ availableUnits, onDone }: { availableUnits: ProjectUnit[]; onDone: (s: Sale) => void }) {
+  const [f, setF] = useState({ unit_number: availableUnits[0]?.unit_number ?? 'AUTO', buyer_name: '', buyer_phone: '', buyer_email: '', sale_price: availableUnits[0]?.price?.replace(/[^0-9.]/g, '') ?? '', status: 'RESERVED', sale_date: '', notes: '' });
   const [err, setErr] = useState('');
   const [saving, setSaving] = useState(false);
 
   const submit = async (e: FormEvent) => {
     e.preventDefault(); setSaving(true); setErr('');
     const { data, error } = await supabase.from('sales').insert({
-      unit_number: f.unit_number, buyer_name: f.buyer_name,
+      unit_number: f.unit_number || 'AUTO', buyer_name: f.buyer_name,
       buyer_phone: f.buyer_phone || null, buyer_email: f.buyer_email || null,
       sale_price: f.sale_price ? parseFloat(f.sale_price) : null,
       status: f.status, sale_date: f.sale_date || null, notes: f.notes || null,
@@ -516,7 +521,7 @@ function SaleForm({ onDone }: { onDone: (s: Sale) => void }) {
   return (
     <form onSubmit={submit} className="grid gap-4">
       <div className="grid grid-cols-2 gap-4">
-        <AF label="Unit Number" value={f.unit_number} onChange={(v) => setF({ ...f, unit_number: v })} required />
+        <div className="rounded border border-[#c9c5bd] bg-[#f0ede6] px-3 py-2"><span className="eyebrow block text-slate-400">Unit Number</span><p className="mt-1 text-sm font-semibold text-[#17232b]">{f.unit_number === 'AUTO' ? 'Generated on save' : f.unit_number}</p><p className="mt-1 text-[10px] text-slate-500">{availableUnits.length ? 'First available unit selected automatically' : 'No available unit loaded; database will generate a unique reference'}</p></div>
         <AF label="Buyer Name" value={f.buyer_name} onChange={(v) => setF({ ...f, buyer_name: v })} required />
       </div>
       <div className="grid grid-cols-2 gap-4">
