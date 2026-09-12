@@ -1,11 +1,11 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
-import { ArrowRight, Award, BarChart3, Building2, CalendarDays, Calculator, Check, ChevronRight, ClipboardList, Construction, Download, DollarSign, Eye, EyeOff, LayoutDashboard, LogOut, Mail, Menu, Pencil, Phone, Plus, Search, TrendingUp, Trash2, Upload, Users, X } from 'lucide-react';
+import { ArrowRight, Award, BarChart3, Building2, CalendarDays, Calculator, Check, ChevronRight, ClipboardList, Construction, CreditCard, Download, DollarSign, Eye, EyeOff, LayoutDashboard, LogOut, Mail, Menu, Pencil, Phone, Plus, Search, TrendingUp, Trash2, Upload, Users, X } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import { supabase } from '@/lib/supabase';
 import { resetPassword, signIn, signUp, type AdminUser } from '@/lib/auth';
 import { COMMISSION_STATUS_COLORS, COMMISSION_STATUSES, INVESTMENT_STATUS_COLORS, INVESTMENT_STATUSES, LEAD_STATUSES, LEAD_STATUS_COLORS, PROJECT_STATUSES, REALTOR_STATUS_COLORS, REALTOR_STATUSES, SALE_STATUS_COLORS, SALE_STATUSES, UNIT_STATUSES, fmtKes, type AuditLog, type BuyerInstallment, type Commission, type ConstructionUpdate, type Investment, type Lead, type Project, type ProjectUnit, type Realtor, type Sale } from '@/lib/types';
 
-type AdminTab = 'overview' | 'leads' | 'sales' | 'units' | 'realtors' | 'commissions' | 'investments' | 'projects' | 'updates' | 'calculator' | 'audit';
+type AdminTab = 'overview' | 'leads' | 'sales' | 'payments' | 'units' | 'realtors' | 'commissions' | 'investments' | 'projects' | 'updates' | 'calculator' | 'audit';
 const LEAD_PRIORITIES = ['LOW', 'NORMAL', 'HIGH', 'URGENT'] as const;
 const LEAD_ACTIONS = ['Call lead', 'Send project details', 'Schedule viewing', 'Send quotation', 'Follow up', 'No action'];
 const UNIT_TYPES = ['1 Bedroom', '2 Bedroom', '3 Bedroom', '3 Bedroom + DSQ', '4 Bedroom', 'Penthouse', 'Commercial'];
@@ -56,6 +56,7 @@ export default function AdminDashboard({ user, onSignOut }: { user: AdminUser; o
     { id: 'overview', label: 'Overview', icon: LayoutDashboard, group: 'main' },
     { id: 'leads', label: 'Leads', icon: Users, group: 'sales' },
     { id: 'sales', label: 'Sales', icon: DollarSign, group: 'sales' },
+    { id: 'payments', label: 'Buyer Payments', icon: CreditCard, group: 'sales' },
     { id: 'units', label: 'Units', icon: Building2, group: 'sales' },
     { id: 'investments', label: 'Investments', icon: TrendingUp, group: 'sales' },
     { id: 'realtors', label: 'Realtors', icon: Award, group: 'agents' },
@@ -140,6 +141,7 @@ export default function AdminDashboard({ user, onSignOut }: { user: AdminUser; o
           {tab === 'overview' && <OverviewTab goTo={go} />}
           {tab === 'leads' && <LeadsTab />}
           {tab === 'sales' && <SalesTab />}
+          {tab === 'payments' && <BuyerPaymentsTab />}
           {tab === 'units' && <UnitsTab />}
           {tab === 'investments' && <InvestmentsTab />}
           {tab === 'realtors' && <RealtorsTab />}
@@ -429,6 +431,34 @@ function LeadActionPanel({ lead, onUpdate }: { lead: Lead; onUpdate: (changes: P
     {lead.last_contacted_at && <p className="text-[10px] text-slate-400">Last contacted {fmt(lead.last_contacted_at)}</p>}
     {message && <p className={`text-xs ${message === 'Action plan saved.' ? 'text-[#2e6b3e]' : 'text-[#a55445]'}`}>{message}</p>}
     <button onClick={save} disabled={saving} className="btn-primary disabled:opacity-60">{saving ? 'Saving…' : 'Save action plan'} <Check size={15} /></button>
+  </div>;
+}
+
+function BuyerPaymentsTab() {
+  const [sales, setSales] = useState<Sale[]>([]);
+  const [installments, setInstallments] = useState<BuyerInstallment[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState('');
+  const [selected, setSelected] = useState<Sale | null>(null);
+
+  const load = useCallback(async () => {
+    const [{ data: saleRows }, { data: installmentRows }] = await Promise.all([
+      supabase.from('sales').select('*').gt('installment_count', 0).order('created_at', { ascending: false }),
+      supabase.from('buyer_installments').select('*').order('due_date'),
+    ]);
+    setSales((saleRows ?? []) as Sale[]); setInstallments((installmentRows ?? []) as BuyerInstallment[]); setLoading(false);
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  if (loading) return <Spinner />;
+  const filtered = sales.filter((sale) => { const query = search.toLowerCase(); return !query || sale.buyer_name.toLowerCase().includes(query) || sale.unit_number.toLowerCase().includes(query); });
+  const totals = sales.reduce((result, sale) => { const rows = installments.filter((item) => item.sale_id === sale.id); result.paid += (sale.deposit_amount ?? 0) + rows.reduce((sum, item) => sum + item.paid_amount, 0); result.balance += Math.max((sale.sale_price ?? 0) - (sale.deposit_amount ?? 0) - rows.reduce((sum, item) => sum + item.paid_amount, 0), 0); result.overdue += rows.filter((item) => item.status !== 'PAID' && new Date(item.due_date) < new Date(new Date().toDateString())).length; return result; }, { paid: 0, balance: 0, overdue: 0 });
+
+  return <div>
+    <div className="mb-6 flex flex-wrap items-end justify-between gap-4"><div><p className="eyebrow text-[#20afd1]">Collections</p><h2 className="mt-2 font-serif text-4xl">Buyer payments</h2><p className="mt-3 max-w-xl text-sm leading-6 text-slate-500">Track every buyer repayment, outstanding balance, due date, and overdue installment from one place.</p></div><div className="relative"><Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" /><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search buyer or unit" className="admin-input pl-9" /></div></div>
+    <div className="mb-6 grid gap-3 sm:grid-cols-3"><StatMini label="Collected" value={fmtKes(totals.paid)} color="text-[#2e6b3e]" /><StatMini label="Outstanding balance" value={fmtKes(totals.balance)} color="text-[#856b2e]" /><StatMini label="Overdue installments" value={String(totals.overdue)} color="text-[#a55445]" /></div>
+    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{filtered.map((sale) => { const rows = installments.filter((item) => item.sale_id === sale.id); const paid = (sale.deposit_amount ?? 0) + rows.reduce((sum, item) => sum + item.paid_amount, 0); const balance = Math.max((sale.sale_price ?? 0) - paid, 0); const percent = sale.sale_price ? Math.min((paid / sale.sale_price) * 100, 100) : 0; const next = rows.find((item) => item.status !== 'PAID'); const overdue = next && new Date(next.due_date) < new Date(new Date().toDateString()); return <button key={sale.id} onClick={() => setSelected(sale)} className="rounded-lg border border-[#c9c5bd] bg-white p-5 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-[#20afd1] hover:shadow-md"><div className="flex items-start justify-between"><div><p className="eyebrow text-[#20afd1]">Unit {sale.unit_number}</p><h3 className="mt-2 text-lg">{sale.buyer_name}</h3></div><CreditCard size={20} className="text-[#20afd1]" /></div><div className="mt-5 flex justify-between text-xs"><span className="text-slate-500">Paid <strong className="text-[#2e6b3e]">{fmtKes(paid)}</strong></span><span className="text-slate-500">Balance <strong className="text-[#856b2e]">{fmtKes(balance)}</strong></span></div><div className="mt-3 h-2 rounded-full bg-[#e6e2da]"><div className="h-full rounded-full bg-[#20afd1]" style={{ width: `${percent}%` }} /></div><div className="mt-4 flex items-center justify-between text-[10px] uppercase tracking-[.1em]">{next ? <span className={overdue ? 'font-semibold text-[#a55445]' : 'text-slate-500'}>{overdue ? 'Overdue' : 'Next due'} · {new Date(next.due_date).toLocaleDateString()}</span> : <span className="font-semibold text-[#2e6b3e]">Paid in full</span>}<span className="text-[#20afd1]">Open plan</span></div></button>})}{filtered.length === 0 && <div className="rounded-lg border border-dashed border-[#b8b4ab] p-12 text-center text-sm text-slate-400 md:col-span-2 xl:col-span-3">No buyer payment plans recorded yet. Create one from Record Sale.</div>}</div>
+    {selected && <Modal title={`Payments · ${selected.buyer_name}`} onClose={() => { setSelected(null); load(); }}><InstallmentPanel sale={selected} /></Modal>}
   </div>;
 }
 
