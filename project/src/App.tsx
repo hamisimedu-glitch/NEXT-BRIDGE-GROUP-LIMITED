@@ -144,6 +144,10 @@ function BrandMark({ inverse = false }: { inverse?: boolean }) {
   return <span className={`brand-mark ${inverse ? 'brand-mark-inverse' : ''}`}><img src="/NBG_LOGO-removebg-preview.png" alt="Next Bridge Group" /></span>;
 }
 
+function WatermarkedImage({ src, alt, className = '', imageClassName = '' }: { src: string; alt: string; className?: string; imageClassName?: string }) {
+  return <div className={`watermarked-media ${className}`}><img src={src} alt={alt} className={imageClassName || 'h-full w-full object-cover'} /><img src="/NBG_LOGO-removebg-preview.png" alt="NBG authenticated media" className="media-watermark" /></div>;
+}
+
 function Header({ view, navigate, mobileOpen, setMobileOpen }: { view: View; navigate: (view: View) => void; mobileOpen: boolean; setMobileOpen: (open: boolean) => void }) {
   return (
     <header className={`absolute top-0 z-30 w-full ${view === 'home' ? 'text-white' : 'text-[#17232b]'}`}>
@@ -173,7 +177,7 @@ function Header({ view, navigate, mobileOpen, setMobileOpen }: { view: View; nav
 function HomePage({ navigate, setGalleryIndex }: { navigate: (view: View) => void; setGalleryIndex: (index: number) => void }) {
   return <>
     <section className="hero-section relative flex min-h-[780px] items-end overflow-hidden bg-[#f4f1eb] pb-16 md:min-h-screen md:pb-24">
-      <img src={images.hero} alt="Contemporary coastal architecture concept image" className="absolute inset-0 h-full w-full object-cover" />
+      <WatermarkedImage src={images.hero} alt="Contemporary coastal architecture concept image" className="absolute inset-0" />
       <div className="relative mx-auto w-full max-w-[1440px] px-5 md:px-10">
         <div className="hero-content max-w-3xl animate-rise">
           <p className="eyebrow mb-7 text-[#9edfeb]">Nyali · Mombasa · Kenya</p>

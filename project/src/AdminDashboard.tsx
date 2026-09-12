@@ -1,5 +1,6 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
-import { ArrowRight, Award, BarChart3, Building2, CalendarDays, Calculator, Check, ChevronRight, ClipboardList, Construction, DollarSign, Eye, EyeOff, LayoutDashboard, LogOut, Mail, Menu, Pencil, Phone, Plus, Search, TrendingUp, Trash2, Upload, Users, X } from 'lucide-react';
+import { ArrowRight, Award, BarChart3, Building2, CalendarDays, Calculator, Check, ChevronRight, ClipboardList, Construction, Download, DollarSign, Eye, EyeOff, LayoutDashboard, LogOut, Mail, Menu, Pencil, Phone, Plus, Search, TrendingUp, Trash2, Upload, Users, X } from 'lucide-react';
+import { jsPDF } from 'jspdf';
 import { supabase } from '@/lib/supabase';
 import { resetPassword, signIn, signUp, type AdminUser } from '@/lib/auth';
 import { COMMISSION_STATUS_COLORS, COMMISSION_STATUSES, INVESTMENT_STATUS_COLORS, INVESTMENT_STATUSES, LEAD_STATUSES, LEAD_STATUS_COLORS, PROJECT_STATUSES, REALTOR_STATUS_COLORS, REALTOR_STATUSES, SALE_STATUS_COLORS, SALE_STATUSES, UNIT_STATUSES, fmtKes, type AuditLog, type Commission, type ConstructionUpdate, type Investment, type Lead, type Project, type ProjectUnit, type Realtor, type Sale } from '@/lib/types';
@@ -11,6 +12,21 @@ const UNIT_TYPES = ['1 Bedroom', '2 Bedroom', '3 Bedroom', '3 Bedroom + DSQ', '4
 const FLOOR_OPTIONS = Array.from({ length: 30 }, (_, index) => String(index + 1));
 const PARKING_OPTIONS = ['No parking', '1 space', '2 spaces', '3 spaces', '4 spaces'];
 const VIEW_OPTIONS = ['Garden view', 'Pool view', 'Sea view', 'Ocean view', 'City view', 'Courtyard view'];
+
+async function exportAuditPdf(logs: AuditLog[], category: string, action: string) {
+  const pdf = new jsPDF({ unit: 'mm', format: 'a4' });
+  const logo = await fetch('/NBG_LOGO-removebg-preview.png').then((response) => response.blob()).then((blob) => new Promise<string>((resolve) => { const reader = new FileReader(); reader.onloadend = () => resolve(String(reader.result)); reader.readAsDataURL(blob); }));
+  pdf.addImage(logo, 'PNG', 14, 12, 18, 18);
+  pdf.setTextColor(15, 143, 159); pdf.setFontSize(18); pdf.text('NEXT BRIDGE GROUP', 38, 20);
+  pdf.setTextColor(90, 86, 77); pdf.setFontSize(9); pdf.text('AUDIT TRAIL · AUTHENTICATED OPERATIONS REPORT', 38, 27);
+  pdf.setDrawColor(15, 143, 159); pdf.line(14, 35, 196, 35);
+  pdf.setTextColor(23, 35, 43); pdf.setFontSize(10); pdf.text(`Generated: ${new Date().toLocaleString()}`, 14, 43); pdf.text(`Filters: ${category} / ${action}`, 14, 49); pdf.text(`Events: ${logs.length}`, 14, 55);
+  let y = 65;
+  pdf.setFillColor(15, 143, 159); pdf.rect(14, y - 5, 182, 8, 'F'); pdf.setTextColor(255, 255, 255); pdf.setFontSize(8); pdf.text('TIME', 16, y); pdf.text('CATEGORY', 48, y); pdf.text('ACTION', 83, y); pdf.text('RECORD', 108, y); pdf.text('ACTOR', 145, y); y += 8;
+  logs.forEach((log) => { if (y > 280) { pdf.addPage(); y = 18; } pdf.setTextColor(23, 35, 43); pdf.setFontSize(7); pdf.text(fmt(log.created_at), 16, y); pdf.text(log.category.slice(0, 16), 48, y); pdf.text(log.action, 83, y); pdf.text((log.entity_label || log.entity_type).slice(0, 22), 108, y); pdf.text((log.actor_email || 'anonymous').slice(0, 24), 145, y); pdf.setDrawColor(225, 222, 214); pdf.line(14, y + 3, 196, y + 3); y += 8; });
+  const pages = pdf.getNumberOfPages(); for (let page = 1; page <= pages; page += 1) { pdf.setPage(page); pdf.setTextColor(120, 116, 108); pdf.setFontSize(7); pdf.text(`NBG confidential · Page ${page} of ${pages}`, 14, 290); }
+  pdf.save(`nbg-audit-trail-${new Date().toISOString().slice(0, 10)}.pdf`);
+}
 
 const WA = '254741121575';
 
@@ -1195,7 +1211,7 @@ function AuditTrailTab() {
   if (loading) return <Spinner />;
 
   return <div>
-    <div className="mb-6 flex flex-wrap items-end justify-between gap-4"><div><p className="eyebrow text-[#20afd1]">Nothing goes unnoticed</p><h2 className="mt-2 font-serif text-4xl">Audit trail</h2><p className="mt-3 max-w-xl text-sm leading-6 text-slate-500">Every operational insert, update, and delete is recorded with its category, actor, timestamp, and data change.</p></div><div className="flex gap-2"><select value={category} onChange={(e) => setCategory(e.target.value)} className="admin-input"><option value="ALL">All categories</option>{categories.map((item) => <option key={item}>{item}</option>)}</select><select value={action} onChange={(e) => setAction(e.target.value)} className="admin-input"><option value="ALL">All actions</option><option>INSERT</option><option>UPDATE</option><option>DELETE</option></select></div></div>
+    <div className="mb-6 flex flex-wrap items-end justify-between gap-4"><div><p className="eyebrow text-[#20afd1]">Nothing goes unnoticed</p><h2 className="mt-2 font-serif text-4xl">Audit trail</h2><p className="mt-3 max-w-xl text-sm leading-6 text-slate-500">Every operational insert, update, and delete is recorded with its category, actor, timestamp, and data change.</p></div><div className="flex flex-wrap gap-2"><select value={category} onChange={(e) => setCategory(e.target.value)} className="admin-input"><option value="ALL">All categories</option>{categories.map((item) => <option key={item}>{item}</option>)}</select><select value={action} onChange={(e) => setAction(e.target.value)} className="admin-input"><option value="ALL">All actions</option><option>INSERT</option><option>UPDATE</option><option>DELETE</option></select><button onClick={() => exportAuditPdf(filtered, category, action)} className="admin-add-btn flex items-center gap-2"><Download size={14} /> Export PDF</button></div></div>
     <div className="mb-4 grid gap-3 sm:grid-cols-3"><StatMini label="Visible events" value={String(filtered.length)} color="text-[#20afd1]" /><StatMini label="Categories" value={String(categories.length)} color="text-[#856b2e]" /><StatMini label="Latest event" value={logs[0] ? fmt(logs[0].created_at) : '—'} color="text-[#3a6f69]" /></div>
     <div className="overflow-x-auto rounded-lg border border-[#c9c5bd] bg-white shadow-sm"><table className="w-full text-left text-sm"><thead className="border-b border-[#c9c5bd] bg-[#f0ede6] text-[10px] uppercase tracking-[.12em] text-slate-400"><tr>{['Time', 'Category', 'Action', 'Record', 'Actor', 'Details'].map((heading) => <th key={heading} className="px-4 py-3 font-semibold">{heading}</th>)}</tr></thead><tbody>{filtered.map((log) => <tr key={log.id} className="border-b border-[#e6e2da] last:border-0 hover:bg-[#f0ede6]/60"><td className="whitespace-nowrap px-4 py-3 text-xs text-slate-400">{fmt(log.created_at)}</td><td className="px-4 py-3"><span className="rounded bg-[#d4e8f5] px-2 py-1 text-[9px] font-semibold uppercase tracking-[.1em] text-[#2e5f7a]">{log.category}</span></td><td className="px-4 py-3 text-xs font-semibold text-[#17232b]">{log.action}</td><td className="px-4 py-3 text-xs"><p className="font-medium">{log.entity_label || 'Untitled record'}</p><p className="text-slate-400">{log.entity_type}</p></td><td className="px-4 py-3 text-xs text-slate-500">{log.actor_email || 'anonymous'}</td><td className="max-w-[260px] px-4 py-3 text-xs text-slate-500">{log.action === 'UPDATE' ? 'Previous and new values captured' : log.action === 'INSERT' ? 'Record created' : 'Record deleted'}</td></tr>)}{filtered.length === 0 && <EmptyRow cols={6} text="No audit events match these filters." />}</tbody></table></div>
   </div>;

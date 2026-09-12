@@ -17,6 +17,11 @@ button { cursor: pointer; }
 .brand-mark-inverse img { mix-blend-mode: normal; }
 .brand-mark-auth { width: 82px; height: 74px; }
 .brand-mark-auth img { width: 86px; height: 86px; }
+.watermarked-media { position: relative; overflow: hidden; }
+.watermarked-media > img:first-child { display: block; }
+.media-watermark { position: absolute; right: 18px; bottom: 18px; z-index: 2; width: 48px; height: 48px; object-fit: contain; opacity: .78; filter: drop-shadow(0 1px 4px rgba(7,17,22,.2)); pointer-events: none; }
+/* Shared watermark for image-led public cards and galleries. */
+.group:has(> img)::after { position: absolute; right: 18px; bottom: 18px; z-index: 3; width: 42px; height: 42px; background: url('/NBG_LOGO-removebg-preview.png') center / contain no-repeat; content: ''; opacity: .78; filter: drop-shadow(0 1px 4px rgba(7,17,22,.22)); pointer-events: none; }
 .eyebrow { font-size: 10px; line-height: 1.2; letter-spacing: .2em; text-transform: uppercase; }
 .section-pad { padding: 112px 20px; }
 .page-top { padding-top: 180px; min-height: 80vh; }
