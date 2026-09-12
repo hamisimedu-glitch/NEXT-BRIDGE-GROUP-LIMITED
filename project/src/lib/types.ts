@@ -77,6 +77,22 @@ export type Sale = {
   status: string;
   sale_date: string | null;
   notes: string | null;
+  deposit_amount: number;
+  installment_count: number;
+  installment_frequency: string;
+  created_at: string;
+};
+
+export type BuyerInstallment = {
+  id: string;
+  sale_id: string;
+  installment_number: number;
+  due_date: string;
+  amount: number;
+  paid_amount: number;
+  status: string;
+  paid_at: string | null;
+  notes: string | null;
   created_at: string;
 };
 

@@ -3,7 +3,7 @@ import { ArrowRight, Award, BarChart3, Building2, CalendarDays, Calculator, Chec
 import { jsPDF } from 'jspdf';
 import { supabase } from '@/lib/supabase';
 import { resetPassword, signIn, signUp, type AdminUser } from '@/lib/auth';
-import { COMMISSION_STATUS_COLORS, COMMISSION_STATUSES, INVESTMENT_STATUS_COLORS, INVESTMENT_STATUSES, LEAD_STATUSES, LEAD_STATUS_COLORS, PROJECT_STATUSES, REALTOR_STATUS_COLORS, REALTOR_STATUSES, SALE_STATUS_COLORS, SALE_STATUSES, UNIT_STATUSES, fmtKes, type AuditLog, type Commission, type ConstructionUpdate, type Investment, type Lead, type Project, type ProjectUnit, type Realtor, type Sale } from '@/lib/types';
+import { COMMISSION_STATUS_COLORS, COMMISSION_STATUSES, INVESTMENT_STATUS_COLORS, INVESTMENT_STATUSES, LEAD_STATUSES, LEAD_STATUS_COLORS, PROJECT_STATUSES, REALTOR_STATUS_COLORS, REALTOR_STATUSES, SALE_STATUS_COLORS, SALE_STATUSES, UNIT_STATUSES, fmtKes, type AuditLog, type BuyerInstallment, type Commission, type ConstructionUpdate, type Investment, type Lead, type Project, type ProjectUnit, type Realtor, type Sale } from '@/lib/types';
 
 type AdminTab = 'overview' | 'leads' | 'sales' | 'units' | 'realtors' | 'commissions' | 'investments' | 'projects' | 'updates' | 'calculator' | 'audit';
 const LEAD_PRIORITIES = ['LOW', 'NORMAL', 'HIGH', 'URGENT'] as const;
@@ -12,6 +12,7 @@ const UNIT_TYPES = ['1 Bedroom', '2 Bedroom', '3 Bedroom', '3 Bedroom + DSQ', '4
 const FLOOR_OPTIONS = Array.from({ length: 30 }, (_, index) => String(index + 1));
 const PARKING_OPTIONS = ['No parking', '1 space', '2 spaces', '3 spaces', '4 spaces'];
 const VIEW_OPTIONS = ['Garden view', 'Pool view', 'Sea view', 'Ocean view', 'City view', 'Courtyard view'];
+const PAYMENT_METHODS = ['BANK_TRANSFER', 'MPESA', 'CASH', 'CARD', 'OTHER'];
 
 async function exportAuditPdf(logs: AuditLog[], category: string, action: string) {
   const pdf = new jsPDF({ unit: 'mm', format: 'a4' });
@@ -439,6 +440,7 @@ function SalesTab() {
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [showForm, setShowForm] = useState(false);
+  const [selectedSale, setSelectedSale] = useState<Sale | null>(null);
 
   const load = useCallback(async () => {
     const [{ data }, { data: units }] = await Promise.all([
@@ -481,7 +483,7 @@ function SalesTab() {
       <div className="overflow-x-auto rounded-lg border border-[#c9c5bd] bg-white shadow-sm">
         <table className="w-full text-left text-sm">
           <thead className="border-b border-[#c9c5bd] bg-[#f0ede6] text-[10px] uppercase tracking-[.12em] text-slate-400">
-            <tr>{['Unit', 'Buyer', 'Price', 'Status', 'Date', 'Notes'].map((h) => <th key={h} className="px-4 py-3 font-semibold">{h}</th>)}</tr>
+            <tr>{['Unit', 'Buyer', 'Price', 'Status', 'Installments', 'Date', 'Notes', ''].map((h) => <th key={h} className="px-4 py-3 font-semibold">{h}</th>)}</tr>
           </thead>
           <tbody>
             {filtered.map((sale) => (
@@ -495,11 +497,13 @@ function SalesTab() {
                 <td className="px-4 py-3">
                   <StatusSelect value={sale.status} options={SALE_STATUSES} colors={SALE_STATUS_COLORS} onChange={(v) => updateStatus(sale.id, v)} />
                 </td>
+                <td className="px-4 py-3 text-xs text-slate-500">{sale.installment_count ? `${sale.installment_count} ${sale.installment_frequency.toLowerCase()}` : 'No plan'}</td>
                 <td className="px-4 py-3 text-xs text-slate-400">{sale.sale_date ? new Date(sale.sale_date).toLocaleDateString() : '—'}</td>
                 <td className="px-4 py-3 text-xs text-slate-400 max-w-[200px] truncate">{sale.notes ?? '—'}</td>
+                <td className="px-4 py-3"><button onClick={() => setSelectedSale(sale)} className="text-xs text-[#20afd1] hover:underline">Payments</button></td>
               </tr>
             ))}
-            {filtered.length === 0 && <EmptyRow cols={6} text="No sales recorded yet." />}
+            {filtered.length === 0 && <EmptyRow cols={8} text="No sales recorded yet." />}
           </tbody>
         </table>
       </div>
@@ -509,12 +513,13 @@ function SalesTab() {
           <SaleForm availableUnits={availableUnits} onDone={(s) => { setSales((p) => [s, ...p]); setShowForm(false); }} />
         </Modal>
       )}
+      {selectedSale && <Modal title={`Payments · ${selectedSale.buyer_name}`} onClose={() => setSelectedSale(null)}><InstallmentPanel sale={selectedSale} /></Modal>}
     </div>
   );
 }
 
 function SaleForm({ availableUnits, onDone }: { availableUnits: ProjectUnit[]; onDone: (s: Sale) => void }) {
-  const [f, setF] = useState({ unit_number: availableUnits[0]?.unit_number ?? 'AUTO', buyer_name: '', buyer_phone: '', buyer_email: '', sale_price: availableUnits[0]?.price?.replace(/[^0-9.]/g, '') ?? '', status: 'RESERVED', sale_date: '', notes: '' });
+  const [f, setF] = useState({ unit_number: availableUnits[0]?.unit_number ?? 'AUTO', buyer_name: '', buyer_phone: '', buyer_email: '', sale_price: availableUnits[0]?.price?.replace(/[^0-9.]/g, '') ?? '', status: 'RESERVED', sale_date: '', notes: '', deposit_amount: '', installment_count: '0', installment_frequency: 'MONTHLY' });
   const [err, setErr] = useState('');
   const [saving, setSaving] = useState(false);
 
@@ -525,10 +530,27 @@ function SaleForm({ availableUnits, onDone }: { availableUnits: ProjectUnit[]; o
       buyer_phone: f.buyer_phone || null, buyer_email: f.buyer_email || null,
       sale_price: f.sale_price ? parseFloat(f.sale_price) : null,
       status: f.status, sale_date: f.sale_date || null, notes: f.notes || null,
+      deposit_amount: f.deposit_amount ? parseFloat(f.deposit_amount) : 0,
+      installment_count: parseInt(f.installment_count) || 0, installment_frequency: f.installment_frequency,
     }).select().single();
     setSaving(false);
     if (error || !data) { setErr('Could not save. Please try again.'); return; }
-    onDone(data as Sale);
+    const sale = data as Sale;
+    const count = parseInt(f.installment_count) || 0;
+    const salePrice = parseFloat(f.sale_price) || 0;
+    const deposit = parseFloat(f.deposit_amount) || 0;
+    if (count > 0 && salePrice > deposit) {
+      const balance = salePrice - deposit;
+      const installments = Array.from({ length: count }, (_, index) => {
+        const dueDate = new Date();
+        const step = f.installment_frequency === 'QUARTERLY' ? 3 : f.installment_frequency === 'ANNUALLY' ? 12 : 1;
+        dueDate.setMonth(dueDate.getMonth() + step * (index + 1));
+        return { sale_id: sale.id, installment_number: index + 1, due_date: dueDate.toISOString().slice(0, 10), amount: Math.round((balance / count) * 100) / 100, status: 'PENDING' };
+      });
+      const { error: scheduleError } = await supabase.from('buyer_installments').insert(installments);
+      if (scheduleError) { setErr(`Sale saved, but payment plan failed: ${scheduleError.message}`); setSaving(false); return; }
+    }
+    onDone(sale);
   };
 
   return (
@@ -545,6 +567,7 @@ function SaleForm({ availableUnits, onDone }: { availableUnits: ProjectUnit[]; o
         <AF label="Sale Price (KSh)" type="number" value={f.sale_price} onChange={(v) => setF({ ...f, sale_price: v })} />
         <AF label="Sale Date" type="date" value={f.sale_date} onChange={(v) => setF({ ...f, sale_date: v })} />
       </div>
+      <div className="border-t border-[#c9c5bd] pt-4"><p className="eyebrow text-[#20afd1]">Buyer payment plan</p><div className="mt-3 grid grid-cols-3 gap-3"><AF label="Deposit (KSh)" type="number" value={f.deposit_amount} onChange={(v) => setF({ ...f, deposit_amount: v })} /><AF label="Installments" type="number" value={f.installment_count} onChange={(v) => setF({ ...f, installment_count: v })} /><label className="block"><span className="eyebrow mb-1.5 block text-slate-400">Frequency</span><select value={f.installment_frequency} onChange={(e) => setF({ ...f, installment_frequency: e.target.value })} className="admin-input w-full"><option>MONTHLY</option><option>QUARTERLY</option><option>ANNUALLY</option></select></label></div><p className="mt-2 text-[10px] text-slate-500">The remaining balance is divided evenly and scheduled automatically after saving.</p></div>
       <label className="block">
         <span className="eyebrow mb-1.5 block text-slate-400">Status</span>
         <select value={f.status} onChange={(e) => setF({ ...f, status: e.target.value })} className="admin-input w-full">
@@ -559,6 +582,34 @@ function SaleForm({ availableUnits, onDone }: { availableUnits: ProjectUnit[]; o
       <button disabled={saving} className="btn-primary disabled:opacity-60">{saving ? 'Saving…' : 'Save Sale'} <ArrowRight size={15} /></button>
     </form>
   );
+}
+
+function InstallmentPanel({ sale }: { sale: Sale }) {
+  const [installments, setInstallments] = useState<BuyerInstallment[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [paymentFor, setPaymentFor] = useState<BuyerInstallment | null>(null);
+  const load = useCallback(async () => {
+    const { data } = await supabase.from('buyer_installments').select('*').eq('sale_id', sale.id).order('installment_number');
+    setInstallments((data ?? []) as BuyerInstallment[]); setLoading(false);
+  }, [sale.id]);
+  useEffect(() => { load(); }, [load]);
+  const total = sale.sale_price ?? 0;
+  const deposit = sale.deposit_amount ?? 0;
+  const scheduled = installments.reduce((sum, item) => sum + item.amount, 0);
+  const paid = deposit + installments.reduce((sum, item) => sum + item.paid_amount, 0);
+  const balance = Math.max(total - paid, 0);
+  if (loading) return <Spinner />;
+  return <div className="grid gap-5"><div className="grid grid-cols-3 gap-3"><StatMini label="Paid" value={fmtKes(paid)} color="text-[#2e6b3e]" /><StatMini label="Balance" value={fmtKes(balance)} color="text-[#856b2e]" /><StatMini label="Scheduled" value={fmtKes(deposit + scheduled)} color="text-[#2e5f7a]" /></div><div className="rounded border border-[#c9c5bd] bg-white"><div className="grid grid-cols-5 border-b border-[#e6e2da] bg-[#f0ede6] px-3 py-2 text-[9px] uppercase tracking-[.1em] text-slate-400"><span>#</span><span>Due</span><span>Amount</span><span>Status</span><span /></div>{installments.map((item) => { const overdue = item.status !== 'PAID' && new Date(item.due_date) < new Date(new Date().toDateString()); const displayStatus = overdue ? 'OVERDUE' : item.status; return <div key={item.id} className="grid grid-cols-5 items-center border-b border-[#e6e2da] px-3 py-3 text-xs last:border-0"><span>{item.installment_number}</span><span>{new Date(item.due_date).toLocaleDateString()}</span><span>{fmtKes(item.amount)}</span><span className={displayStatus === 'OVERDUE' ? 'font-semibold text-[#a55445]' : displayStatus === 'PAID' ? 'text-[#2e6b3e]' : 'text-slate-500'}>{displayStatus}</span><button onClick={() => setPaymentFor(item)} className="text-right text-[10px] text-[#20afd1] hover:underline">Record payment</button></div>; })}{installments.length === 0 && <p className="p-5 text-sm text-slate-500">No installment plan was created for this sale.</p>}</div>{paymentFor && <PaymentForm installment={paymentFor} onDone={() => { setPaymentFor(null); setLoading(true); load(); }} />}</div>;
+}
+
+function PaymentForm({ installment, onDone }: { installment: BuyerInstallment; onDone: () => void }) {
+  const [amount, setAmount] = useState(String(Math.max(installment.amount - installment.paid_amount, 0)));
+  const [method, setMethod] = useState('BANK_TRANSFER');
+  const [reference, setReference] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const submit = async (event: FormEvent) => { event.preventDefault(); setSaving(true); setError(''); const { error: paymentError } = await supabase.from('buyer_payments').insert({ sale_id: installment.sale_id, installment_id: installment.id, amount: parseFloat(amount), method, reference: reference || null }); setSaving(false); if (paymentError) { setError(paymentError.message); return; } onDone(); };
+  return <form onSubmit={submit} className="grid gap-3 border-t border-[#c9c5bd] pt-4"><p className="eyebrow text-[#20afd1]">Record payment · installment {installment.installment_number}</p><div className="grid grid-cols-3 gap-3"><AF label="Amount (KSh)" type="number" value={amount} onChange={setAmount} required /><label className="block"><span className="eyebrow mb-1.5 block text-slate-400">Method</span><select value={method} onChange={(e) => setMethod(e.target.value)} className="admin-input w-full">{PAYMENT_METHODS.map((item) => <option key={item}>{item}</option>)}</select></label><AF label="Reference" value={reference} onChange={setReference} /></div>{error && <p className="text-xs text-[#a55445]">{error}</p>}<button disabled={saving} className="btn-primary disabled:opacity-60">{saving ? 'Recording…' : 'Record payment'} <Check size={15} /></button></form>;
 }
 
 // ─── Units ───────────────────────────────────────────────
