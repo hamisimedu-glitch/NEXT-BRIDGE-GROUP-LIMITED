@@ -1545,7 +1545,7 @@ export function AdminSignIn() {
 
   const submit = async (e: FormEvent) => {
     e.preventDefault(); setLoading(true); setError('');
-    const result = mode === 'signin' ? await signIn(email, password) : await signUp(email, password);
+    const result = mode === 'signin' ? await signIn(email, password) : await signUp(email, password, 'staff');
     setLoading(false);
     if (result.error) {
       const message = result.error.message.toLowerCase();
