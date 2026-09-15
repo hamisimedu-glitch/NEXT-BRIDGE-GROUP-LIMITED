@@ -40,6 +40,18 @@ export async function sendMagicLink(email: string) {
   });
 }
 
+export async function signInWithPassword(email: string, password: string) {
+  return supabase.auth.signInWithPassword({ email, password });
+}
+
+export async function sendPasswordReset(email: string) {
+  return supabase.auth.resetPasswordForEmail(email, { redirectTo: `${window.location.origin}/portal?reset=1` });
+}
+
+export async function updatePassword(password: string) {
+  return supabase.auth.updateUser({ password });
+}
+
 export async function resetPassword(email: string) {
   return supabase.auth.resetPasswordForEmail(email, { redirectTo: `${window.location.origin}/admin` });
 }

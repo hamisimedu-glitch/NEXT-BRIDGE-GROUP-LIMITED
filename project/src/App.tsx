@@ -23,9 +23,10 @@ import {
   X,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
-import { fetchProfile, onAuthChange, sendMagicLink, signOut, type AdminUser } from '@/lib/auth';
-import type { ConstructionUpdate, Project, ProjectUnit } from '@/lib/types';
+import { fetchProfile, onAuthChange, sendMagicLink, sendPasswordReset, signInWithPassword, signOut, updatePassword, type AdminUser } from '@/lib/auth';
+import type { ConstructionUpdate, Investment, Project, ProjectUnit } from '@/lib/types';
 import AdminDashboard, { AdminSignIn } from '@/AdminDashboard';
+import ClientPortal, { ClientPortalSignIn } from '@/ClientPortal';
 
 type UnitStatus = 'AVAILABLE' | 'RESERVED' | 'SOLD';
 type View = 'home' | 'projects' | 'units' | 'construction' | 'gallery' | 'about' | 'contact' | 'viewing' | 'faq' | 'portal' | 'admin';
@@ -420,7 +421,7 @@ function EnquiryPage({ mode, navigate }: { mode: 'contact' | 'viewing'; navigate
   );
 }
 
-function ClientPortalSignIn() {
+function LegacyClientPortalSignIn() {
   const [email, setEmail] = useState('');
   const [sent, setSent] = useState(false);
   const [error, setError] = useState('');
@@ -437,7 +438,7 @@ function ClientPortalSignIn() {
   return <main className="page-top section-pad bg-[#f4f1eb]"><div className="mx-auto max-w-xl"><div className="border border-[#a9d9d8] bg-[#eefbf9] p-7 md:p-12"><p className="eyebrow text-[#087f88]">Client portal</p><h1 className="mt-5 font-serif text-5xl leading-none text-[#123b4b]">Your project,<br /><em>in view.</em></h1>{sent ? <div className="mt-8"><p className="text-lg text-[#123b4b]">Check your inbox.</p><p className="mt-3 text-sm leading-6 text-slate-600">We sent a secure sign-in link to <strong>{email}</strong>. The link will return you to your private portal.</p><button onClick={() => setSent(false)} className="link-arrow mt-7">Use another email <ArrowRight size={16} /></button></div> : <form onSubmit={submit} className="mt-8 grid gap-5"><label><span className="eyebrow mb-2 block text-slate-500">Email address</span><input value={email} onChange={(event) => setEmail(event.target.value)} type="email" required className="field" placeholder="you@example.com" /></label>{error && <p className="text-sm text-[#a55445]">{error}</p>}<button disabled={loading} className="btn-primary justify-center disabled:opacity-60">{loading ? 'Sending secure link...' : 'Email me a magic link'} <ArrowRight size={16} /></button><p className="text-xs leading-5 text-slate-500">No password is stored. This portal uses a one-time secure email link.</p></form>}</div></div></main>;
 }
 
-function ClientPortal({ user, onSignOut, navigate }: { user: AdminUser; onSignOut: () => void; navigate: (view: View) => void }) {
+function LegacyClientPortal({ user, onSignOut, navigate }: { user: AdminUser; onSignOut: () => void; navigate: (view: View) => void }) {
   const [projects, setProjects] = useState<Project[]>([]);
   const [updates, setUpdates] = useState<ConstructionUpdate[]>([]);
   const [units, setUnits] = useState<ProjectUnit[]>([]);
