@@ -19,6 +19,7 @@ import {
   Phone,
   Search,
   ShieldCheck,
+  Star,
   X,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
@@ -44,7 +45,7 @@ type Unit = {
 };
 
 const images = {
-  hero: 'https://images.pexels.com/photos/11176923/pexels-photo-11176923.jpeg?auto=compress&cs=tinysrgb&w=1800',
+  hero: '/NBG%20HERO.png',
   exterior: 'https://images.pexels.com/photos/16048055/pexels-photo-16048055.jpeg?auto=compress&cs=tinysrgb&w=1200',
   interior: 'https://images.pexels.com/photos/30554297/pexels-photo-30554297.jpeg?auto=compress&cs=tinysrgb&w=1200',
   mombasa: 'https://images.pexels.com/photos/13418220/pexels-photo-13418220.jpeg?auto=compress&cs=tinysrgb&w=1200',
@@ -68,15 +69,19 @@ const gallery = [
 ];
 
 const navItems: { label: string; view: View }[] = [
-  { label: 'The collection', view: 'projects' },
-  { label: 'Availability', view: 'units' },
-  { label: 'Construction', view: 'construction' },
-  { label: 'Why Nyali', view: 'about' },
-  { label: 'Journal', view: 'gallery' },
+  { label: 'Residences', view: 'projects' },
+  { label: 'Location', view: 'about' },
+  { label: 'Gallery', view: 'gallery' },
+  { label: 'Contact', view: 'contact' },
 ];
 
+function viewFromPath(pathname: string): View {
+  const route = pathname.replace(/^\//, '') as View;
+  return ['projects', 'units', 'construction', 'gallery', 'about', 'contact', 'viewing', 'faq', 'admin'].includes(route) ? route : 'home';
+}
+
 function App() {
-  const [view, setView] = useState<View>(() => window.location.pathname === '/admin' ? 'admin' : 'home');
+  const [view, setView] = useState<View>(() => viewFromPath(window.location.pathname));
   const [mobileOpen, setMobileOpen] = useState(false);
   const [selectedUnit, setSelectedUnit] = useState<Unit | null>(null);
   const [galleryIndex, setGalleryIndex] = useState<number | null>(null);
@@ -84,6 +89,13 @@ function App() {
   const [authLoading, setAuthLoading] = useState(true);
 
   useEffect(() => {
+    const handlePopState = () => {
+      setView(viewFromPath(window.location.pathname));
+      setMobileOpen(false);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    };
+    window.addEventListener('popstate', handlePopState);
+
     (async () => {
       const { data: { session } } = await supabase.auth.getSession();
       if (session?.user) {
@@ -103,7 +115,10 @@ function App() {
         }
       })();
     });
-    return () => subscription.unsubscribe();
+    return () => {
+      window.removeEventListener('popstate', handlePopState);
+      subscription.unsubscribe();
+    };
   }, []);
 
   const navigate = (nextView: View) => {
@@ -149,49 +164,101 @@ function WatermarkedImage({ src, alt, className = '', imageClassName = '' }: { s
 }
 
 function Header({ view, navigate, mobileOpen, setMobileOpen }: { view: View; navigate: (view: View) => void; mobileOpen: boolean; setMobileOpen: (open: boolean) => void }) {
+  const isHome = view === 'home';
   return (
-    <header className={`absolute top-0 z-30 w-full ${view === 'home' ? 'text-white' : 'text-[#17232b]'}`}>
-      <div className="mx-auto flex max-w-[1440px] items-center justify-between px-5 py-5 md:px-10 md:py-7">
+    <header className={`site-header site-header-global absolute top-0 z-30 w-full text-white ${isHome ? 'site-header-home' : 'site-header-inner'}`}>
+      <div className="mx-auto flex max-w-[1600px] items-center justify-between px-4 py-4 md:px-8 md:py-5">
         <button onClick={() => navigate('home')} className="group flex items-center gap-3 text-left" aria-label="Next Bridge Group home">
-          <BrandMark inverse={view === 'home'} />
+          <BrandMark inverse />
           <span className="hidden sm:block">
             <span className="block text-[11px] font-semibold tracking-[0.22em]">NEXT BRIDGE</span>
-            <span className={`block text-[9px] tracking-[0.22em] ${view === 'home' ? 'text-white/65' : 'text-slate-500'}`}>GROUP LIMITED</span>
+            <span className="block text-[9px] tracking-[0.22em] text-white/70">GROUP LIMITED</span>
           </span>
         </button>
+
         <nav className="hidden items-center gap-8 lg:flex">
-          {navItems.map((item) => <button key={item.view} onClick={() => navigate(item.view)} className={`nav-link text-[11px] font-medium uppercase tracking-[0.16em] ${view === item.view ? 'nav-link-active' : ''}`}>{item.label}</button>)}
+          <button onClick={() => navigate('home')} className={`nav-link text-[10px] font-medium uppercase tracking-[0.18em] ${view === 'home' ? 'nav-link-active' : ''}`}>Home</button>
+          {navItems.map((item) => <button key={item.view} onClick={() => navigate(item.view)} className={`nav-link text-[10px] font-medium uppercase tracking-[0.18em] ${item.view === view ? 'nav-link-active' : ''}`}>{item.label}</button>)}
         </nav>
-        <div className="hidden items-center gap-5 lg:flex">
-          <button onClick={() => navigate('admin')} className={`text-[10px] font-semibold uppercase tracking-[.15em] ${view === 'home' ? 'text-white/75' : 'text-[#17232b]'}`}>Admin</button>
-          <button onClick={() => navigate('contact')} className={`flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.15em] ${view === 'home' ? 'text-white' : 'text-[#17232b]'}`}><Phone size={14} strokeWidth={1.5} /> Talk to us</button>
-          <button onClick={() => navigate('viewing')} className="btn-primary px-5 py-3 text-[10px]">Book a private viewing <ArrowRight size={14} /></button>
+
+        <div className="hidden items-center gap-4 lg:flex">
+          <button onClick={() => navigate('contact')} className="header-contact inline-flex items-center gap-2 rounded-full px-3 py-2 text-[10px] font-medium uppercase tracking-[0.18em] transition">
+            <span className="header-contact-icon flex h-5 w-5 items-center justify-center rounded-full"><Phone size={10} strokeWidth={1.8} /></span>
+            NYALI · MOMBASA · KENYA
+          </button>
+          <button onClick={() => setMobileOpen(!mobileOpen)} className="header-menu flex h-12 w-12 items-center justify-center rounded-full transition" aria-label={mobileOpen ? 'Close menu' : 'Open menu'}>
+            <Menu size={22} />
+          </button>
         </div>
-        <button className="lg:hidden" onClick={() => setMobileOpen(!mobileOpen)} aria-label={mobileOpen ? 'Close menu' : 'Open menu'}>{mobileOpen ? <X /> : <Menu />}</button>
+
+        <button className="header-menu-mobile flex h-11 w-11 items-center justify-center rounded-full transition lg:hidden" onClick={() => setMobileOpen(!mobileOpen)} aria-label={mobileOpen ? 'Close menu' : 'Open menu'}>{mobileOpen ? <X /> : <Menu />}</button>
       </div>
-      {mobileOpen && <div className="mx-4 border border-white/35 bg-[#0f8f9f]/95 p-5 backdrop-blur-xl lg:hidden"><div className="grid gap-1">{navItems.map((item) => <button key={item.view} onClick={() => navigate(item.view)} className="border-b border-white/20 px-2 py-4 text-left text-xs uppercase tracking-[0.16em] text-white">{item.label}</button>)}<button onClick={() => navigate('admin')} className="border-b border-white/20 px-2 py-4 text-left text-xs uppercase tracking-[0.16em] text-[#fff1b8]">Admin dashboard</button><button onClick={() => navigate('viewing')} className="mt-4 bg-[#ef7c68] px-4 py-4 text-left text-xs font-semibold uppercase tracking-[0.16em] text-white">Book a private viewing</button></div></div>}
+      {mobileOpen && <div className="site-mobile-menu absolute right-4 top-[76px] w-[min(360px,calc(100%-2rem))] p-5 md:right-8"><div className="grid gap-1"><button onClick={() => navigate('home')} className="border-b border-white/20 px-2 py-4 text-left text-xs uppercase tracking-[0.16em]">Home</button>{navItems.map((item) => <button key={item.view} onClick={() => navigate(item.view)} className="border-b border-white/20 px-2 py-4 text-left text-xs uppercase tracking-[0.16em]">{item.label}</button>)}<button onClick={() => navigate('admin')} className="border-b border-white/20 px-2 py-4 text-left text-xs uppercase tracking-[0.16em]">Admin dashboard</button><button onClick={() => navigate('viewing')} className="mt-4 bg-[#0b8e92] px-4 py-4 text-left text-xs font-semibold uppercase tracking-[0.16em] text-white">Book a private viewing</button></div></div>}
     </header>
   );
 }
 
 function HomePage({ navigate, setGalleryIndex }: { navigate: (view: View) => void; setGalleryIndex: (index: number) => void }) {
   return <>
-    <section className="hero-section relative flex min-h-[780px] items-end overflow-hidden bg-[#f4f1eb] pb-16 md:min-h-screen md:pb-24">
-      <WatermarkedImage src={images.hero} alt="Contemporary coastal architecture concept image" className="absolute inset-0" />
-      <div className="relative mx-auto w-full max-w-[1440px] px-5 md:px-10">
-        <div className="hero-content max-w-3xl animate-rise">
-          <p className="eyebrow mb-7 text-[#9edfeb]">Nyali · Mombasa · Kenya</p>
-          <h1 className="max-w-4xl font-serif text-[clamp(3.5rem,9vw,8.6rem)] leading-[.86] tracking-[-.06em] text-white">A new standard<br /><em>of coastal living.</em></h1>
-          <div className="mt-10 flex flex-col gap-4 sm:flex-row sm:items-center"><button onClick={() => navigate('projects')} className="btn-primary">Explore residences <ArrowRight size={16} /></button><button onClick={() => navigate('viewing')} className="btn-ghost">Book a private viewing</button></div>
+    <section className="hero-reference relative overflow-hidden bg-[#0a4061] pb-0 pt-0" style={{ backgroundImage: `url(${images.hero})` }}>
+      <div className="absolute inset-0 bg-[linear-gradient(90deg,rgba(5,28,40,0.4)_0%,rgba(6,38,54,0.18)_39%,rgba(6,38,54,0.02)_72%,rgba(3,18,26,0.04)_100%)]" />
+      <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(3,18,26,0.18)_0%,rgba(3,18,26,0)_42%,rgba(3,18,26,0.14)_100%)]" />
+      <div className="relative mx-auto min-h-[620px] max-w-[1600px] px-4 md:min-h-[600px] md:px-8">
+        <div className="grid min-h-[620px] items-center md:min-h-[600px] lg:grid-cols-2">
+          <div className="hero-content flex max-w-[640px] flex-col justify-center px-1 pb-12 pt-24 md:px-2 md:pb-8 md:pt-12 lg:col-start-2 lg:justify-self-end">
+            <p className="hero-kicker mb-4 text-[9px] font-medium uppercase tracking-[0.38em] text-[#f3d69d]">NYALI · MOMBASA · KENYA</p>
+            <h1 className="max-w-[600px] font-serif text-[clamp(3.7rem,5.6vw,7.8rem)] leading-[0.82] tracking-[-0.08em] text-white">
+              <span className="block">A new standard</span>
+              <span className="block">of <span className="hero-accent">coastal</span></span>
+              <span className="block">living.</span>
+            </h1>
+            <p className="mt-5 max-w-[430px] text-base leading-[1.7] text-white/80 md:text-[1.06rem]">Modern residences, premium finishes, and breathtaking ocean views — all in one exclusive address.</p>
+
+            <div className="mt-8 flex w-full max-w-[500px] flex-col gap-4 sm:flex-row">
+              <button onClick={() => navigate('projects')} className="hero-button-primary flex-1">Explore residences <ArrowRight size={16} /></button>
+              <button onClick={() => navigate('viewing')} className="hero-button-secondary flex-1">Book a private viewing</button>
+            </div>
+
+            <div className="mt-8 grid max-w-[520px] grid-cols-2 gap-3 sm:grid-cols-4">
+              {[
+                ['Ocean views', 'waves'],
+                ['Secure living', 'shield'],
+                ['Premium amenities', 'sparkles'],
+                ['Prime location', 'location'],
+              ].map(([label, type]) => (
+                <div key={label} className="flex min-h-[92px] flex-col items-center justify-center border border-white/25 bg-black/10 px-2 text-center text-white/85">
+                  <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-full border border-white/25 bg-white/10">
+                    {type === 'waves' && <Compass size={16} />}
+                    {type === 'shield' && <ShieldCheck size={16} />}
+                    {type === 'sparkles' && <Building2 size={16} />}
+                    {type === 'location' && <MapPin size={16} />}
+                  </div>
+                  <span className="text-[9px] uppercase leading-4 tracking-[0.16em]">{label}</span>
+                </div>
+              ))}
+            </div>
+
+          </div>
+          <p className="hero-quote absolute bottom-8 left-5 max-w-[230px] font-serif text-2xl italic leading-[0.95] text-white md:bottom-12 md:left-8 md:text-3xl">More than a home,<br />it’s a lifestyle.</p>
         </div>
-        <div className="mt-20 flex items-end justify-between border-t border-white/25 pt-5 text-white/80 md:mt-24"><p className="max-w-xs text-xs leading-6">Thoughtfully designed homes for modern families and discerning investors.</p><div className="hidden items-center gap-3 text-[10px] uppercase tracking-[.2em] sm:flex"><span className="h-8 w-px bg-[#20afd1]" /> scroll to explore <ArrowDown size={14} /></div><p className="text-right text-[10px] uppercase tracking-[.18em]">Built for<br />long-term value</p></div>
+      </div>
+      <div className="hero-feature-band relative z-10 mx-auto grid max-w-[1500px] gap-4 rounded-t-[28px] bg-[#fffdf8] px-5 py-5 shadow-[0_-12px_30px_rgba(7,18,22,0.1)] md:grid-cols-[1fr_1fr_1fr_1fr_auto] md:items-center md:px-8 md:py-6">
+        {[
+          ['Luxury residences', 'Spacious 1, 2 & 3 bedroom apartments with modern designs.', Building2],
+          ['Oceanfront living', 'Wake up to breathtaking views of the Indian Ocean.', Compass],
+          ['24/7 security', 'Your safety and peace of mind are our priority.', ShieldCheck],
+          ['World-class amenities', 'Infinity pool, gym, lounge, and more.', Star],
+        ].map(([title, text, Icon], index) => {
+          const FeatureIcon = Icon as typeof Building2;
+          return <div key={title as string} className={`flex items-center gap-3 border-b border-[#d9d3ca] pb-4 md:border-b-0 md:border-r md:pb-0 md:pr-5 ${index === 3 ? 'md:border-r-0' : ''}`}><FeatureIcon size={25} strokeWidth={1.5} className="shrink-0 text-[#08a4b1]" /><div><h3 className="text-[10px] font-semibold uppercase tracking-[0.15em] text-[#0d5268]">{title as string}</h3><p className="mt-1 max-w-[180px] text-[10px] leading-4 text-slate-600">{text as string}</p></div></div>;
+        })}
       </div>
     </section>
     <section className="section-pad bg-[#f4f1eb]"><div className="mx-auto max-w-[1440px]">
       <SectionIntro eyebrow="Featured development" title={<>The address<br /><em>of what’s next.</em></>} copy="A limited collection of contemporary residences in Nyali, created around the way coastal life is lived today." action="View project" onAction={() => navigate('projects')} />
       <div className="mt-14 grid gap-8 lg:grid-cols-[1.45fr_1fr] lg:items-end"><div className="group relative min-h-[440px] overflow-hidden md:min-h-[590px]"><img src={images.exterior} alt="Contemporary apartment architecture concept image" className="absolute inset-0 h-full w-full object-cover transition duration-700 group-hover:scale-105" /><div className="absolute inset-0 bg-gradient-to-t from-[#17232b]/80 via-transparent to-transparent" /><div className="absolute bottom-7 left-7 text-white md:bottom-10 md:left-10"><p className="eyebrow text-[#9edfeb]">Demo development · replace with verified details</p><h3 className="mt-3 font-serif text-4xl md:text-6xl">Next Bridge<br /><em>Residences</em></h3><p className="mt-5 flex items-center gap-2 text-xs tracking-wide"><MapPin size={14} className="text-[#20afd1]" /> Nyali, Mombasa</p></div><span className="absolute right-6 top-6 border border-white/40 px-3 py-2 text-[9px] uppercase tracking-[.18em] text-white">Now presenting</span></div><div className="flex flex-col justify-between border-t border-[#c9c5bd] pt-6 lg:min-h-[590px]"><div><div className="flex items-center justify-between"><p className="eyebrow text-[#20afd1]">Project snapshot</p><span className="rounded-full bg-[#dceeea] px-3 py-1.5 text-[9px] uppercase tracking-[.15em] text-[#3a6f69]">Data preview</span></div><p className="mt-6 max-w-md text-2xl leading-snug text-[#17232b]">A calm, considered response to the energy of the coast.</p><div className="mt-10 grid grid-cols-2 gap-y-7 border-y border-[#c9c5bd] py-7">{[['Status', 'Information pending'], ['Apartment types', 'To be confirmed'], ['Progress', 'Not yet published'], ['Completion', 'To be confirmed']].map(([label, value]) => <div key={label}><p className="eyebrow text-slate-500">{label}</p><p className="mt-2 text-sm">{value}</p></div>)}</div></div><button onClick={() => navigate('projects')} className="link-arrow mt-10 self-start">Explore the development <ArrowRight size={16} /></button></div></div>
     </div></section>
-    <section className="section-pad bg-[#17232b] text-white"><div className="mx-auto max-w-[1440px]"><div className="grid gap-14 lg:grid-cols-[1fr_1.2fr]"><div><p className="eyebrow text-[#9edfeb]">The NBG approach</p><h2 className="mt-6 font-serif text-5xl leading-[.96] tracking-[-.04em] md:text-7xl">A home.<br /><em>An investment.<br />A legacy.</em></h2></div><div className="lg:pt-24"><p className="max-w-xl text-xl leading-relaxed text-white/75">We are creating more than addresses. We are shaping places with a sense of permanence — where thoughtful architecture, honest progress and the rhythms of coastal living come together.</p><div className="mt-14 grid gap-0 border-t border-white/20 sm:grid-cols-3">{[['01', 'Designed with intent'], ['02', 'Built with discipline'], ['03', 'Held for generations']].map(([no, text]) => <div key={no} className="border-b border-white/20 py-6 sm:border-r sm:border-b-0 sm:pr-6 sm:last:border-r-0 sm:last:pl-6"><span className="text-xs text-[#20afd1]">{no}</span><p className="mt-8 max-w-[150px] text-sm leading-6 text-white/80">{text}</p></div>)}</div></div></div></div></section>
+    <section className="section-pad approach-section"><div className="mx-auto max-w-[1440px]"><div className="grid gap-14 lg:grid-cols-[1fr_1.2fr]"><div><p className="eyebrow text-[#087f88]">The NBG approach</p><h2 className="mt-6 font-serif text-5xl leading-[.96] tracking-[-.04em] md:text-7xl">A home.<br /><em>An investment.<br />A legacy.</em></h2></div><div className="lg:pt-24"><p className="max-w-xl text-xl leading-relaxed approach-copy">We are creating more than addresses. We are shaping places with a sense of permanence — where thoughtful architecture, honest progress and the rhythms of coastal living come together.</p><div className="mt-14 grid gap-0 border-t approach-rule sm:grid-cols-3">{[['01', 'Designed with intent'], ['02', 'Built with discipline'], ['03', 'Held for generations']].map(([no, text]) => <div key={no} className="approach-item border-b py-6 sm:border-r sm:border-b-0 sm:pr-6 sm:last:border-r-0 sm:last:pl-6"><span className="text-xs text-[#087f88]">{no}</span><p className="mt-8 max-w-[150px] text-sm leading-6">{text}</p></div>)}</div></div></div></div></section>
     <Highlights navigate={navigate} />
     <section className="section-pad bg-[#e9e5dc]"><div className="mx-auto max-w-[1440px]"><SectionIntro eyebrow="Life at NBG" title={<>Spaces that make<br /><em>room for living.</em></>} copy="From the first light of morning to slow evenings by the water, every detail is considered around daily life." action="View the gallery" onAction={() => navigate('gallery')} /><div className="mt-14 grid gap-4 md:grid-cols-12 md:grid-rows-2"><GalleryTile item={gallery[1]} className="md:col-span-7 md:row-span-2" onClick={() => setGalleryIndex(1)} /><GalleryTile item={gallery[2]} className="md:col-span-5" onClick={() => setGalleryIndex(2)} /><GalleryTile item={gallery[3]} className="md:col-span-5" onClick={() => setGalleryIndex(3)} /></div></div></section>
     <ConstructionStrip navigate={navigate} />
@@ -230,7 +297,7 @@ function UnitsPage({ navigate, setSelectedUnit }: { navigate: (view: View) => vo
 
 function UnitCard({ unit, onClick }: { unit: Unit; onClick: () => void }) { return <button onClick={onClick} className="group text-left"><div className="relative min-h-[250px] overflow-hidden bg-[#d8d4cb]"><img src={unit.image_url || (unit.bedrooms === 2 ? images.interior : images.exterior)} alt={`${unit.type} image`} className="absolute inset-0 h-full w-full object-cover opacity-85 transition duration-500 group-hover:scale-105" /><div className="absolute inset-0 bg-[#17232b]/35 transition group-hover:bg-[#17232b]/15" /><span className={`absolute left-5 top-5 px-3 py-2 text-[9px] uppercase tracking-[.16em] ${unit.status === 'AVAILABLE' ? 'bg-[#dceeea] text-[#3a6f69]' : unit.status === 'RESERVED' ? 'bg-[#f2e7c9] text-[#856b2e]' : 'bg-[#17232b]/80 text-white'}`}>{unit.status}</span><span className="absolute bottom-5 right-5 text-white transition group-hover:translate-x-1"><ArrowRight /></span></div><div className="border-b border-[#c9c5bd] py-5"><div className="flex justify-between gap-5"><div><p className="eyebrow text-[#20afd1]">Unit {unit.number}</p><h3 className="mt-2 text-xl">{unit.type}</h3></div><p className="text-right text-xs text-slate-500">Price<br /><span className="text-sm text-[#17232b]">{unit.price || 'On request'}</span></p></div><div className="mt-5 flex flex-wrap gap-x-5 gap-y-2 text-xs text-slate-600"><span className="flex items-center gap-1.5"><BedDouble size={14} /> {unit.size}</span><span className="flex items-center gap-1.5"><Layers3 size={14} /> Floor {unit.floor}</span><span>{unit.view}</span></div></div></button> }
 
-function ConstructionPage({ navigate }: { navigate: (view: View) => void }) { return <PageFrame eyebrow="Construction journey" title={<>Progress you can<br /><em>see and trust.</em></>} intro="Transparency is part of the product. Published construction updates will appear here as the NBG team records progress on site."><div className="mt-14 grid gap-12 lg:grid-cols-[.8fr_1.2fr]"><div className="bg-[#17232b] p-8 text-white md:p-12"><p className="eyebrow text-[#9edfeb]">Overall project progress</p><p className="mt-8 font-serif text-8xl">—<span className="ml-2 text-2xl">%</span></p><div className="mt-8 h-px bg-white/20"><div className="h-full w-0 bg-[#20afd1]" /></div><p className="mt-5 text-xs leading-5 text-white/60">No verified updates have been published yet.</p></div><div><p className="eyebrow text-[#20afd1]">The journey</p><div className="mt-6 divide-y divide-[#c9c5bd] border-y border-[#c9c5bd]">{['Land acquisition', 'Design & approvals', 'Foundation', 'Structure', 'Walling', 'Finishing', 'Handover'].map((item, index) => <div key={item} className="flex items-center gap-5 py-5"><span className="flex h-8 w-8 items-center justify-center rounded-full border border-[#c9c5bd] text-[10px] text-slate-500">{String(index + 1).padStart(2, '0')}</span><span className="text-sm">{item}</span><span className="ml-auto text-[9px] uppercase tracking-[.16em] text-slate-400">Pending update</span></div>)}</div></div></div><div className="mt-16 border-t border-[#c9c5bd] pt-7"><p className="eyebrow text-[#20afd1]">Latest site note</p><div className="mt-6 flex flex-col justify-between gap-5 md:flex-row"><p className="text-2xl text-slate-500">No construction updates have been published yet.</p><button onClick={() => navigate('contact')} className="link-arrow self-start">Ask about the project <ArrowRight size={16} /></button></div></div></PageFrame> }
+function ConstructionPage({ navigate }: { navigate: (view: View) => void }) { return <PageFrame eyebrow="Construction journey" title={<>Progress you can<br /><em>see and trust.</em></>} intro="Transparency is part of the product. Published construction updates will appear here as the NBG team records progress on site."><div className="mt-14 grid gap-12 lg:grid-cols-[.8fr_1.2fr]"><div className="progress-panel p-8 md:p-12"><p className="eyebrow text-[#087f88]">Overall project progress</p><p className="mt-8 font-serif text-8xl text-[#123b4b]">—<span className="ml-2 text-2xl">%</span></p><div className="mt-8 h-px bg-[#a9d9d8]"><div className="h-full w-0 bg-[#19c6c9]" /></div><p className="mt-5 text-xs leading-5 text-[#55777d]">No verified updates have been published yet.</p></div><div><p className="eyebrow text-[#20afd1]">The journey</p><div className="mt-6 divide-y divide-[#c9c5bd] border-y border-[#c9c5bd]">{['Land acquisition', 'Design & approvals', 'Foundation', 'Structure', 'Walling', 'Finishing', 'Handover'].map((item, index) => <div key={item} className="flex items-center gap-5 py-5"><span className="flex h-8 w-8 items-center justify-center rounded-full border border-[#c9c5bd] text-[10px] text-slate-500">{String(index + 1).padStart(2, '0')}</span><span className="text-sm">{item}</span><span className="ml-auto text-[9px] uppercase tracking-[.16em] text-slate-400">Pending update</span></div>)}</div></div></div><div className="mt-16 border-t border-[#c9c5bd] pt-7"><p className="eyebrow text-[#20afd1]">Latest site note</p><div className="mt-6 flex flex-col justify-between gap-5 md:flex-row"><p className="text-2xl text-slate-500">No construction updates have been published yet.</p><button onClick={() => navigate('contact')} className="link-arrow self-start">Ask about the project <ArrowRight size={16} /></button></div></div></PageFrame> }
 
 function GalleryPage({ setGalleryIndex }: { setGalleryIndex: (index: number) => void }) { const [filter, setFilter] = useState('All'); const categories = ['All', 'Architecture', 'Interiors', 'Location']; const filtered = gallery.filter((item) => filter === 'All' || item.label === filter); return <PageFrame eyebrow="The journal of place" title={<>A visual language<br /><em>of coastal living.</em></>} intro="A curated reference gallery for the NBG world. These concept images are placeholders and will be replaced with official project photography."><div className="mt-12 flex flex-wrap gap-2">{categories.map((item) => <button key={item} onClick={() => setFilter(item)} className={`px-4 py-2 text-[10px] uppercase tracking-[.14em] ${filter === item ? 'bg-[#17232b] text-white' : 'bg-[#e6e2da] text-slate-600'}`}>{item}</button>)}</div><div className="mt-8 columns-1 gap-4 sm:columns-2 lg:columns-3">{filtered.map((item) => { const index = gallery.indexOf(item); return <button key={item.title} onClick={() => setGalleryIndex(index)} className="group relative mb-4 block w-full overflow-hidden text-left"><img src={item.image} alt={item.title} className="block w-full transition duration-700 group-hover:scale-105" /><div className="absolute inset-0 bg-gradient-to-t from-[#17232b]/80 via-transparent opacity-0 transition group-hover:opacity-100" /><div className="absolute bottom-5 left-5 translate-y-3 text-white opacity-0 transition group-hover:translate-y-0 group-hover:opacity-100"><p className="eyebrow text-[#9edfeb]">{item.label}</p><p className="mt-2 text-lg">{item.title}</p></div></button> })}</div></PageFrame> }
 
@@ -339,7 +406,7 @@ function Lightbox({ index, close, change }: { index: number; close: () => void; 
 
 function UnitModal({ unit, close, navigate }: { unit: Unit; close: () => void; navigate: (view: View) => void }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-[#071116]/70 p-0 backdrop-blur-sm md:items-center md:p-6" role="dialog" aria-modal="true">
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-[#071116]/70 p-0 md:items-center md:p-6" role="dialog" aria-modal="true">
       <div className="relative max-h-[90vh] w-full max-w-4xl overflow-y-auto bg-[#f4f1eb] md:grid md:grid-cols-2">
         <button onClick={close} className="absolute right-5 top-5 z-10 flex h-9 w-9 items-center justify-center bg-[#17232b] text-white" aria-label="Close unit details"><X size={16} /></button>
         <div className="relative min-h-[290px] md:min-h-full">
@@ -367,48 +434,48 @@ function UnitModal({ unit, close, navigate }: { unit: Unit; close: () => void; n
 
 function WhatsAppButton() {
   return (
-    <a href="https://wa.me/254741121575" className="fixed bottom-5 right-5 z-20 flex items-center gap-3 bg-[#1f8a72] px-4 py-3 text-[10px] font-semibold uppercase tracking-[.12em] text-white shadow-lg transition hover:-translate-y-1 hover:bg-[#176b59]" aria-label="Chat with a property consultant">
-      <MessageCircle size={17} /> <span className="hidden sm:block">Chat with a consultant</span>
+    <a href="https://wa.me/254741121575" className="whatsapp-float flex items-center justify-center text-white shadow-lg transition hover:-translate-y-1" aria-label="Chat with a property consultant" title="Chat with a consultant">
+      <MessageCircle size={23} strokeWidth={2.2} />
     </a>
   );
 }
 
 function Footer({ navigate }: { navigate: (view: View) => void }) {
   return (
-    <footer className="bg-[#17232b] px-5 pb-8 pt-16 text-white md:px-10">
+    <footer className="site-footer-global px-5 pb-8 pt-14 md:px-10">
       <div className="mx-auto max-w-[1440px]">
-        <div className="grid gap-12 border-b border-white/15 pb-14 md:grid-cols-[1.2fr_.8fr_.8fr] md:gap-8">
+        <div className="grid gap-12 border-b border-[#a9d9d8] pb-14 md:grid-cols-[1.2fr_.8fr_.8fr] md:gap-8">
           <div>
             <div className="flex items-center gap-3">
               <BrandMark inverse />
               <span>
                 <span className="block text-[11px] font-semibold tracking-[.22em]">NEXT BRIDGE</span>
-                <span className="block text-[9px] tracking-[.22em] text-white/50">GROUP LIMITED</span>
+                <span className="block text-[9px] tracking-[.22em] text-[#427478]">GROUP LIMITED</span>
               </span>
             </div>
-            <p className="mt-8 max-w-xs font-serif text-3xl leading-none">Building homes.<br /><em>Creating legacies.</em></p>
+            <p className="mt-8 max-w-xs font-serif text-3xl leading-none text-[#123b4b]">Building homes.<br /><em>Creating legacies.</em></p>
           </div>
           <div>
-            <p className="eyebrow text-[#9edfeb]">Explore</p>
-            <div className="mt-6 grid gap-4 text-sm text-white/65">
-              <button onClick={() => navigate('projects')} className="text-left hover:text-white">The collection</button>
-              <button onClick={() => navigate('units')} className="text-left hover:text-white">Availability</button>
-              <button onClick={() => navigate('construction')} className="text-left hover:text-white">Construction</button>
-              <button onClick={() => navigate('about')} className="text-left hover:text-white">Why Nyali</button>
+            <p className="eyebrow text-[#087f88]">Explore</p>
+            <div className="mt-6 grid gap-4 text-sm text-[#41636a]">
+              <button onClick={() => navigate('projects')} className="text-left hover:text-[#087f88]">The collection</button>
+              <button onClick={() => navigate('units')} className="text-left hover:text-[#087f88]">Availability</button>
+              <button onClick={() => navigate('construction')} className="text-left hover:text-[#087f88]">Construction</button>
+              <button onClick={() => navigate('about')} className="text-left hover:text-[#087f88]">Why Nyali</button>
             </div>
           </div>
           <div>
-            <p className="eyebrow text-[#9edfeb]">Connect</p>
-            <div className="mt-6 grid gap-4 text-sm text-white/65">
-              <button onClick={() => navigate('contact')} className="flex items-center gap-2 text-left hover:text-white"><Phone size={15} /> Contact</button>
-              <button onClick={() => navigate('viewing')} className="flex items-center gap-2 text-left hover:text-white"><CalendarDays size={15} /> Book a viewing</button>
+            <p className="eyebrow text-[#087f88]">Connect</p>
+            <div className="mt-6 grid gap-4 text-sm text-[#41636a]">
+              <button onClick={() => navigate('contact')} className="flex items-center gap-2 text-left hover:text-[#087f88]"><Phone size={15} /> Contact</button>
+              <button onClick={() => navigate('viewing')} className="flex items-center gap-2 text-left hover:text-[#087f88]"><CalendarDays size={15} /> Book a viewing</button>
               <span className="flex items-center gap-2"><Instagram size={15} /> Instagram</span>
             </div>
           </div>
         </div>
-        <div className="flex flex-col justify-between gap-6 pt-7 text-[10px] uppercase tracking-[.14em] text-white/40 sm:flex-row">
+        <div className="flex flex-col justify-between gap-6 pt-7 text-[10px] uppercase tracking-[.14em] text-[#62868b] sm:flex-row">
           <span>© 2026 Next Bridge Group Limited</span>
-          <button onClick={() => navigate('admin')} className="text-left hover:text-white/70">Admin Dashboard</button>
+          <button onClick={() => navigate('admin')} className="text-left hover:text-[#087f88]">Admin Dashboard</button>
           <div className="flex gap-5"><span>Privacy</span><span>Terms</span></div>
         </div>
       </div>
