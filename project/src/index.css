@@ -53,6 +53,7 @@ button { cursor: pointer; }
 .site-header-inner .header-contact, .site-header-inner .header-menu { background: rgba(255,255,255,.08); }
 .site-footer-global { background: var(--aqua-pale); color: var(--ink); }
 .portal-stat { border: 1px solid #a9d9d8; background: #eefbf9; padding: 24px; }
+.portal-panel { border: 1px solid #a9d9d8; background: #eefbf9; padding: 24px; }
 .approach-section { background: #d9f6f3; color: #123b4b; }
 .approach-copy { color: #41636a; }
 .approach-rule, .approach-item { border-color: #a9d9d8; }
