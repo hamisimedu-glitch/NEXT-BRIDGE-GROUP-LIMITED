@@ -23,12 +23,12 @@ import {
   X,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
-import { fetchProfile, onAuthChange, signOut, type AdminUser } from '@/lib/auth';
+import { fetchProfile, onAuthChange, sendMagicLink, signOut, type AdminUser } from '@/lib/auth';
 import type { ConstructionUpdate, Project, ProjectUnit } from '@/lib/types';
 import AdminDashboard, { AdminSignIn } from '@/AdminDashboard';
 
 type UnitStatus = 'AVAILABLE' | 'RESERVED' | 'SOLD';
-type View = 'home' | 'projects' | 'units' | 'construction' | 'gallery' | 'about' | 'contact' | 'viewing' | 'faq' | 'admin';
+type View = 'home' | 'projects' | 'units' | 'construction' | 'gallery' | 'about' | 'contact' | 'viewing' | 'faq' | 'portal' | 'admin';
 
 type Unit = {
   id: string;
@@ -77,7 +77,7 @@ const navItems: { label: string; view: View }[] = [
 
 function viewFromPath(pathname: string): View {
   const route = pathname.replace(/^\//, '') as View;
-  return ['projects', 'units', 'construction', 'gallery', 'about', 'contact', 'viewing', 'faq', 'admin'].includes(route) ? route : 'home';
+  return ['projects', 'units', 'construction', 'gallery', 'about', 'contact', 'viewing', 'faq', 'portal', 'admin'].includes(route) ? route : 'home';
 }
 
 function App() {
@@ -131,7 +131,14 @@ function App() {
   if (view === 'admin') {
     if (authLoading) return <div className="flex min-h-screen items-center justify-center bg-[#0f8f9f] text-white/75">Loading…</div>;
     if (!adminUser) return <AdminSignIn />;
+    if (!['admin', 'owner', 'staff'].includes(adminUser.role)) return <ClientPortal user={adminUser} onSignOut={async () => { await signOut(); setAdminUser(null); }} navigate={navigate} />;
     return <AdminDashboard user={adminUser} onSignOut={async () => { await signOut(); setAdminUser(null); setView('home'); }} />;
+  }
+
+  if (view === 'portal') {
+    if (authLoading) return <div className="flex min-h-screen items-center justify-center bg-[#0d4055] text-white/75">Checking your secure portal...</div>;
+    if (!adminUser) return <ClientPortalSignIn />;
+    return <ClientPortal user={adminUser} onSignOut={async () => { await signOut(); setAdminUser(null); }} navigate={navigate} />;
   }
 
   return (
@@ -193,7 +200,7 @@ function Header({ view, navigate, mobileOpen, setMobileOpen }: { view: View; nav
 
         <button className="header-menu-mobile flex h-11 w-11 items-center justify-center rounded-full transition lg:hidden" onClick={() => setMobileOpen(!mobileOpen)} aria-label={mobileOpen ? 'Close menu' : 'Open menu'}>{mobileOpen ? <X /> : <Menu />}</button>
       </div>
-      {mobileOpen && <div className="site-mobile-menu absolute right-4 top-[76px] w-[min(360px,calc(100%-2rem))] p-5 md:right-8"><div className="grid gap-1"><button onClick={() => navigate('home')} className="border-b border-white/20 px-2 py-4 text-left text-xs uppercase tracking-[0.16em]">Home</button>{navItems.map((item) => <button key={item.view} onClick={() => navigate(item.view)} className="border-b border-white/20 px-2 py-4 text-left text-xs uppercase tracking-[0.16em]">{item.label}</button>)}<button onClick={() => navigate('admin')} className="border-b border-white/20 px-2 py-4 text-left text-xs uppercase tracking-[0.16em]">Admin dashboard</button><button onClick={() => navigate('viewing')} className="mt-4 bg-[#0b8e92] px-4 py-4 text-left text-xs font-semibold uppercase tracking-[0.16em] text-white">Book a private viewing</button></div></div>}
+      {mobileOpen && <div className="site-mobile-menu absolute right-4 top-[76px] w-[min(360px,calc(100%-2rem))] p-5 md:right-8"><div className="grid gap-1"><button onClick={() => navigate('home')} className="border-b border-white/20 px-2 py-4 text-left text-xs uppercase tracking-[0.16em]">Home</button>{navItems.map((item) => <button key={item.view} onClick={() => navigate(item.view)} className="border-b border-white/20 px-2 py-4 text-left text-xs uppercase tracking-[0.16em]">{item.label}</button>)}<button onClick={() => navigate('portal')} className="border-b border-white/20 px-2 py-4 text-left text-xs uppercase tracking-[0.16em]">Client portal</button><button onClick={() => navigate('admin')} className="border-b border-white/20 px-2 py-4 text-left text-xs uppercase tracking-[0.16em]">Admin dashboard</button><button onClick={() => navigate('viewing')} className="mt-4 bg-[#0b8e92] px-4 py-4 text-left text-xs font-semibold uppercase tracking-[0.16em] text-white">Book a private viewing</button></div></div>}
     </header>
   );
 }
@@ -413,6 +420,42 @@ function EnquiryPage({ mode, navigate }: { mode: 'contact' | 'viewing'; navigate
   );
 }
 
+function ClientPortalSignIn() {
+  const [email, setEmail] = useState('');
+  const [sent, setSent] = useState(false);
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault(); setLoading(true); setError('');
+    const { error: authError } = await sendMagicLink(email.trim());
+    setLoading(false);
+    if (authError) { setError('We could not send the secure link. Check the email address and try again.'); return; }
+    setSent(true);
+  };
+
+  return <main className="page-top section-pad bg-[#f4f1eb]"><div className="mx-auto max-w-xl"><div className="border border-[#a9d9d8] bg-[#eefbf9] p-7 md:p-12"><p className="eyebrow text-[#087f88]">Client portal</p><h1 className="mt-5 font-serif text-5xl leading-none text-[#123b4b]">Your project,<br /><em>in view.</em></h1>{sent ? <div className="mt-8"><p className="text-lg text-[#123b4b]">Check your inbox.</p><p className="mt-3 text-sm leading-6 text-slate-600">We sent a secure sign-in link to <strong>{email}</strong>. The link will return you to your private portal.</p><button onClick={() => setSent(false)} className="link-arrow mt-7">Use another email <ArrowRight size={16} /></button></div> : <form onSubmit={submit} className="mt-8 grid gap-5"><label><span className="eyebrow mb-2 block text-slate-500">Email address</span><input value={email} onChange={(event) => setEmail(event.target.value)} type="email" required className="field" placeholder="you@example.com" /></label>{error && <p className="text-sm text-[#a55445]">{error}</p>}<button disabled={loading} className="btn-primary justify-center disabled:opacity-60">{loading ? 'Sending secure link...' : 'Email me a magic link'} <ArrowRight size={16} /></button><p className="text-xs leading-5 text-slate-500">No password is stored. This portal uses a one-time secure email link.</p></form>}</div></div></main>;
+}
+
+function ClientPortal({ user, onSignOut, navigate }: { user: AdminUser; onSignOut: () => void; navigate: (view: View) => void }) {
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [updates, setUpdates] = useState<ConstructionUpdate[]>([]);
+  const [units, setUnits] = useState<ProjectUnit[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    Promise.all([
+      supabase.from('projects').select('*').eq('is_published', true).order('created_at', { ascending: false }),
+      supabase.from('construction_updates').select('*').order('posted_at', { ascending: false }).limit(8),
+      supabase.from('project_units').select('*').eq('is_published', true).order('unit_number'),
+    ]).then(([projectResult, updateResult, unitResult]) => {
+      setProjects((projectResult.data ?? []) as Project[]); setUpdates((updateResult.data ?? []) as ConstructionUpdate[]); setUnits((unitResult.data ?? []) as ProjectUnit[]); setLoading(false);
+    });
+  }, []);
+
+  return <><header className="border-b border-[#a9d9d8] bg-[#0d4055] px-5 py-5 text-white md:px-10"><div className="mx-auto flex max-w-[1440px] items-center justify-between"><div><p className="eyebrow text-[#8de7e2]">Secure client portal</p><h1 className="mt-2 font-serif text-3xl">Welcome back</h1><p className="mt-1 text-xs text-white/65">{user.email}</p></div><button onClick={onSignOut} className="border border-white/30 px-4 py-2 text-[10px] uppercase tracking-[.14em]">Sign out</button></div></header><main className="section-pad min-h-screen bg-[#f4f1eb]"><div className="mx-auto max-w-[1440px]"><div className="flex flex-col justify-between gap-5 md:flex-row md:items-end"><div><p className="eyebrow text-[#087f88]">NBG client view</p><h2 className="mt-4 font-serif text-5xl text-[#123b4b] md:text-7xl">Stay close to<br /><em>what comes next.</em></h2></div><button onClick={() => navigate('contact')} className="btn-primary self-start">Speak with the team <ArrowRight size={16} /></button></div>{loading ? <p className="mt-14 text-sm text-slate-500">Loading your project view...</p> : <div className="mt-14 grid gap-5 lg:grid-cols-3"><div className="border border-[#a9d9d8] bg-[#eefbf9] p-6"><p className="eyebrow text-[#087f88]">Published projects</p><p className="mt-5 font-serif text-6xl text-[#123b4b]">{projects.length}</p><p className="mt-3 text-sm text-slate-600">Projects available to explore.</p></div><div className="border border-[#a9d9d8] bg-[#eefbf9] p-6"><p className="eyebrow text-[#087f88]">Latest updates</p><p className="mt-5 font-serif text-6xl text-[#123b4b]">{updates.length}</p><p className="mt-3 text-sm text-slate-600">Verified construction notes.</p></div><div className="border border-[#a9d9d8] bg-[#eefbf9] p-6"><p className="eyebrow text-[#087f88]">Published homes</p><p className="mt-5 font-serif text-6xl text-[#123b4b]">{units.length}</p><p className="mt-3 text-sm text-slate-600">Availability currently visible.</p></div></div>} {!loading && <div className="mt-14 grid gap-12 lg:grid-cols-[1.15fr_.85fr]"><section><p className="eyebrow text-[#087f88]">Construction feed</p><div className="mt-5 divide-y divide-[#c9c5bd] border-y border-[#c9c5bd]">{updates.map((update) => <article key={update.id} className="py-5"><div className="flex items-start justify-between gap-5"><div><h3 className="text-lg text-[#123b4b]">{update.title}</h3><p className="mt-1 text-xs text-slate-500">{new Date(update.posted_at).toLocaleDateString()}</p></div><span className="bg-[#d9f6f3] px-3 py-1 text-xs font-semibold text-[#087f88]">{update.progress_pct}%</span></div>{update.body && <p className="mt-3 text-sm leading-6 text-slate-600">{update.body}</p>}</article>)}{updates.length === 0 && <p className="py-8 text-sm text-slate-500">No construction updates have been published yet.</p>}</div></section><section><p className="eyebrow text-[#087f88]">Published projects</p><div className="mt-5 grid gap-4">{projects.map((project) => <div key={project.id} className="border border-[#c9c5bd] bg-white p-5"><p className="eyebrow text-slate-500">{project.status}</p><h3 className="mt-2 font-serif text-2xl text-[#123b4b]">{project.name}</h3><p className="mt-2 text-sm text-slate-500">{project.location || 'Location to be announced'}</p></div>)}</div></section></div>}</div></main></>;
+}
+
 function FaqPage({ navigate }: { navigate: (view: View) => void }) { const faqs = ['How do I register my interest?', 'Can I purchase from outside Kenya?', 'Where can I see construction progress?', 'How will pricing be shared?', 'Can I book a private viewing?']; const [open, setOpen] = useState<number | null>(null); return <PageFrame eyebrow="Questions, answered" title={<>Clarity for<br /><em>the journey ahead.</em></>} intro="Verified answers will be managed by the NBG team here. For a question not covered, our consultants are happy to help."><div className="mt-14 max-w-4xl border-t border-[#c9c5bd]">{faqs.map((faq, index) => <div key={faq} className="border-b border-[#c9c5bd]"><button onClick={() => setOpen(open === index ? null : index)} className="flex w-full items-center justify-between py-7 text-left text-lg"><span>{faq}</span><ChevronDown size={18} className={`transition ${open === index ? 'rotate-180 text-[#20afd1]' : ''}`} /></button>{open === index && <p className="max-w-2xl pb-7 text-sm leading-6 text-slate-600">This answer will be published once the verified project information is added by the NBG team. You can contact us directly for the latest details.</p>}</div>)}</div><button onClick={() => navigate('contact')} className="link-arrow mt-10">Ask a different question <ArrowRight size={16} /></button></PageFrame> }
 
 function PageFrame({ eyebrow, title, intro, children }: { eyebrow: string; title: React.ReactNode; intro: string; children: React.ReactNode }) { return <section className="page-top section-pad"><div className="mx-auto max-w-[1440px]"><div className="max-w-4xl"><p className="eyebrow text-[#20afd1]">{eyebrow}</p><h1 className="mt-5 font-serif text-6xl leading-[.9] tracking-[-.06em] md:text-8xl">{title}</h1><p className="mt-8 max-w-xl text-base leading-7 text-slate-600">{intro}</p></div>{children}</div></section> }
@@ -503,6 +546,7 @@ function Footer({ navigate }: { navigate: (view: View) => void }) {
             <div className="mt-6 grid gap-4 text-sm text-[#41636a]">
               <button onClick={() => navigate('contact')} className="flex items-center gap-2 text-left hover:text-[#087f88]"><Phone size={15} /> Contact</button>
               <button onClick={() => navigate('viewing')} className="flex items-center gap-2 text-left hover:text-[#087f88]"><CalendarDays size={15} /> Book a viewing</button>
+              <button onClick={() => navigate('portal')} className="flex items-center gap-2 text-left hover:text-[#087f88]"><ShieldCheck size={15} /> Client portal</button>
               <span className="flex items-center gap-2"><Instagram size={15} /> Instagram</span>
             </div>
           </div>

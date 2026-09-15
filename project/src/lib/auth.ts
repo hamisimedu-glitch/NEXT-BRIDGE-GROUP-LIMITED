@@ -33,6 +33,13 @@ export async function signUp(email: string, password: string) {
   return supabase.auth.signUp({ email, password });
 }
 
+export async function sendMagicLink(email: string) {
+  return supabase.auth.signInWithOtp({
+    email,
+    options: { emailRedirectTo: `${window.location.origin}/portal` },
+  });
+}
+
 export async function resetPassword(email: string) {
   return supabase.auth.resetPasswordForEmail(email, { redirectTo: `${window.location.origin}/admin` });
 }
