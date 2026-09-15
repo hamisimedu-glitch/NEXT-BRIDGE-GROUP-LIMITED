@@ -1500,7 +1500,7 @@ function UpdateForm({ projects, initial, onDone }: { projects: Project[]; initia
     try { if (image) image_url = await uploadPublicMedia(image, 'updates'); } catch (error) { setErr(uploadErrorMessage(error)); setSaving(false); return; }
     const values = {
       project_id: f.project_id || null, title: f.title,
-      body: f.body || null, progress_pct: parseInt(f.progress_pct) || 0, image_url,
+      body: f.body || null, progress_pct: Math.min(100, Math.max(0, parseInt(f.progress_pct, 10) || 0)), image_url,
     };
     const response = initial
       ? await supabase.from('construction_updates').update(values).eq('id', initial.id).select().single()

@@ -24,7 +24,7 @@ import {
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { fetchProfile, onAuthChange, signOut, type AdminUser } from '@/lib/auth';
-import type { Project, ProjectUnit } from '@/lib/types';
+import type { ConstructionUpdate, Project, ProjectUnit } from '@/lib/types';
 import AdminDashboard, { AdminSignIn } from '@/AdminDashboard';
 
 type UnitStatus = 'AVAILABLE' | 'RESERVED' | 'SOLD';
@@ -297,7 +297,41 @@ function UnitsPage({ navigate, setSelectedUnit }: { navigate: (view: View) => vo
 
 function UnitCard({ unit, onClick }: { unit: Unit; onClick: () => void }) { return <button onClick={onClick} className="group text-left"><div className="relative min-h-[250px] overflow-hidden bg-[#d8d4cb]"><img src={unit.image_url || (unit.bedrooms === 2 ? images.interior : images.exterior)} alt={`${unit.type} image`} className="absolute inset-0 h-full w-full object-cover opacity-85 transition duration-500 group-hover:scale-105" /><div className="absolute inset-0 bg-[#17232b]/35 transition group-hover:bg-[#17232b]/15" /><span className={`absolute left-5 top-5 px-3 py-2 text-[9px] uppercase tracking-[.16em] ${unit.status === 'AVAILABLE' ? 'bg-[#dceeea] text-[#3a6f69]' : unit.status === 'RESERVED' ? 'bg-[#f2e7c9] text-[#856b2e]' : 'bg-[#17232b]/80 text-white'}`}>{unit.status}</span><span className="absolute bottom-5 right-5 text-white transition group-hover:translate-x-1"><ArrowRight /></span></div><div className="border-b border-[#c9c5bd] py-5"><div className="flex justify-between gap-5"><div><p className="eyebrow text-[#20afd1]">Unit {unit.number}</p><h3 className="mt-2 text-xl">{unit.type}</h3></div><p className="text-right text-xs text-slate-500">Price<br /><span className="text-sm text-[#17232b]">{unit.price || 'On request'}</span></p></div><div className="mt-5 flex flex-wrap gap-x-5 gap-y-2 text-xs text-slate-600"><span className="flex items-center gap-1.5"><BedDouble size={14} /> {unit.size}</span><span className="flex items-center gap-1.5"><Layers3 size={14} /> Floor {unit.floor}</span><span>{unit.view}</span></div></div></button> }
 
-function ConstructionPage({ navigate }: { navigate: (view: View) => void }) { return <PageFrame eyebrow="Construction journey" title={<>Progress you can<br /><em>see and trust.</em></>} intro="Transparency is part of the product. Published construction updates will appear here as the NBG team records progress on site."><div className="mt-14 grid gap-12 lg:grid-cols-[.8fr_1.2fr]"><div className="progress-panel p-8 md:p-12"><p className="eyebrow text-[#087f88]">Overall project progress</p><p className="mt-8 font-serif text-8xl text-[#123b4b]">—<span className="ml-2 text-2xl">%</span></p><div className="mt-8 h-px bg-[#a9d9d8]"><div className="h-full w-0 bg-[#19c6c9]" /></div><p className="mt-5 text-xs leading-5 text-[#55777d]">No verified updates have been published yet.</p></div><div><p className="eyebrow text-[#20afd1]">The journey</p><div className="mt-6 divide-y divide-[#c9c5bd] border-y border-[#c9c5bd]">{['Land acquisition', 'Design & approvals', 'Foundation', 'Structure', 'Walling', 'Finishing', 'Handover'].map((item, index) => <div key={item} className="flex items-center gap-5 py-5"><span className="flex h-8 w-8 items-center justify-center rounded-full border border-[#c9c5bd] text-[10px] text-slate-500">{String(index + 1).padStart(2, '0')}</span><span className="text-sm">{item}</span><span className="ml-auto text-[9px] uppercase tracking-[.16em] text-slate-400">Pending update</span></div>)}</div></div></div><div className="mt-16 border-t border-[#c9c5bd] pt-7"><p className="eyebrow text-[#20afd1]">Latest site note</p><div className="mt-6 flex flex-col justify-between gap-5 md:flex-row"><p className="text-2xl text-slate-500">No construction updates have been published yet.</p><button onClick={() => navigate('contact')} className="link-arrow self-start">Ask about the project <ArrowRight size={16} /></button></div></div></PageFrame> }
+function ConstructionPage({ navigate }: { navigate: (view: View) => void }) {
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [updates, setUpdates] = useState<ConstructionUpdate[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    Promise.all([
+      supabase.from('projects').select('*').eq('is_published', true).order('created_at', { ascending: false }),
+      supabase.from('construction_updates').select('*').order('posted_at', { ascending: false }),
+    ]).then(([projectsResult, updatesResult]) => {
+      setProjects((projectsResult.data ?? []) as Project[]);
+      setUpdates((updatesResult.data ?? []) as ConstructionUpdate[]);
+      setLoading(false);
+    });
+  }, []);
+
+  const projectCards = projects.map((project) => {
+    const projectUpdates = updates.filter((update) => update.project_id === project.id);
+    const latest = projectUpdates[0];
+    return { project, projectUpdates, latest, progress: latest?.progress_pct ?? 0 };
+  });
+  const unassignedUpdates = updates.filter((update) => !update.project_id);
+
+  return <PageFrame eyebrow="Construction journey" title={<>Progress you can<br /><em>see and trust.</em></>} intro="Track verified construction milestones published by the NBG team. Each project displays its latest progress, site note, and update history as work moves forward.">
+    {loading ? <p className="mt-14 text-sm text-slate-500">Loading published construction progress...</p> : projects.length === 0 ? <EmptyState title="Project progress is being prepared" text="Published construction updates will appear here once the project team makes them available." action="Ask about the project" onAction={() => navigate('contact')} /> : <div className="mt-14 space-y-14">
+      {projectCards.map(({ project, projectUpdates, latest, progress }) => <article key={project.id} className="border-t border-[#a9d9d8] pt-7">
+        <div className="flex flex-col justify-between gap-5 md:flex-row md:items-end"><div><p className="eyebrow text-[#087f88]">{project.status}</p><h2 className="mt-3 font-serif text-4xl text-[#123b4b] md:text-5xl">{project.name}</h2><p className="mt-2 text-sm text-slate-500">{project.location || 'Location to be announced'}</p></div><p className="font-serif text-6xl text-[#087f88]">{progress}<span className="ml-1 text-xl">%</span></p></div>
+        <div className="mt-7 h-2 overflow-hidden rounded-full bg-[#d9f6f3]"><div className="h-full rounded-full bg-[#19c6c9] transition-all" style={{ width: `${Math.min(100, Math.max(0, progress))}%` }} /></div>
+        <div className="mt-8 grid gap-8 lg:grid-cols-[1.1fr_.9fr]">{latest?.image_url ? <img src={latest.image_url} alt={latest.title} className="h-72 w-full object-cover" /> : <div className="flex h-72 items-center justify-center bg-[#eefbf9] text-sm text-[#55777d]">No site image published yet</div>}<div><p className="eyebrow text-[#087f88]">Latest site note</p><h3 className="mt-3 font-serif text-3xl text-[#123b4b]">{latest?.title ?? 'Awaiting first update'}</h3><p className="mt-4 text-sm leading-6 text-slate-600">{latest?.body ?? 'The NBG team has not published a construction milestone for this project yet.'}</p>{latest && <p className="mt-5 text-[10px] uppercase tracking-[.14em] text-slate-400">Published {new Date(latest.posted_at).toLocaleDateString()}</p>}<button onClick={() => navigate('contact')} className="link-arrow mt-7">Ask about this project <ArrowRight size={16} /></button></div></div>
+        {projectUpdates.length > 0 && <div className="mt-10 border-t border-[#c9c5bd] pt-6"><p className="eyebrow text-[#087f88]">Milestone history</p><div className="mt-5 grid gap-3 md:grid-cols-2">{projectUpdates.map((update) => <div key={update.id} className="flex items-start gap-4 border-b border-[#e2eeec] pb-4"><span className="mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#d9f6f3] text-[10px] font-semibold text-[#087f88]">{update.progress_pct}%</span><div><h4 className="text-sm font-semibold text-[#123b4b]">{update.title}</h4><p className="mt-1 text-xs text-slate-500">{new Date(update.posted_at).toLocaleDateString()}</p></div></div>)}</div></div>}
+      </article>)}
+      {unassignedUpdates.length > 0 && <p className="text-xs text-slate-500">{unassignedUpdates.length} general site update{unassignedUpdates.length === 1 ? '' : 's'} available.</p>}
+    </div>}
+  </PageFrame>;
+}
 
 function GalleryPage({ setGalleryIndex }: { setGalleryIndex: (index: number) => void }) { const [filter, setFilter] = useState('All'); const categories = ['All', 'Architecture', 'Interiors', 'Location']; const filtered = gallery.filter((item) => filter === 'All' || item.label === filter); return <PageFrame eyebrow="The journal of place" title={<>A visual language<br /><em>of coastal living.</em></>} intro="A curated reference gallery for the NBG world. These concept images are placeholders and will be replaced with official project photography."><div className="mt-12 flex flex-wrap gap-2">{categories.map((item) => <button key={item} onClick={() => setFilter(item)} className={`px-4 py-2 text-[10px] uppercase tracking-[.14em] ${filter === item ? 'bg-[#17232b] text-white' : 'bg-[#e6e2da] text-slate-600'}`}>{item}</button>)}</div><div className="mt-8 columns-1 gap-4 sm:columns-2 lg:columns-3">{filtered.map((item) => { const index = gallery.indexOf(item); return <button key={item.title} onClick={() => setGalleryIndex(index)} className="group relative mb-4 block w-full overflow-hidden text-left"><img src={item.image} alt={item.title} className="block w-full transition duration-700 group-hover:scale-105" /><div className="absolute inset-0 bg-gradient-to-t from-[#17232b]/80 via-transparent opacity-0 transition group-hover:opacity-100" /><div className="absolute bottom-5 left-5 translate-y-3 text-white opacity-0 transition group-hover:translate-y-0 group-hover:opacity-100"><p className="eyebrow text-[#9edfeb]">{item.label}</p><p className="mt-2 text-lg">{item.title}</p></div></button> })}</div></PageFrame> }
 
