@@ -101,7 +101,7 @@ function App() {
       const { data: { session } } = await supabase.auth.getSession();
       if (session?.user) {
         const profile = await fetchProfile(session.user.id);
-        setAdminUser(profile ? { ...profile, email: session.user.email ?? '' } : { id: session.user.id, email: session.user.email ?? '', role: 'staff' });
+        setAdminUser(profile ? { ...profile, email: session.user.email ?? '' } : { id: session.user.id, email: session.user.email ?? '', role: 'client' });
       }
       setAuthLoading(false);
     })();
@@ -110,7 +110,7 @@ function App() {
       (async () => {
         if (session?.user) {
           const profile = await fetchProfile(session.user.id);
-          setAdminUser(profile ? { ...profile, email: session.user.email ?? '' } : { id: session.user.id, email: session.user.email ?? '', role: 'staff' });
+          setAdminUser(profile ? { ...profile, email: session.user.email ?? '' } : { id: session.user.id, email: session.user.email ?? '', role: 'client' });
         } else {
           setAdminUser(null);
         }
@@ -201,7 +201,7 @@ function Header({ view, navigate, mobileOpen, setMobileOpen }: { view: View; nav
 
         <button className="header-menu-mobile flex h-11 w-11 items-center justify-center rounded-full transition lg:hidden" onClick={() => setMobileOpen(!mobileOpen)} aria-label={mobileOpen ? 'Close menu' : 'Open menu'}>{mobileOpen ? <X /> : <Menu />}</button>
       </div>
-      {mobileOpen && <div className="site-mobile-menu absolute right-4 top-[76px] w-[min(360px,calc(100%-2rem))] p-5 md:right-8"><div className="grid gap-1"><button onClick={() => navigate('home')} className="border-b border-white/20 px-2 py-4 text-left text-xs uppercase tracking-[0.16em]">Home</button>{navItems.map((item) => <button key={item.view} onClick={() => navigate(item.view)} className="border-b border-white/20 px-2 py-4 text-left text-xs uppercase tracking-[0.16em]">{item.label}</button>)}<button onClick={() => navigate('portal')} className="border-b border-white/20 px-2 py-4 text-left text-xs uppercase tracking-[0.16em]">Client portal</button><button onClick={() => navigate('admin')} className="border-b border-white/20 px-2 py-4 text-left text-xs uppercase tracking-[0.16em]">Admin dashboard</button><button onClick={() => navigate('viewing')} className="mt-4 bg-[#0b8e92] px-4 py-4 text-left text-xs font-semibold uppercase tracking-[0.16em] text-white">Book a private viewing</button></div></div>}
+      {mobileOpen && <div className="site-mobile-menu absolute right-4 top-[76px] w-[min(360px,calc(100%-2rem))] p-5 md:right-8"><div className="grid gap-1"><button onClick={() => navigate('home')} className="border-b border-white/20 px-2 py-4 text-left text-xs uppercase tracking-[0.16em]">Home</button>{navItems.map((item) => <button key={item.view} onClick={() => navigate(item.view)} className="border-b border-white/20 px-2 py-4 text-left text-xs uppercase tracking-[0.16em]">{item.label}</button>)}<button onClick={() => navigate('portal')} className="border-b border-white/20 px-2 py-4 text-left text-xs uppercase tracking-[0.16em]">Client portal</button><button onClick={() => navigate('viewing')} className="mt-4 bg-[#0b8e92] px-4 py-4 text-left text-xs font-semibold uppercase tracking-[0.16em] text-white">Book a private viewing</button></div></div>}
     </header>
   );
 }
@@ -554,7 +554,6 @@ function Footer({ navigate }: { navigate: (view: View) => void }) {
         </div>
         <div className="flex flex-col justify-between gap-6 pt-7 text-[10px] uppercase tracking-[.14em] text-[#62868b] sm:flex-row">
           <span>© 2026 Next Bridge Group Limited</span>
-          <button onClick={() => navigate('admin')} className="text-left hover:text-[#087f88]">Admin Dashboard</button>
           <div className="flex gap-5"><span>Privacy</span><span>Terms</span></div>
         </div>
       </div>
