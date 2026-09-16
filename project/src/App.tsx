@@ -310,7 +310,9 @@ function HomePage({ navigate, setGalleryIndex }: { navigate: (view: View) => voi
           <p className="hero-quote absolute bottom-8 left-5 max-w-[230px] font-serif text-2xl italic leading-[0.95] text-white md:bottom-12 md:left-8 md:text-3xl">More than a home,<br />it’s a lifestyle.</p>
         </div>
       </div>
-      <div className="hero-feature-band relative z-10 mx-auto grid max-w-[1500px] gap-4 rounded-t-[28px] bg-[#fffdf8] px-5 py-5 shadow-[0_-12px_30px_rgba(7,18,22,0.1)] md:grid-cols-[1fr_1fr_1fr_1fr_auto] md:items-center md:px-8 md:py-6">
+    </section>
+    <section className="hero-feature-section">
+      <div className="hero-feature-band relative z-10 mx-auto grid max-w-[1500px] gap-4 rounded-[28px] bg-[#fffdf8] px-5 py-5 shadow-[0_18px_45px_rgba(7,18,22,0.1)] md:grid-cols-[1fr_1fr_1fr_1fr_auto] md:items-center md:px-8 md:py-6">
         {[
           ['Luxury residences', 'Spacious 1, 2 & 3 bedroom apartments with modern designs.', Building2],
           ['Oceanfront living', 'Wake up to breathtaking views of the Indian Ocean.', Compass],
