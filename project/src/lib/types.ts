@@ -43,10 +43,25 @@ export type Project = {
   id: string;
   name: string;
   location: string | null;
+  property_category?: string | null;
+  locality?: string | null;
+  county?: string | null;
+  country?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
+  map_zoom?: number | null;
+  land_reference?: string | null;
   status: string;
   description: string | null;
   image_url: string | null;
   is_published: boolean;
+  price_min?: number | null;
+  price_max?: number | null;
+  amenities?: string[] | null;
+  floor_plan_url?: string | null;
+  brochure_url?: string | null;
+  map_url?: string | null;
+  expected_completion?: string | null;
   created_at: string;
 };
 
@@ -62,6 +77,8 @@ export type ProjectUnit = {
   view: string | null;
   price: string | null;
   status: string;
+  property_category?: string | null;
+  availability_note?: string | null;
   image_url: string | null;
   is_published: boolean;
   created_at: string;

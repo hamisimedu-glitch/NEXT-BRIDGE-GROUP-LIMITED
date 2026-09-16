@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ArrowDown,
   ArrowRight,
@@ -10,6 +10,8 @@ import {
   ChevronLeft,
   ChevronRight,
   Compass,
+  Download,
+  ExternalLink,
   Filter,
   Instagram,
   Layers3,
@@ -27,12 +29,14 @@ import { fetchProfile, onAuthChange, sendMagicLink, sendPasswordReset, signInWit
 import type { ConstructionUpdate, Investment, Project, ProjectUnit } from '@/lib/types';
 import AdminDashboard, { AdminSignIn } from '@/AdminDashboard';
 import ClientPortal, { ClientPortalSignIn } from '@/ClientPortal';
+import LocationMap from '@/LocationMap';
 
 type UnitStatus = 'AVAILABLE' | 'RESERVED' | 'SOLD';
-type View = 'home' | 'projects' | 'units' | 'construction' | 'gallery' | 'about' | 'contact' | 'viewing' | 'faq' | 'portal' | 'admin';
+type View = 'home' | 'projects' | 'project' | 'units' | 'construction' | 'gallery' | 'about' | 'contact' | 'viewing' | 'faq' | 'investor' | 'privacy' | 'terms' | 'verify' | 'portal' | 'admin' | 'not-found';
 
 type Unit = {
   id: string;
+  project_id?: string | null;
   number: string;
   type: string;
   bedrooms: number;
@@ -76,9 +80,31 @@ const navItems: { label: string; view: View }[] = [
   { label: 'Contact', view: 'contact' },
 ];
 
+function trackContactEvent(channel: 'whatsapp' | 'phone', context: string) {
+  void supabase.from('contact_events').insert({ channel, context, page_path: window.location.pathname });
+}
+
 function viewFromPath(pathname: string): View {
+  if (pathname.startsWith('/project/')) return 'project';
+  if (pathname.startsWith('/verify/')) return 'verify';
   const route = pathname.replace(/^\//, '') as View;
-  return ['projects', 'units', 'construction', 'gallery', 'about', 'contact', 'viewing', 'faq', 'portal', 'admin'].includes(route) ? route : 'home';
+  if (pathname === '/' || pathname === '') return 'home';
+  return ['projects', 'project', 'units', 'construction', 'gallery', 'about', 'contact', 'viewing', 'faq', 'investor', 'privacy', 'terms', 'verify', 'portal', 'admin'].includes(route) ? route : 'not-found';
+}
+
+function projectIdFromPath(pathname: string): string | null {
+  if (!pathname.startsWith('/project/')) return null;
+  try {
+    const id = decodeURIComponent(pathname.slice('/project/'.length));
+    return id || null;
+  } catch {
+    return null;
+  }
+}
+
+function verificationCodeFromPath(pathname: string): string | null {
+  if (!pathname.startsWith('/verify/')) return null;
+  try { const code = decodeURIComponent(pathname.slice('/verify/'.length)); return code || null; } catch { return null; }
 }
 
 function App() {
@@ -88,33 +114,46 @@ function App() {
   const [galleryIndex, setGalleryIndex] = useState<number | null>(null);
   const [adminUser, setAdminUser] = useState<AdminUser | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
+  const [projectId, setProjectId] = useState<string | null>(() => projectIdFromPath(window.location.pathname));
+  const [verificationCode, setVerificationCode] = useState<string | null>(() => verificationCodeFromPath(window.location.pathname));
+
+  const resolveSignedInUser = async () => {
+    const { data: { session }, error } = await supabase.auth.getSession();
+    if (error) {
+      setAdminUser(null);
+      setAuthLoading(false);
+      return;
+    }
+
+    if (!session?.user) {
+      setAdminUser(null);
+      setAuthLoading(false);
+      return;
+    }
+
+    const profile = await fetchProfile(session.user.id);
+    setAdminUser(
+      profile
+        ? { ...profile, email: session.user.email ?? '' }
+        : { id: session.user.id, email: session.user.email ?? '', role: 'client' }
+    );
+    setAuthLoading(false);
+  };
 
   useEffect(() => {
     const handlePopState = () => {
       setView(viewFromPath(window.location.pathname));
+      setProjectId(projectIdFromPath(window.location.pathname));
+      setVerificationCode(verificationCodeFromPath(window.location.pathname));
       setMobileOpen(false);
       window.scrollTo({ top: 0, behavior: 'smooth' });
     };
     window.addEventListener('popstate', handlePopState);
 
-    (async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session?.user) {
-        const profile = await fetchProfile(session.user.id);
-        setAdminUser(profile ? { ...profile, email: session.user.email ?? '' } : { id: session.user.id, email: session.user.email ?? '', role: 'client' });
-      }
-      setAuthLoading(false);
-    })();
+    void resolveSignedInUser();
 
-    const { data: { subscription } } = onAuthChange(async (session) => {
-      (async () => {
-        if (session?.user) {
-          const profile = await fetchProfile(session.user.id);
-          setAdminUser(profile ? { ...profile, email: session.user.email ?? '' } : { id: session.user.id, email: session.user.email ?? '', role: 'client' });
-        } else {
-          setAdminUser(null);
-        }
-      })();
+    const { data: { subscription } } = onAuthChange(async () => {
+      await resolveSignedInUser();
     });
     return () => {
       window.removeEventListener('popstate', handlePopState);
@@ -129,17 +168,19 @@ function App() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
+  const normalizedRole = String(adminUser?.role ?? '').trim().toLowerCase();
+
   if (view === 'admin') {
     if (authLoading) return <div className="flex min-h-screen items-center justify-center bg-[#0f8f9f] text-white/75">Loading…</div>;
     if (!adminUser) return <AdminSignIn />;
-    if (!['admin', 'owner', 'staff'].includes(adminUser.role)) return <ClientPortal user={adminUser} onSignOut={async () => { await signOut(); setAdminUser(null); }} navigate={navigate} />;
-    return <AdminDashboard user={adminUser} onSignOut={async () => { await signOut(); setAdminUser(null); setView('home'); }} />;
+    if (!['admin', 'owner', 'staff'].includes(normalizedRole)) return <AdminAccessDenied email={adminUser.email} navigate={navigate} />;
+    return <AdminDashboard user={{ ...adminUser, role: normalizedRole }} onSignOut={async () => { await signOut(); setAdminUser(null); setView('home'); }} />;
   }
 
   if (view === 'portal') {
     if (authLoading) return <div className="flex min-h-screen items-center justify-center bg-[#0d4055] text-white/75">Checking your secure portal...</div>;
     if (!adminUser) return <ClientPortalSignIn />;
-    return <ClientPortal user={adminUser} onSignOut={async () => { await signOut(); setAdminUser(null); }} navigate={navigate} />;
+    return <ClientPortal user={{ ...adminUser, role: normalizedRole }} onSignOut={async () => { await signOut(); setAdminUser(null); }} navigate={navigate} />;
   }
 
   return (
@@ -148,12 +189,19 @@ function App() {
       <main>
         {view === 'home' && <HomePage navigate={navigate} setGalleryIndex={setGalleryIndex} />}
         {view === 'projects' && <DatabaseProjectsPage navigate={navigate} />}
+        {view === 'project' && projectId ? <ProjectDetailPage projectId={projectId} navigate={navigate} /> : view === 'project' ? <NotFoundPage navigate={navigate} /> : null}
         {view === 'units' && <DatabaseUnitsPage navigate={navigate} setSelectedUnit={setSelectedUnit} />}
         {view === 'construction' && <ConstructionPage navigate={navigate} />}
         {view === 'gallery' && <GalleryPage setGalleryIndex={setGalleryIndex} />}
         {view === 'about' && <AboutPage navigate={navigate} />}
         {(view === 'contact' || view === 'viewing') && <EnquiryPage mode={view} navigate={navigate} />}
         {view === 'faq' && <FaqPage navigate={navigate} />}
+        {view === 'investor' && <InvestorPage navigate={navigate} />}
+        {view === 'privacy' && <LegalPage kind="privacy" />}
+        {view === 'terms' && <LegalPage kind="terms" />}
+        {view === 'verify' && verificationCode && <VerifyDocumentPage code={verificationCode} />}
+        {view === 'verify' && !verificationCode && <NotFoundPage navigate={navigate} />}
+        {view === 'not-found' && <NotFoundPage navigate={navigate} />}
       </main>
       <Footer navigate={navigate} />
       <WhatsAppButton />
@@ -161,6 +209,18 @@ function App() {
       {galleryIndex !== null && <Lightbox index={galleryIndex} close={() => setGalleryIndex(null)} change={setGalleryIndex} />}
     </div>
   );
+}
+
+function NotFoundPage({ navigate }: { navigate: (view: View) => void }) {
+  return <PageFrame eyebrow="Page not found" title={<>This address<br /><em>has moved.</em></>} intro="The page you requested is not part of the published NBG experience. You can return to the collection or start again from home."><div className="mt-12 flex flex-wrap gap-3"><button onClick={() => navigate('home')} className="btn-primary">Back to NBG home <ArrowRight size={16} /></button><button onClick={() => navigate('projects')} className="btn-secondary">Explore residences <Building2 size={16} /></button></div></PageFrame>;
+}
+
+function PublicErrorState({ message, onRetry, navigate }: { message: string; onRetry: () => void; navigate: (view: View) => void }) {
+  return <div className="mt-12 border border-[#e4b8ad] bg-[#fff7f4] p-8 md:p-12"><p className="eyebrow text-[#a55445]">Something needs attention</p><h2 className="mt-4 font-serif text-4xl text-[#123b4b]">We could not load this view.</h2><p className="mt-4 max-w-xl text-sm leading-6 text-slate-600">{message}</p><div className="mt-7 flex flex-wrap gap-3"><button onClick={onRetry} className="btn-primary">Try again <ArrowRight size={16} /></button><button onClick={() => navigate('home')} className="btn-secondary">Back to home <ArrowRight size={16} /></button></div></div>;
+}
+
+function AdminAccessDenied({ email, navigate }: { email: string; navigate: (view: View) => void }) {
+  return <main className="flex min-h-screen items-center justify-center bg-[#f4f1eb] px-6 text-[#123b4b]"><section className="w-full max-w-lg border border-[#a9d9d8] bg-[#eefbf9] p-8 text-center md:p-12"><p className="eyebrow text-[#087f88]">Restricted workspace</p><h1 className="mt-5 font-serif text-5xl leading-none">Admin access<br /><em>is required.</em></h1><p className="mt-6 text-sm leading-6 text-slate-600">{email} is signed in as a client account. Use the client portal or sign in with an authorized staff account.</p><div className="mt-8 flex flex-col justify-center gap-3 sm:flex-row"><button onClick={() => navigate('portal')} className="btn-primary justify-center">Open client portal <ArrowRight size={16} /></button><button onClick={() => signOut()} className="btn-secondary justify-center">Sign out</button></div></section></main>;
 }
 
 function BrandMark({ inverse = false }: { inverse?: boolean }) {
@@ -285,18 +345,82 @@ function SectionIntro({ eyebrow, title, copy, action, onAction }: { eyebrow: str
 function DatabaseProjectsPage({ navigate }: { navigate: (view: View) => void }) {
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
-  useEffect(() => { supabase.from('projects').select('*').eq('is_published', true).order('created_at', { ascending: false }).then(({ data }) => { setProjects((data ?? []) as Project[]); setLoading(false); }); }, []);
-  return <PageFrame eyebrow="The collection" title={<>Places to put down<br /><em>your roots.</em></>} intro="Explore the NBG portfolio. Each development carries its own story, with verified information published by the project team."><div className="mt-16 grid gap-8 lg:grid-cols-2">{loading && <p className="text-sm text-slate-500">Loading published projects…</p>}{!loading && projects.length === 0 && <EmptyState title="Projects are being prepared" text="The NBG team will publish verified project details here soon." action="Contact a consultant" onAction={() => navigate('contact')} />}{projects.map((project) => <article key={project.id} className="group relative min-h-[520px] overflow-hidden"><img src={project.image_url || images.exterior} alt={project.name} className="absolute inset-0 h-full w-full object-cover transition duration-700 group-hover:scale-105" /><div className="absolute inset-0 bg-gradient-to-t from-[#17232b] to-transparent" /><div className="absolute bottom-8 left-8 text-white"><p className="eyebrow text-[#9edfeb]">{project.status}</p><h2 className="mt-3 font-serif text-5xl">{project.name}</h2><p className="mt-5 flex items-center gap-2 text-xs"><MapPin size={14} className="text-[#20afd1]" /> {project.location || 'Location to be announced'}</p><button onClick={() => navigate('units')} className="link-arrow mt-7 text-white">View availability <ArrowRight size={16} /></button></div></article>)}</div></PageFrame>;
+  const [error, setError] = useState('');
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError('');
+    const { data, error: queryError } = await supabase.from('projects').select('*').eq('is_published', true).order('created_at', { ascending: false });
+    if (queryError) setError('Published projects are temporarily unavailable.');
+    setProjects((data ?? []) as Project[]);
+    setLoading(false);
+  }, []);
+  useEffect(() => { void load(); }, [load]);
+  return <PageFrame eyebrow="The collection" title={<>Places to put down<br /><em>your roots.</em></>} intro="Explore the NBG portfolio. Each development carries its own story, with verified information published by the project team."><div className="mt-16">{error ? <PublicErrorState message={error} onRetry={() => void load()} navigate={navigate} /> : loading ? <p className="text-sm text-slate-500">Loading published projects...</p> : <div className="grid gap-8 lg:grid-cols-2">{projects.length === 0 && <EmptyState title="Projects are being prepared" text="Published project details will appear here once the NBG team makes them available." action="Back to home" onAction={() => navigate('home')} />}{projects.map((project) => <article key={project.id} className="group relative min-h-[520px] overflow-hidden"><img src={project.image_url || images.exterior} alt={project.name} className="absolute inset-0 h-full w-full object-cover transition duration-700 group-hover:scale-105" /><div className="absolute inset-0 bg-gradient-to-t from-[#17232b] to-transparent" /><div className="absolute bottom-8 left-8 text-white"><p className="eyebrow text-[#9edfeb]">{project.status}</p><h2 className="mt-3 font-serif text-5xl">{project.name}</h2><p className="mt-5 flex items-center gap-2 text-xs"><MapPin size={14} className="text-[#20afd1]" /> {project.location || 'Location to be announced'}</p><button onClick={() => navigateToPublicProject(project.id)} className="link-arrow mt-7 text-white">View project details <ArrowRight size={16} /></button></div></article>)}</div>}</div></PageFrame>;
+}
+
+function navigateToPublicProject(id: string) {
+  window.history.pushState({}, '', `/project/${encodeURIComponent(id)}`);
+  window.dispatchEvent(new PopStateEvent('popstate'));
+}
+
+function ProjectDetailPage({ projectId, navigate }: { projectId: string; navigate: (view: View) => void }) {
+  const [project, setProject] = useState<Project | null>(null);
+  const [units, setUnits] = useState<ProjectUnit[]>([]);
+  const [updates, setUpdates] = useState<ConstructionUpdate[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError('');
+    const [projectResult, unitsResult, updatesResult] = await Promise.all([
+      supabase.from('projects').select('*').eq('id', projectId).eq('is_published', true).maybeSingle(),
+      supabase.from('project_units').select('*').eq('project_id', projectId).eq('is_published', true).order('unit_number'),
+      supabase.from('construction_updates').select('*').eq('project_id', projectId).order('posted_at', { ascending: false }),
+    ]);
+    if (projectResult.error || unitsResult.error || updatesResult.error) setError('Project details are temporarily unavailable.');
+    setProject((projectResult.data ?? null) as Project | null);
+    setUnits((unitsResult.data ?? []) as ProjectUnit[]);
+    setUpdates((updatesResult.data ?? []) as ConstructionUpdate[]);
+    setLoading(false);
+  }, [projectId]);
+  useEffect(() => {
+    void load();
+  }, [load]);
+  if (loading) return <PageFrame eyebrow="Project profile" title={<>Preparing<br /><em>the details.</em></>} intro="Loading verified project information..."><p className="mt-14 text-sm text-slate-500">Please wait...</p></PageFrame>;
+  if (error) return <PageFrame eyebrow="Project profile" title={<>Details are<br /><em>temporarily paused.</em></>} intro="We could not retrieve this project right now."><PublicErrorState message={error} onRetry={() => void load()} navigate={navigate} /></PageFrame>;
+  if (!project) return <PageFrame eyebrow="Project profile" title={<>Project<br /><em>not found.</em></>} intro="This project is not currently published."><button onClick={() => navigate('projects')} className="btn-primary mt-10">Back to the collection <ArrowRight size={16} /></button></PageFrame>;
+  const progress = updates[0]?.progress_pct ?? 0;
+  const priceRange = project.price_min || project.price_max ? `${project.price_min ? `KSh ${project.price_min.toLocaleString()}` : 'Price'} - ${project.price_max ? `KSh ${project.price_max.toLocaleString()}` : 'on request'}` : 'Pricing shared by the NBG team';
+  return <PageFrame eyebrow={`${project.status} · ${project.location || 'Kenya'}`} title={<>{project.name}<br /><em>in full view.</em></>} intro={project.description || 'A considered collection of homes, designed for coastal living and long-term value.'}>
+    <div className="mt-14 grid gap-10 lg:grid-cols-[1.25fr_.75fr]"><div className="relative min-h-[520px] overflow-hidden"><img src={project.image_url || images.exterior} alt={project.name} className="absolute inset-0 h-full w-full object-cover" /><div className="absolute inset-0 bg-gradient-to-t from-[#17232b]/75 via-transparent to-transparent" /><div className="absolute bottom-7 left-7 text-white"><p className="eyebrow text-[#9edfeb]">From {priceRange}</p><p className="mt-3 text-sm">Expected completion: {project.expected_completion || 'To be announced'}</p></div></div><div className="border-t border-[#c9c5bd] pt-6"><p className="eyebrow text-[#087f88]">The project brief</p><div className="mt-7 grid grid-cols-2 gap-y-7 border-y border-[#c9c5bd] py-7"><div><p className="eyebrow text-slate-500">Availability</p><p className="mt-2 text-2xl text-[#123b4b]">{units.filter((unit) => unit.status === 'AVAILABLE').length} homes</p></div><div><p className="eyebrow text-slate-500">Progress</p><p className="mt-2 text-2xl text-[#087f88]">{progress}%</p></div><div><p className="eyebrow text-slate-500">Location</p><p className="mt-2 text-sm">{project.location || 'Coastal Kenya'}</p></div><div><p className="eyebrow text-slate-500">Price range</p><p className="mt-2 text-sm">{priceRange}</p></div></div><div className="mt-8 flex flex-wrap gap-3">{project.brochure_url && <a href={project.brochure_url} download className="btn-primary">Brochure <Download size={16} /></a>}{project.floor_plan_url && <a href={project.floor_plan_url} target="_blank" rel="noreferrer" className="btn-secondary">Floor plans <ExternalLink size={16} /></a>}<button onClick={() => navigate('viewing')} className="btn-secondary">Book a viewing <CalendarDays size={16} /></button></div></div></div>
+    <div className="mt-16 grid gap-12 lg:grid-cols-[1fr_1fr]"><section><p className="eyebrow text-[#087f88]">Amenities</p><h2 className="mt-4 font-serif text-5xl text-[#123b4b]">Made for<br /><em>daily life.</em></h2><div className="mt-8 grid grid-cols-2 gap-3">{(project.amenities?.length ? project.amenities : ['24/7 security', 'Residents lounge', 'Swimming pool', 'Fitness studio', 'Secure parking', 'Landscaped grounds']).map((amenity) => <div key={amenity} className="border border-[#a9d9d8] bg-[#eefbf9] p-4 text-sm text-[#315a62]">{amenity}</div>)}</div></section><section><p className="eyebrow text-[#087f88]">Published availability</p><div className="mt-4 space-y-3">{units.length === 0 ? <p className="text-sm text-slate-500">Availability will be published as homes are released.</p> : units.map((unit) => <div key={unit.id} className="flex items-center justify-between border-b border-[#c9c5bd] py-4"><div><p className="text-sm font-semibold text-[#123b4b]">{unit.unit_number} · {unit.type || 'Residence'}</p><p className="mt-1 text-xs text-slate-500">{unit.size || 'Size on request'} · {unit.view || 'View on request'}</p></div><span className="text-[10px] uppercase tracking-[.12em] text-[#087f88]">{unit.status}</span></div>)}</div></section></div>
+    <section className="mt-16 border-t border-[#c9c5bd] pt-8"><div className="flex items-end justify-between gap-5"><div><p className="eyebrow text-[#087f88]">Construction progress</p><h2 className="mt-3 font-serif text-4xl text-[#123b4b]">Built in the open.</h2></div><span className="font-serif text-5xl text-[#087f88]">{progress}%</span></div><div className="mt-6 h-2 bg-[#d9f6f3]"><div className="h-full bg-[#19c6c9]" style={{ width: `${progress}%` }} /></div>{updates[0] && <p className="mt-5 text-sm text-slate-600">{updates[0].title}: {updates[0].body}</p>}</section>
+    <InvestorCallout navigate={navigate} />
+  </PageFrame>;
 }
 
 function DatabaseUnitsPage({ navigate, setSelectedUnit }: { navigate: (view: View) => void; setSelectedUnit: (unit: Unit) => void }) {
   const [units, setUnits] = useState<Unit[]>([]);
+  const [projects, setProjects] = useState<Project[]>([]);
   const [status, setStatus] = useState<'ALL' | UnitStatus>('ALL');
   const [bedrooms, setBedrooms] = useState('All bedrooms');
   const [loading, setLoading] = useState(true);
-  useEffect(() => { supabase.from('project_units').select('*').eq('is_published', true).order('unit_number').then(({ data }) => { setUnits(((data ?? []) as ProjectUnit[]).map((unit) => ({ id: unit.id, number: unit.unit_number, type: unit.type || 'Residence', bedrooms: unit.bedrooms || 0, size: unit.size || 'Size on request', floor: unit.floor || '—', parking: unit.parking || '—', view: unit.view || '—', price: unit.price || undefined, status: unit.status as UnitStatus, image_url: unit.image_url }))); setLoading(false); }); }, []);
+  const [error, setError] = useState('');
+  const load = async () => {
+    setLoading(true);
+    setError('');
+    const [{ data, error: queryError }, { data: projectRows }] = await Promise.all([
+      supabase.from('project_units').select('*').eq('is_published', true).order('unit_number'),
+      supabase.from('projects').select('*').eq('is_published', true).order('name'),
+    ]);
+    if (queryError) setError('Published availability is temporarily unavailable.');
+    setUnits(((data ?? []) as ProjectUnit[]).map((unit) => ({ id: unit.id, project_id: unit.project_id, number: unit.unit_number, type: unit.type || 'Residence', bedrooms: unit.bedrooms || 0, size: unit.size || 'Size on request', floor: unit.floor || '—', parking: unit.parking || '—', view: unit.view || '—', price: unit.price || undefined, status: unit.status as UnitStatus, image_url: unit.image_url })));
+    setProjects((projectRows ?? []) as Project[]);
+    setLoading(false);
+  };
+  useEffect(() => { void load(); }, []);
   const filtered = useMemo(() => units.filter((unit) => (status === 'ALL' || unit.status === status) && (bedrooms === 'All bedrooms' || unit.bedrooms === Number(bedrooms))), [units, status, bedrooms]);
-  return <PageFrame eyebrow="Availability" title={<>Find a place<br /><em>that feels like yours.</em></>} intro="Browse verified availability published by the NBG team."><div className="mt-14 flex flex-col gap-4 border-y border-[#c9c5bd] py-5 md:flex-row md:items-center md:justify-between"><div className="flex items-center gap-3 text-xs"><Filter size={16} className="text-[#20afd1]" /><span className="uppercase tracking-[.14em]">Filter by</span><div className="flex gap-1">{(['ALL', 'AVAILABLE', 'RESERVED', 'SOLD'] as const).map((item) => <button key={item} onClick={() => setStatus(item)} className={`px-3 py-2 text-[10px] uppercase tracking-[.12em] transition ${status === item ? 'bg-[#17232b] text-white' : 'bg-[#e6e2da] text-slate-600 hover:bg-[#d8d4cb]'}`}>{item}</button>)}</div></div><select value={bedrooms} onChange={(e) => setBedrooms(e.target.value)} className="border-0 border-b border-[#a9a59d] bg-transparent px-0 py-2 text-sm outline-none"><option>All bedrooms</option><option value="2">2 bedrooms</option><option value="3">3 bedrooms</option><option value="4">4 bedrooms</option></select></div>{loading ? <p className="mt-8 text-sm text-slate-500">Loading published availability…</p> : <><div className="mt-8 grid gap-4 md:grid-cols-2">{filtered.map((unit) => <UnitCard key={unit.id} unit={unit} onClick={() => setSelectedUnit(unit)} />)}</div>{filtered.length === 0 && <EmptyState title="No published homes yet" text="Try a different filter or speak with a consultant about upcoming availability." action="Contact a consultant" onAction={() => navigate('contact')} />}</>}</PageFrame>;
+  return <PageFrame eyebrow="Availability" title={<>Find a place<br /><em>that feels like yours.</em></>} intro="Browse verified availability published by the NBG team."><div className="mt-14">{error ? <PublicErrorState message={error} onRetry={() => void load()} navigate={navigate} /> : loading ? <p className="text-sm text-slate-500">Loading published availability...</p> : <><div className="flex flex-col gap-4 border-y border-[#c9c5bd] py-5 md:flex-row md:items-center md:justify-between"><div className="flex items-center gap-3 text-xs"><Filter size={16} className="text-[#20afd1]" /><span className="uppercase tracking-[.14em]">Filter by</span><div className="flex gap-1">{(['ALL', 'AVAILABLE', 'RESERVED', 'SOLD'] as const).map((item) => <button key={item} onClick={() => setStatus(item)} className={`px-3 py-2 text-[10px] uppercase tracking-[.12em] transition ${status === item ? 'bg-[#17232b] text-white' : 'bg-[#e6e2da] text-slate-600 hover:bg-[#d8d4cb]'}`}>{item}</button>)}</div></div><select value={bedrooms} onChange={(e) => setBedrooms(e.target.value)} className="border-0 border-b border-[#a9a59d] bg-transparent px-0 py-2 text-sm outline-none"><option>All bedrooms</option><option value="2">2 bedrooms</option><option value="3">3 bedrooms</option><option value="4">4 bedrooms</option></select></div><div className="mt-8 grid gap-4 md:grid-cols-2">{filtered.map((unit) => <UnitCard key={unit.id} unit={unit} onClick={() => setSelectedUnit(unit)} />)}</div>{filtered.length === 0 && <EmptyState title="No published homes yet" text="Try a different filter or speak with a consultant about upcoming availability." action="Back to home" onAction={() => navigate('home')} />}</>}</div>{projects.length > 0 && <LocationMap projects={projects.map((project) => ({ ...project, availableUnits: units.filter((unit) => unit.project_id === project.id && unit.status === 'AVAILABLE').length }))} />}</PageFrame>;
 }
 
 // Kept as a local fallback while the public page uses database-backed availability.
@@ -309,17 +433,22 @@ function ConstructionPage({ navigate }: { navigate: (view: View) => void }) {
   const [projects, setProjects] = useState<Project[]>([]);
   const [updates, setUpdates] = useState<ConstructionUpdate[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
 
-  useEffect(() => {
+  const load = async () => {
+    setLoading(true);
+    setError('');
     Promise.all([
       supabase.from('projects').select('*').eq('is_published', true).order('created_at', { ascending: false }),
       supabase.from('construction_updates').select('*').order('posted_at', { ascending: false }),
     ]).then(([projectsResult, updatesResult]) => {
+      if (projectsResult.error || updatesResult.error) setError('Construction updates are temporarily unavailable.');
       setProjects((projectsResult.data ?? []) as Project[]);
       setUpdates((updatesResult.data ?? []) as ConstructionUpdate[]);
       setLoading(false);
     });
-  }, []);
+  };
+  useEffect(() => { void load(); }, []);
 
   const projectCards = projects.map((project) => {
     const projectUpdates = updates.filter((update) => update.project_id === project.id);
@@ -329,7 +458,7 @@ function ConstructionPage({ navigate }: { navigate: (view: View) => void }) {
   const unassignedUpdates = updates.filter((update) => !update.project_id);
 
   return <PageFrame eyebrow="Construction journey" title={<>Progress you can<br /><em>see and trust.</em></>} intro="Track verified construction milestones published by the NBG team. Each project displays its latest progress, site note, and update history as work moves forward.">
-    {loading ? <p className="mt-14 text-sm text-slate-500">Loading published construction progress...</p> : projects.length === 0 ? <EmptyState title="Project progress is being prepared" text="Published construction updates will appear here once the project team makes them available." action="Ask about the project" onAction={() => navigate('contact')} /> : <div className="mt-14 space-y-14">
+    {error ? <PublicErrorState message={error} onRetry={() => void load()} navigate={navigate} /> : loading ? <p className="mt-14 text-sm text-slate-500">Loading published construction progress...</p> : projects.length === 0 ? <EmptyState title="Project progress is being prepared" text="Published construction updates will appear here once the project team makes them available." action="Back to home" onAction={() => navigate('home')} /> : <div className="mt-14 space-y-14">
       {projectCards.map(({ project, projectUpdates, latest, progress }) => <article key={project.id} className="border-t border-[#a9d9d8] pt-7">
         <div className="flex flex-col justify-between gap-5 md:flex-row md:items-end"><div><p className="eyebrow text-[#087f88]">{project.status}</p><h2 className="mt-3 font-serif text-4xl text-[#123b4b] md:text-5xl">{project.name}</h2><p className="mt-2 text-sm text-slate-500">{project.location || 'Location to be announced'}</p></div><p className="font-serif text-6xl text-[#087f88]">{progress}<span className="ml-1 text-xl">%</span></p></div>
         <div className="mt-7 h-2 overflow-hidden rounded-full bg-[#d9f6f3]"><div className="h-full rounded-full bg-[#19c6c9] transition-all" style={{ width: `${Math.min(100, Math.max(0, progress))}%` }} /></div>
@@ -345,8 +474,17 @@ function GalleryPage({ setGalleryIndex }: { setGalleryIndex: (index: number) => 
 
 function AboutPage({ navigate }: { navigate: (view: View) => void }) { return <PageFrame eyebrow="Why NBG" title={<>Building homes.<br /><em>Creating legacies.</em></>} intro="Next Bridge Group Limited is a real-estate development and construction company based in Nyali, Mombasa. This page is prepared for the company story and verified leadership content to be added by the NBG team."><div className="mt-14 grid gap-10 lg:grid-cols-[1fr_1fr]"><div className="relative min-h-[480px] overflow-hidden"><img src={images.coast} alt="Kenyan coast concept image" className="absolute inset-0 h-full w-full object-cover" /><div className="absolute inset-0 bg-[#17232b]/25" /></div><div className="flex flex-col justify-center"><p className="eyebrow text-[#20afd1]">Our point of view</p><h2 className="mt-5 font-serif text-5xl leading-none md:text-6xl">The quality of a home is felt long after the keys are handed over.</h2><p className="mt-8 max-w-lg text-base leading-7 text-slate-600">We are building a foundation for a portfolio of places that are thoughtfully designed, responsibly delivered and connected to the communities they become part of.</p><button onClick={() => navigate('contact')} className="link-arrow mt-8 self-start">Start a conversation <ArrowRight size={16} /></button></div></div><div className="mt-16 grid gap-0 border-y border-[#c9c5bd] sm:grid-cols-3">{[['01', 'Quality', 'An uncompromising eye for the details that shape everyday life.'], ['02', 'Transparency', 'A clear, honest view of what is known and what is still to come.'], ['03', 'Commitment', 'A long-term relationship with every customer and every place.']].map(([no, title, text]) => <div key={no} className="border-b border-[#c9c5bd] py-8 sm:border-r sm:border-b-0 sm:pl-7 sm:first:pl-0 sm:last:border-r-0"><span className="text-xs text-[#20afd1]">{no}</span><h3 className="mt-10 text-xl">{title}</h3><p className="mt-3 max-w-xs text-sm leading-6 text-slate-600">{text}</p></div>)}</div></PageFrame> }
 
+function InvestorCallout({ navigate }: { navigate: (view: View) => void }) { return <section className="mt-16 bg-[#0d4055] p-8 text-white md:p-12"><p className="eyebrow text-[#8de7e2]">For investors and diaspora buyers</p><div className="mt-4 flex flex-col justify-between gap-8 lg:flex-row lg:items-end"><div><h2 className="max-w-2xl font-serif text-4xl leading-none md:text-5xl">A clear route from interest<br /><em>to ownership.</em></h2><p className="mt-5 max-w-xl text-sm leading-6 text-white/70">Understand the expected process, payment milestones, documentation, and the people supporting your decision.</p></div><button onClick={() => navigate('investor')} className="btn-primary self-start">Explore the investor journey <ArrowRight size={16} /></button></div></section> }
+
+function InvestorPage({ navigate }: { navigate: (view: View) => void }) { const steps = [['01', 'Discover', 'Review the published project, availability, payment options, and verified progress.'], ['02', 'Connect', 'Speak with a consultant, book a private viewing, and confirm the home that fits your plans.'], ['03', 'Reserve', 'Agree the reservation terms, deposit schedule, and documentation before committing.'], ['04', 'Own', 'Track construction, payments, documents, and handover through your private client portal.']]; return <PageFrame eyebrow="The investor journey" title={<>Invest with<br /><em>clearer steps.</em></>} intro="Whether you are close to Nyali or investing from abroad, NBG is designed to make the journey visible, considered, and accountable."><div className="mt-14 grid gap-4 md:grid-cols-2">{steps.map(([number, title, text]) => <article key={number} className="border border-[#a9d9d8] bg-[#eefbf9] p-7 md:p-9"><span className="text-xs text-[#20afd1]">{number}</span><h2 className="mt-10 font-serif text-4xl text-[#123b4b]">{title}</h2><p className="mt-4 max-w-sm text-sm leading-6 text-slate-600">{text}</p></article>)}</div><section className="mt-14 grid gap-10 border-y border-[#c9c5bd] py-10 lg:grid-cols-[1fr_1fr]"><div><p className="eyebrow text-[#087f88]">Payment planning</p><h2 className="mt-4 font-serif text-4xl text-[#123b4b]">Plan the commitment<br /><em>before the decision.</em></h2></div><div className="grid gap-4 text-sm text-slate-600"><p><strong className="text-[#123b4b]">Reservation:</strong> Confirm the selected home and agreed reservation terms.</p><p><strong className="text-[#123b4b]">Deposit:</strong> Follow the documented deposit schedule shared by your consultant.</p><p><strong className="text-[#123b4b]">Progress payments:</strong> Track agreed milestones and receipts in your private portal.</p><p><strong className="text-[#123b4b]">Handover:</strong> Receive completion guidance, documentation, and next-step support.</p></div></section><button onClick={() => navigate('contact')} className="btn-primary mt-10">Speak with an investment consultant <ArrowRight size={16} /></button></PageFrame>; }
+
+function VerifyDocumentPage({ code }: { code: string }) { const [result, setResult] = useState<{ title: string; category: string; document_ref: string; verification_code: string; content_hash: string; generated_at: string } | null>(null); const [loading, setLoading] = useState(true); useEffect(() => { void supabase.rpc('verify_client_document', { code }).then(({ data }) => { setResult((data?.[0] ?? null) as typeof result); setLoading(false); }); }, [code]); return <PageFrame eyebrow="Document verification" title={result ? <>Document<br /><em>verified.</em></> : <>Check a document<br /><em>with NBG.</em></>} intro="Use the verification code printed on an NBG-generated PDF to confirm that it exists in the NBG document registry."><div className="mt-14 max-w-2xl border border-[#a9d9d8] bg-[#eefbf9] p-7 md:p-10">{loading ? <p className="text-sm text-slate-500">Checking the NBG registry...</p> : result ? <><div className="flex items-center gap-3 text-[#2e6b3e]"><Check size={20} /><p className="eyebrow">Authenticity record found</p></div><h2 className="mt-5 font-serif text-4xl text-[#123b4b]">{result.title}</h2><div className="mt-7 grid gap-5 border-y border-[#a9d9d8] py-6 sm:grid-cols-2"><div><p className="eyebrow text-slate-500">Reference</p><p className="mt-2 text-sm">{result.document_ref}</p></div><div><p className="eyebrow text-slate-500">Type</p><p className="mt-2 text-sm">{result.category}</p></div><div><p className="eyebrow text-slate-500">Issued</p><p className="mt-2 text-sm">{new Date(result.generated_at).toLocaleString()}</p></div><div><p className="eyebrow text-slate-500">Integrity hash</p><p className="mt-2 break-all text-xs text-slate-500">{result.content_hash}</p></div></div><p className="mt-6 text-sm leading-6 text-slate-600">This confirms that the document reference and verification code are registered by Next Bridge Group. Confirm financial commitments directly with an authorized NBG representative.</p></> : <><p className="text-sm text-[#a55445]">No matching document was found for this verification code.</p><p className="mt-4 text-sm leading-6 text-slate-600">Do not make a payment based on an unverified document. Contact NBG using the official phone or WhatsApp details on this website.</p></>}</div></PageFrame>; }
+
+function LegalPage({ kind }: { kind: 'privacy' | 'terms' }) { const privacy = kind === 'privacy'; return <PageFrame eyebrow={privacy ? 'Your information' : 'Working together'} title={privacy ? <>Privacy<br /><em>at NBG.</em></> : <>Terms of<br /><em>engagement.</em></>} intro={privacy ? 'We use the information you share to respond to enquiries, arrange viewings, provide client services, and improve the NBG experience.' : 'These practical terms describe how enquiries, project information, pricing, availability, and client conversations should be understood.'}><div className="mt-14 max-w-3xl space-y-10 text-sm leading-7 text-slate-600"><section><h2 className="font-serif text-3xl text-[#123b4b]">Verified information</h2><p className="mt-3">Project status, availability, pricing, imagery, and completion dates are published by the NBG team and may change as information is verified. Please confirm the latest details with a consultant before making a financial decision.</p></section><section><h2 className="font-serif text-3xl text-[#123b4b]">{privacy ? 'How we use enquiries' : 'Enquiries and reservations'}</h2><p className="mt-3">{privacy ? 'Name, phone, email, preferences, and messages are used to respond to your request. We do not sell enquiry information. You may ask the team to correct or remove your details.' : 'An enquiry or viewing request does not create a reservation or purchase contract. Reservations, payment schedules, and agreements become binding only when confirmed in writing by authorized NBG representatives.'}</p></section><section><h2 className="font-serif text-3xl text-[#123b4b]">Contact</h2><p className="mt-3">Next Bridge Group Limited · Nyali, Mombasa, Kenya · +254 741 121 575 · hello@nextbridgegroup.com</p></section></div></PageFrame>; }
+
 function EnquiryPage({ mode, navigate }: { mode: 'contact' | 'viewing'; navigate: (view: View) => void }) {
   const [submitted, setSubmitted] = useState(false);
+  const [reference, setReference] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -355,13 +493,17 @@ function EnquiryPage({ mode, navigate }: { mode: 'contact' | 'viewing'; navigate
     setLoading(true);
     setError('');
     const form = new FormData(event.currentTarget);
+    const referenceId = `NBG-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${Math.random().toString(36).slice(2, 7).toUpperCase()}`;
+    const viewingDetails = mode === 'viewing'
+      ? `Preferred date: ${form.get('date') || 'Not specified'}\nPreferred time: ${form.get('time') || 'Not specified'}\nApartment type: ${form.get('apartment') || 'Not specified'}`
+      : '';
     const { error: insertError } = await supabase.from('leads').insert({
       name: form.get('name'),
       phone: form.get('phone'),
       email: form.get('email'),
       project: 'Next Bridge Residences',
       source: mode === 'viewing' ? 'private-viewing' : 'contact-form',
-      message: form.get('message'),
+      message: [`Reference: ${referenceId}`, viewingDetails, String(form.get('message') || '')].filter(Boolean).join('\n\n'),
       status: 'NEW',
     });
     setLoading(false);
@@ -369,6 +511,7 @@ function EnquiryPage({ mode, navigate }: { mode: 'contact' | 'viewing'; navigate
       setError('We could not send your request just now. Please try WhatsApp or call the team directly.');
       return;
     }
+    setReference(referenceId);
     setSubmitted(true);
   };
 
@@ -385,6 +528,7 @@ function EnquiryPage({ mode, navigate }: { mode: 'contact' | 'viewing'; navigate
               <span className="flex h-12 w-12 items-center justify-center rounded-full bg-[#dceeea] text-[#3a6f69]"><Check /></span>
               <h2 className="mt-7 font-serif text-5xl">Thank you.</h2>
               <p className="mt-5 max-w-md text-sm leading-6 text-slate-600">Your request is with the NBG team. We will be in touch using the details you shared.</p>
+              <p className="mt-5 border border-[#a9d9d8] bg-[#eefbf9] px-4 py-3 text-sm text-[#087f88]">Reference: <strong>{reference}</strong></p>
               <button onClick={() => navigate('home')} className="link-arrow mt-8 self-start">Return home <ArrowRight size={16} /></button>
             </div>
           ) : (
@@ -407,8 +551,8 @@ function EnquiryPage({ mode, navigate }: { mode: 'contact' | 'viewing'; navigate
         <div>
           <div className="border-t border-[#c9c5bd] pt-6">
             <p className="eyebrow text-[#20afd1]">Prefer a direct line?</p>
-            <a href="tel:+254741121575" className="mt-5 flex items-center gap-3 text-2xl hover:text-[#20afd1]"><Phone size={20} /> +254 741 121 575</a>
-            <a href="https://wa.me/254741121575" className="mt-4 flex items-center gap-3 text-sm text-slate-600 hover:text-[#20afd1]"><MessageCircle size={18} /> Chat on WhatsApp</a>
+            <a href="tel:+254741121575" onClick={() => trackContactEvent('phone', mode)} className="mt-5 flex items-center gap-3 text-2xl hover:text-[#20afd1]"><Phone size={20} /> +254 741 121 575</a>
+            <a href="https://wa.me/254741121575" onClick={() => trackContactEvent('whatsapp', mode)} className="mt-4 flex items-center gap-3 text-sm text-slate-600 hover:text-[#20afd1]"><MessageCircle size={18} /> Chat on WhatsApp</a>
           </div>
           <div className="mt-12 border-t border-[#c9c5bd] pt-6">
             <p className="eyebrow text-[#20afd1]">Our office</p>
@@ -512,7 +656,7 @@ function UnitModal({ unit, close, navigate }: { unit: Unit; close: () => void; n
 
 function WhatsAppButton() {
   return (
-    <a href="https://wa.me/254741121575" className="whatsapp-float flex items-center justify-center text-white shadow-lg transition hover:-translate-y-1" aria-label="Chat with a property consultant" title="Chat with a consultant">
+    <a href="https://wa.me/254741121575" onClick={() => trackContactEvent('whatsapp', 'floating-button')} className="whatsapp-float flex items-center justify-center text-white shadow-lg transition hover:-translate-y-1" aria-label="Chat with a property consultant" title="Chat with a consultant">
       <MessageCircle size={23} strokeWidth={2.2} />
     </a>
   );
@@ -546,6 +690,8 @@ function Footer({ navigate }: { navigate: (view: View) => void }) {
             <p className="eyebrow text-[#087f88]">Connect</p>
             <div className="mt-6 grid gap-4 text-sm text-[#41636a]">
               <button onClick={() => navigate('contact')} className="flex items-center gap-2 text-left hover:text-[#087f88]"><Phone size={15} /> Contact</button>
+              <a href="tel:+254741121575" onClick={() => trackContactEvent('phone', 'footer')} className="flex items-center gap-2 text-left hover:text-[#087f88]"><Phone size={15} /> Call +254 741 121 575</a>
+              <a href="https://wa.me/254741121575" onClick={() => trackContactEvent('whatsapp', 'footer')} className="flex items-center gap-2 text-left hover:text-[#087f88]"><MessageCircle size={15} /> WhatsApp</a>
               <button onClick={() => navigate('viewing')} className="flex items-center gap-2 text-left hover:text-[#087f88]"><CalendarDays size={15} /> Book a viewing</button>
               <button onClick={() => navigate('portal')} className="flex items-center gap-2 text-left hover:text-[#087f88]"><ShieldCheck size={15} /> Client portal</button>
               <span className="flex items-center gap-2"><Instagram size={15} /> Instagram</span>
@@ -554,7 +700,7 @@ function Footer({ navigate }: { navigate: (view: View) => void }) {
         </div>
         <div className="flex flex-col justify-between gap-6 pt-7 text-[10px] uppercase tracking-[.14em] text-[#62868b] sm:flex-row">
           <span>© 2026 Next Bridge Group Limited</span>
-          <div className="flex gap-5"><span>Privacy</span><span>Terms</span></div>
+          <div className="flex gap-5"><button onClick={() => navigate('privacy')}>Privacy</button><button onClick={() => navigate('terms')}>Terms</button></div>
         </div>
       </div>
     </footer>

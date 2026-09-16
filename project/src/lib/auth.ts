@@ -5,7 +5,16 @@ export type AdminUser = {
   id: string;
   email: string;
   role: string;
+  full_name?: string | null;
+  phone?: string | null;
+  preferred_location?: string | null;
+  investment_budget?: string | null;
+  notes?: string | null;
 };
+
+function normalizeRole(role: string | null | undefined): string {
+  return String(role ?? 'client').trim().toLowerCase();
+}
 
 export async function fetchProfile(userId: string): Promise<AdminUser | null> {
   const { data, error } = await supabase
@@ -13,7 +22,7 @@ export async function fetchProfile(userId: string): Promise<AdminUser | null> {
     .select('id, role')
     .eq('id', userId)
     .maybeSingle();
-  if (data) return { id: data.id, email: '', role: data.role };
+  if (data) return { id: data.id, email: '', role: normalizeRole(data.role) };
   if (error && error.code !== 'PGRST116') return null;
 
   const { data: created, error: createError } = await supabase
@@ -22,7 +31,7 @@ export async function fetchProfile(userId: string): Promise<AdminUser | null> {
     .select('id, role')
     .single();
   if (createError || !created) return null;
-  return { id: created.id, email: '', role: created.role };
+  return { id: created.id, email: '', role: normalizeRole(created.role) };
 }
 
 export async function signIn(email: string, password: string) {
