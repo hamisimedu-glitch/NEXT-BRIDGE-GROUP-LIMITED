@@ -1,6 +1,6 @@
 import { FormEvent, useCallback, useEffect, useState } from 'react';
-import { AlertCircle, ArrowRight, BarChart3, Bell, Building2, Calculator, CalendarDays, Check, CircleCheck, Clock3, FileText, FileDown, Home, LockKeyhole, MapPin, Menu, MessageCircle, Receipt, Send, Settings, ShieldCheck, UserRound, X } from 'lucide-react';
-import { sendMagicLink, sendPasswordReset, signInWithPassword, signUp, updatePassword, type AdminUser } from '@/lib/auth';
+import { AlertCircle, ArrowRight, BarChart3, BedDouble, Bell, Building2, Calculator, CalendarDays, Check, ChevronDown, ChevronLeft, ChevronRight, CircleCheck, Clock3, Eye, EyeOff, FileText, FileDown, Grid2X2, Heart, Home, List, LockKeyhole, Mail, MapPin, Menu, MessageCircle, Phone, Receipt, Ruler, Search, Send, Settings, ShieldCheck, UserRound, X } from 'lucide-react';
+import { sendMagicLink, sendPasswordReset, signInWithGoogle, signInWithPassword, signUp, updatePassword, type AdminUser } from '@/lib/auth';
 import { supabase } from '@/lib/supabase';
 import type { ConstructionUpdate, Investment, Project, ProjectUnit, Realtor } from '@/lib/types';
 import LocationMap from '@/LocationMap';
@@ -30,21 +30,51 @@ function kenyaCalendarDate() {
 }
 
 export function ClientPortalSignIn() {
-  const [mode, setMode] = useState<'magic' | 'password' | 'signup' | 'reset'>(() => localStorage.getItem('nbg_pending_purchase') ? 'signup' : 'magic');
+  const [mode, setMode] = useState<'signin' | 'magic' | 'signup' | 'reset' | 'created'>(() => localStorage.getItem('nbg_pending_purchase') ? 'signup' : 'signin');
+  const [step, setStep] = useState<1 | 2>(1);
   const [email, setEmail] = useState('');
+  const [fullName, setFullName] = useState('');
+  const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [notice, setNotice] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [acceptedTerms, setAcceptedTerms] = useState(false);
 
+  const changeMode = (nextMode: 'signin' | 'magic' | 'signup' | 'reset') => {
+    setMode(nextMode);
+    setStep(1);
+    setNotice('');
+    setError('');
+  };
+
+  const continueWithGoogle = async () => {
+    if (mode === 'signup' && !acceptedTerms) {
+      setError('Please accept the NBG Privacy Notice and Terms of Engagement to continue.');
+      return;
+    }
+    setLoading(true);
+    setError('');
+    const { error: oauthError } = await signInWithGoogle();
+    if (oauthError) {
+      setLoading(false);
+      setError(oauthError.message || 'Google sign-in is temporarily unavailable. Please use email instead.');
+    }
+  };
+
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    setLoading(true);
     setError('');
     setNotice('');
 
+    if (mode === 'signup' && step === 1) {
+      setStep(2);
+      return;
+    }
+
+    setLoading(true);
     const trimmedEmail = email.trim();
 
     if (mode === 'signup') {
@@ -64,7 +94,7 @@ export function ClientPortalSignIn() {
         return;
       }
 
-      const result = await signUp(trimmedEmail, password, 'client');
+      const result = await signUp(trimmedEmail, password, 'client', { full_name: fullName.trim(), phone: phone.trim() });
       setLoading(false);
 
       if (result.error) {
@@ -72,18 +102,14 @@ export function ClientPortalSignIn() {
         return;
       }
 
-      setNotice(localStorage.getItem('nbg_pending_purchase') ? 'Account created. Confirm your email, then sign in; your selected home will be ready in the purchase workspace.' : 'Account created. Check your email to confirm your address, then sign in to your portal.');
-      setMode('password');
+      setMode('created');
+      setNotice(localStorage.getItem('nbg_pending_purchase') ? `Confirm your email at ${trimmedEmail}. Your selected home will be waiting in the purchase workspace.` : `Check ${trimmedEmail} to confirm your email and finish creating your account.`);
       setPassword('');
       setConfirmPassword('');
       return;
     }
 
-    const result = mode === 'magic'
-      ? await sendMagicLink(trimmedEmail)
-      : mode === 'reset'
-        ? await sendPasswordReset(trimmedEmail)
-        : await signInWithPassword(trimmedEmail, password);
+    const result = mode === 'magic' ? await sendMagicLink(trimmedEmail) : mode === 'reset' ? await sendPasswordReset(trimmedEmail) : await signInWithPassword(trimmedEmail, password);
 
     setLoading(false);
 
@@ -92,62 +118,57 @@ export function ClientPortalSignIn() {
       return;
     }
 
-    setNotice(mode === 'password' ? 'Signed in. Loading your portal...' : mode === 'reset' ? 'Password reset instructions are on their way.' : 'Check your inbox for your secure sign-in link.');
+    setNotice(mode === 'signin' ? 'Signed in. Loading your portal...' : mode === 'reset' ? 'Password reset instructions are on their way.' : 'Check your inbox for your secure sign-in link.');
   };
 
   return (
-    <main className="page-top section-pad bg-[#f4f1eb]">
-      <div className="mx-auto max-w-xl">
-        <div className="border border-[#a9d9d8] bg-[#eefbf9] p-7 md:p-12">
-          <p className="eyebrow text-[#087f88]">Secure client portal</p>
-          <h1 className="mt-5 font-serif text-5xl leading-none text-[#123b4b]">Your project,<br /><em>in view.</em></h1>
-          <div className="mt-8 flex border-b border-[#a9d9d8] text-[10px] uppercase tracking-[.12em]">
-            {(['magic', 'password', 'signup', 'reset'] as const).map((item) => (
-              <button key={item} onClick={() => setMode(item)} className={`border-b-2 px-3 py-3 ${mode === item ? 'border-[#19c6c9] text-[#087f88]' : 'border-transparent text-slate-500'}`}>
-                {item === 'magic' ? 'Magic link' : item === 'password' ? 'Password' : item === 'signup' ? 'Sign up' : 'Reset'}
-              </button>
-            ))}
-          </div>
+    <main className="client-auth-page">
+      <div className="client-auth-shell">
+        <section className="client-auth-visual" aria-label="Next Bridge Group client portal">
+          <div className="client-auth-brand"><img className="client-auth-logo" src="/NBG_LOGO-removebg-preview.png" alt="" /><span><strong>NBG</strong><small>A home. An investment. A legacy.</small></span></div>
+          <div className="client-auth-visual-copy"><p className="eyebrow">Welcome to NBG</p><h1>{mode === 'signup' ? <>Your next chapter<br />starts here.</> : <>Luxury homes.<br />Lasting value.</>}</h1><p>Access your project, track progress, make payments and stay connected with your NBG team, all in one place.</p></div>
+          <div className="client-auth-benefits"><p><Check size={15} /> Track your project progress</p><p><Check size={15} /> Make secure payments</p><p><Check size={15} /> Access your documents</p></div>
+          <p className="client-auth-tagline">A home. An investment. A legacy.</p>
+        </section>
 
-          <form onSubmit={submit} className="mt-8 grid gap-5">
-            <label>
-              <span className="eyebrow mb-2 block text-slate-500">Email address</span>
-              <input value={email} onChange={(event) => setEmail(event.target.value)} type="email" required className="field" placeholder="you@example.com" />
-            </label>
+        <section className="client-auth-panel">
+          {mode === 'created' ? <div className="client-auth-success"><span className="client-auth-success-icon"><Check size={28} /></span><p className="eyebrow">Account created</p><h2>One last step.</h2><p>{notice}</p><button type="button" onClick={() => changeMode('signin')} className="client-auth-primary">Continue to sign in <ArrowRight size={16} /></button></div> : <>
+            <div className="client-auth-heading"><p className="eyebrow">{mode === 'signup' ? 'Join NBG' : mode === 'reset' ? 'Account recovery' : 'Welcome back'}</p><h2>{mode === 'signup' ? 'Create your account' : mode === 'reset' ? 'Reset your password' : mode === 'magic' ? 'Sign in with a link' : <>Sign in to your<br />NBG account</>}</h2><p>{mode === 'signup' ? 'Join NBG and take the next step towards your dream home.' : mode === 'reset' ? 'We’ll email you a secure password reset link.' : 'Access your projects, payments and documents in a few clicks.'}</p></div>
 
-            {(mode === 'password' || mode === 'signup') && (
-              <label>
-                <span className="eyebrow mb-2 block text-slate-500">{mode === 'signup' ? 'Create password' : 'Password'}</span>
-                <input value={password} onChange={(event) => setPassword(event.target.value)} type="password" required minLength={8} className="field" placeholder="At least 8 characters" />
-              </label>
-            )}
+            {mode === 'signup' && <div className="client-auth-steps" aria-label={`Registration step ${step} of 2`}><span className={step >= 1 ? 'is-active' : ''}>1 <small>Your details</small></span><i /><span className={step >= 2 ? 'is-active' : ''}>2 <small>Secure account</small></span></div>}
 
-            {mode === 'signup' && (
-              <label>
-                <span className="eyebrow mb-2 block text-slate-500">Confirm password</span>
-                <input value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} type="password" required minLength={8} className="field" placeholder="Repeat your password" />
-              </label>
-            )}
+            <form onSubmit={submit} className="client-auth-form">
+              {mode === 'signup' && step === 1 && <>
+                <label className="client-auth-field"><UserRound size={15} /><span className="sr-only">Full name</span><input value={fullName} onChange={(event) => setFullName(event.target.value)} autoComplete="name" required placeholder="Full name" /></label>
+                <label className="client-auth-field"><Mail size={15} /><span className="sr-only">Email address</span><input value={email} onChange={(event) => setEmail(event.target.value)} type="email" autoComplete="email" required placeholder="Email address" /></label>
+                <label className="client-auth-field"><Phone size={15} /><span className="sr-only">Phone number</span><input value={phone} onChange={(event) => setPhone(event.target.value)} type="tel" autoComplete="tel" required placeholder="Phone number" /></label>
+              </>}
 
-            {mode === 'signup' && <label className="flex items-start gap-3 text-xs leading-5 text-slate-500"><input checked={acceptedTerms} onChange={(event) => setAcceptedTerms(event.target.checked)} type="checkbox" className="mt-1 accent-[#087f88]" required /><span>I agree to the NBG <a href="/privacy" className="text-[#087f88] underline">Privacy Notice</a> and <a href="/terms" className="text-[#087f88] underline">Terms of Engagement</a>.</span></label>}
+              {(mode === 'signin' || mode === 'magic' || mode === 'reset' || (mode === 'signup' && step === 2)) && <label className="client-auth-field"><Mail size={15} /><span className="sr-only">Email address</span><input value={email} onChange={(event) => setEmail(event.target.value)} type="email" autoComplete="email" required placeholder="Email address" /></label>}
 
-            {notice && <p className="text-sm text-[#087f88]">{notice}</p>}
-            {error && <p className="text-sm text-[#a55445]">{error}</p>}
+              {mode === 'signin' && <label className="client-auth-field"><LockKeyhole size={15} /><span className="sr-only">Password</span><input value={password} onChange={(event) => setPassword(event.target.value)} type={showPassword ? 'text' : 'password'} autoComplete="current-password" required placeholder="Password" /><button type="button" onClick={() => setShowPassword((visible) => !visible)} aria-label={showPassword ? 'Hide password' : 'Show password'}>{showPassword ? <EyeOff size={15} /> : <Eye size={15} />}</button></label>}
+              {mode === 'signup' && step === 2 && <>
+                <label className="client-auth-field"><LockKeyhole size={15} /><span className="sr-only">Create password</span><input value={password} onChange={(event) => setPassword(event.target.value)} type={showPassword ? 'text' : 'password'} autoComplete="new-password" required minLength={8} placeholder="Create a strong password" /><button type="button" onClick={() => setShowPassword((visible) => !visible)} aria-label={showPassword ? 'Hide password' : 'Show password'}>{showPassword ? <EyeOff size={15} /> : <Eye size={15} />}</button></label>
+                <label className="client-auth-field"><LockKeyhole size={15} /><span className="sr-only">Confirm password</span><input value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} type={showPassword ? 'text' : 'password'} autoComplete="new-password" required minLength={8} placeholder="Confirm password" /></label>
+                <label className="client-auth-terms"><input checked={acceptedTerms} onChange={(event) => setAcceptedTerms(event.target.checked)} type="checkbox" required /><span>I agree to the NBG <a href="/privacy">Privacy Notice</a> and <a href="/terms">Terms of Engagement</a>.</span></label>
+              </>}
 
-            <button disabled={loading} className="btn-primary justify-center disabled:opacity-60">
-              {loading
-                ? 'Please wait...'
-                : mode === 'magic'
-                  ? 'Email me a magic link'
-                  : mode === 'reset'
-                    ? 'Send reset instructions'
-                    : mode === 'signup'
-                      ? 'Create my client account'
-                      : 'Sign in securely'}
-              <ArrowRight size={16} />
-            </button>
-          </form>
-        </div>
+              {mode === 'signup' && step === 1 && <label className="client-auth-terms"><input checked={acceptedTerms} onChange={(event) => setAcceptedTerms(event.target.checked)} type="checkbox" /><span>I agree to the NBG <a href="/privacy">Privacy Notice</a> and <a href="/terms">Terms of Engagement</a>.</span></label>}
+              {mode === 'signin' && <button type="button" className="client-auth-forgot" onClick={() => changeMode('reset')}>Forgot password?</button>}
+              {notice && <p role="status" className="client-auth-notice">{notice}</p>}
+              {error && <p role="alert" className="client-auth-error">{error}</p>}
+
+              <div className="client-auth-actions">
+                {mode === 'signup' && step === 2 && <button type="button" onClick={() => { setStep(1); setError(''); }} className="client-auth-back"><ChevronLeft size={16} /> Back</button>}
+                <button disabled={loading} className="client-auth-primary disabled:opacity-60">{loading ? 'Please wait...' : mode === 'signup' ? step === 1 ? 'Continue' : 'Create account' : mode === 'signin' ? 'Sign in' : mode === 'magic' ? 'Email me a sign-in link' : 'Send reset link'} <ArrowRight size={16} /></button>
+              </div>
+            </form>
+
+            {mode !== 'reset' && !(mode === 'signup' && step === 2) && <><div className="client-auth-divider"><span>Or continue with</span></div><button type="button" disabled={loading} onClick={() => void continueWithGoogle()} className="client-auth-google"><span aria-hidden="true">G</span> Continue with Google</button></>}
+            <div className="client-auth-switch">{mode === 'signup' ? <>Already have an account? <button type="button" onClick={() => changeMode('signin')}>Sign in</button></> : mode === 'reset' ? <>Remembered your password? <button type="button" onClick={() => changeMode('signin')}>Sign in</button></> : <>Don’t have an account? <button type="button" onClick={() => changeMode('signup')}>Create one</button></>}</div>
+            {mode === 'signin' && <button type="button" className="client-auth-magic" onClick={() => changeMode('magic')}>Email me a sign-in link instead</button>}
+          </>}
+        </section>
       </div>
     </main>
   );
@@ -183,6 +204,7 @@ function ClientPortal({ user, onSignOut, navigate }: { user: AdminUser; onSignOu
   const [notifications, setNotifications] = useState<ClientNotification[]>([]);
   const [purchaseReceipt, setPurchaseReceipt] = useState<PurchaseRequestReceipt | null>(null);
   const [portalError, setPortalError] = useState('');
+  const [homeSearch, setHomeSearch] = useState('');
   const [profile, setProfile] = useState<ClientProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [showInvestment, setShowInvestment] = useState(false);
@@ -205,7 +227,7 @@ function ClientPortal({ user, onSignOut, navigate }: { user: AdminUser; onSignOu
 
     const [stageResult, documentResult, projectDocumentResult, paymentResult, ticketResult, notificationResult, instructionsResult] = await Promise.all([
       supabase.from('client_reservation_stages').select('*').eq('user_id', user.id).order('created_at'),
-      supabase.from('client_documents').select('*').or(`user_id.eq.${user.id},is_global.eq.true`).order('created_at', { ascending: false }),
+      supabase.from('project_units').select('*').eq('is_published', true).order('unit_number'),
       supabase.from('project_investment_documents').select('id,project_id,title,category,storage_path,created_at,is_public,document_ref,verification_code,content_hash').eq('is_published', true).order('created_at', { ascending: false }),
       supabase.from('client_payment_schedule').select('*').eq('user_id', user.id).order('due_date'),
       supabase.from('client_support_tickets').select('*').eq('user_id', user.id).order('created_at', { ascending: false }),
@@ -300,9 +322,9 @@ function ClientPortal({ user, onSignOut, navigate }: { user: AdminUser; onSignOu
   const active = sidebarItems.find((item) => item.id === section) ?? sidebarItems[0];
   const mobileNavItems: { id: PortalSection; label: string; icon: typeof Home }[] = [{ id: 'overview', label: 'Home', icon: Home }, { id: 'progress', label: 'Project', icon: Building2 }, { id: 'payments', label: 'Payments', icon: Receipt }, { id: 'resources', label: 'Docs', icon: FileText }, { id: 'availability', label: 'More', icon: Menu }];
 
-  const content = section === 'overview' ? <OverviewContent user={user} profile={profile} projects={projects} updates={updates} units={units} investments={investments} stages={stages} payments={payments} notifications={notifications} documents={documents} setSection={selectSection} /> : section === 'progress' ? <ProgressContent updates={updates} /> : section === 'payments' ? <ClientPaymentsView user={user} payments={payments} purchaseReceipt={purchaseReceipt} paymentInstructions={purchasePaymentInstructions} onDismissPurchase={() => setPurchaseReceipt(null)} /> : section === 'investments' ? <InvestmentContent projects={projects} investments={investments} showInvestment={showInvestment} setShowInvestment={setShowInvestment} projectId={projectId} setProjectId={setProjectId} amount={amount} setAmount={setAmount} plan={plan} setPlan={setPlan} submitInvestment={submitInvestment} realtor={realtor} setRealtor={setRealtor} user={user} /> : section === 'availability' ? <AvailabilityContent units={units} projects={projects} pendingUnitId={pendingPurchaseUnitId} paymentInstructions={purchasePaymentInstructions} onPurchaseComplete={async (receipt) => { localStorage.removeItem('nbg_pending_purchase'); setPendingPurchaseUnitId(''); setPurchaseReceipt(receipt); setSection('payments'); await load(); }} /> : section === 'resources' ? <ResourcesContent navigate={navigate} documents={documents} projectDocuments={projectDocuments} projects={projects} tickets={tickets} setTickets={setTickets} user={user} /> : <ProfileContent user={user} recovery={recovery} profile={profile} onSaveProfile={saveProfile} onSignOut={onSignOut} />;
+  const content = section === 'overview' ? <OverviewContent user={user} profile={profile} projects={projects} updates={updates} units={units} investments={investments} stages={stages} payments={payments} notifications={notifications} documents={documents} setSection={selectSection} /> : section === 'progress' ? <ProgressContent updates={updates} /> : section === 'payments' ? <ClientPaymentsView user={user} payments={payments} purchaseReceipt={purchaseReceipt} paymentInstructions={purchasePaymentInstructions} onDismissPurchase={() => setPurchaseReceipt(null)} /> : section === 'investments' ? <InvestmentContent projects={projects} investments={investments} showInvestment={showInvestment} setShowInvestment={setShowInvestment} projectId={projectId} setProjectId={setProjectId} amount={amount} setAmount={setAmount} plan={plan} setPlan={setPlan} submitInvestment={submitInvestment} realtor={realtor} setRealtor={setRealtor} user={user} /> : section === 'availability' ? <AvailabilityContent units={units} projects={projects} pendingUnitId={pendingPurchaseUnitId} search={homeSearch} onSearchChange={setHomeSearch} onPurchaseComplete={async (receipt) => { localStorage.removeItem('nbg_pending_purchase'); setPendingPurchaseUnitId(''); setPurchaseReceipt(receipt); setSection('payments'); await load(); }} /> : section === 'resources' ? <ResourcesContent navigate={navigate} documents={documents} projectDocuments={projectDocuments} projects={projects} tickets={tickets} setTickets={setTickets} user={user} /> : <ProfileContent user={user} recovery={recovery} profile={profile} onSaveProfile={saveProfile} onSignOut={onSignOut} />;
 
-  return <div className="portal-shell"><aside className={`portal-sidebar ${sidebarOpen ? 'portal-sidebar-open' : ''}`}><div className="portal-brand"><span className="brand-mark brand-mark-inverse"><img src="/NBG_LOGO-removebg-preview.png" alt="Next Bridge Group" /></span><div><p className="text-[10px] font-bold tracking-[.2em]">NBG CLIENT</p><p className="text-[8px] tracking-[.16em] text-white/45">PRIVATE WORKSPACE</p></div><button onClick={() => setSidebarOpen(false)} className="portal-close md:hidden" aria-label="Close portal menu"><X size={18} /></button></div><nav className="portal-nav">{['Workspace', 'Plan', 'Connect'].map((group) => <div key={group} className="portal-nav-group"><p>{group}</p>{sidebarItems.filter((item) => item.group === group).map(({ id, label, icon: Icon }) => <button key={id} onClick={() => selectSection(id)} className={section === id ? 'portal-nav-active' : ''}><Icon size={16} /><span>{label}</span>{section === id && <ArrowRight size={13} className="ml-auto" />}</button>)}</div>)}</nav><button onClick={onSignOut} className="portal-signout">Sign out</button></aside><div className="client-mobile-header md:hidden"><button type="button" onClick={() => setSidebarOpen(true)} aria-label="Open portal menu"><Menu size={19} /></button><div className="client-mobile-brand"><img src="/NBG_LOGO-removebg-preview.png" alt="" /><span>NBG</span></div><DashboardInbox user={user} mode="client" /></div><div className="portal-main"><header className="portal-topbar"><div><p className="eyebrow text-[#8de7e2]">{active.group}</p><h1>{active.label}</h1></div><div className="flex items-center gap-3"><DashboardInbox user={user} mode="client" /><div className="hidden items-center gap-3 sm:flex"><span className="portal-user-dot" /> <span className="text-xs text-slate-500">{user.email}</span><button onClick={() => navigate('contact')} className="btn-primary !px-4 !py-3">Speak with the team</button></div></div></header><main className="portal-content">{portalError && <div className="mb-6 flex items-start justify-between gap-4 border border-[#e4b8ad] bg-[#fff7f4] p-4 text-sm text-[#7a4e2e]"><span className="flex items-center gap-2"><AlertCircle size={17} />{portalError}</span><button onClick={() => void load()} className="font-semibold underline">Retry</button></div>}{recovery && <PasswordSetup onDone={() => window.history.replaceState({}, '', '/portal')} />}{loading ? <div className="portal-loading"><span /> Loading your private workspace...</div> : <div className="portal-reveal">{content}</div>}</main></div><nav className="client-mobile-nav md:hidden" aria-label="Client portal navigation">{mobileNavItems.map(({ id, label, icon: Icon }) => <button key={id} type="button" onClick={() => selectSection(id)} aria-current={section === id ? 'page' : undefined} className={section === id ? 'is-active' : ''}><Icon size={18} /><span>{label}</span></button>)}</nav></div>;
+  return <div className="portal-shell"><aside className={`portal-sidebar ${sidebarOpen ? 'portal-sidebar-open' : ''}`}><div className="portal-brand"><span className="brand-mark brand-mark-inverse"><img src="/NBG_LOGO-removebg-preview.png" alt="Next Bridge Group" /></span><div><p className="text-[10px] font-bold tracking-[.2em]">NBG CLIENT</p><p className="text-[8px] tracking-[.16em] text-white/45">PRIVATE WORKSPACE</p></div><button onClick={() => setSidebarOpen(false)} className="portal-close md:hidden" aria-label="Close portal menu"><X size={18} /></button></div><nav className="portal-nav">{['Workspace', 'Plan', 'Connect'].map((group) => <div key={group} className="portal-nav-group"><p>{group}</p>{sidebarItems.filter((item) => item.group === group).map(({ id, label, icon: Icon }) => <button key={id} onClick={() => selectSection(id)} className={section === id ? 'portal-nav-active' : ''}><Icon size={16} /><span>{label}</span>{section === id && <ArrowRight size={13} className="ml-auto" />}</button>)}</div>)}</nav><button onClick={onSignOut} className="portal-signout">Sign out</button></aside><div className="client-mobile-header md:hidden"><button type="button" onClick={() => setSidebarOpen(true)} aria-label="Open portal menu"><Menu size={19} /></button><div className="client-mobile-brand"><img src="/NBG_LOGO-removebg-preview.png" alt="" /><span>NBG</span></div><DashboardInbox user={user} mode="client" /></div><div className="portal-main"><header className={`portal-topbar ${section === 'availability' ? 'portal-topbar-homes' : ''}`}>{section === 'availability' ? <label className="homes-search homes-header-search"><Search size={15} /><input aria-label="Search homes, locations, or projects" value={homeSearch} onChange={(event) => setHomeSearch(event.target.value)} placeholder="Search for a home, location or project..." /></label> : <div><p className="eyebrow text-[#8de7e2]">{active.group}</p><h1>{active.label}</h1></div>}<div className="flex items-center gap-3"><DashboardInbox user={user} mode="client" /><div className="hidden items-center gap-3 sm:flex"><span className="portal-user-dot" /> <span className="text-xs text-slate-500">{user.full_name || user.email.split('@')[0]}</span><button onClick={() => navigate('contact')} className="btn-primary !px-4 !py-3">Speak with the team</button></div></div></header><main className={`portal-content ${section === 'availability' ? 'portal-content-homes' : ''}`}>{portalError && <div className="mb-6 flex items-start justify-between gap-4 border border-[#e4b8ad] bg-[#fff7f4] p-4 text-sm text-[#7a4e2e]"><span className="flex items-center gap-2"><AlertCircle size={17} />{portalError}</span><button onClick={() => void load()} className="font-semibold underline">Retry</button></div>}{recovery && <PasswordSetup onDone={() => window.history.replaceState({}, '', '/portal')} />}{loading ? <div className="portal-loading"><span /> Loading your private workspace...</div> : <div className="portal-reveal">{content}</div>}</main></div><nav className="client-mobile-nav md:hidden" aria-label="Client portal navigation">{mobileNavItems.map(({ id, label, icon: Icon }) => <button key={id} type="button" onClick={() => selectSection(id)} aria-current={section === id ? 'page' : undefined} className={section === id ? 'is-active' : ''}><Icon size={18} /><span>{label}</span></button>)}</nav></div>;
 }
 
 function OverviewContent({ user, profile, projects, updates, units, investments, stages, payments, notifications, documents, setSection }: { user: AdminUser; profile: { id: string; full_name: string; phone: string; preferred_location: string; investment_budget: string; notes: string } | null; projects: Project[]; updates: ConstructionUpdate[]; units: ProjectUnit[]; investments: Investment[]; stages: ReservationStage[]; payments: ClientPayment[]; notifications: ClientNotification[]; documents: ClientDocument[]; setSection: (section: PortalSection) => void }) {
@@ -367,21 +389,53 @@ function ReservationTimeline({ stages }: { stages: ReservationStage[] }) { const
 
 function PortalStat({ label, value, detail }: { label: string; value: number; detail: string }) { const [expanded, setExpanded] = useState(false); return <button type="button" onClick={() => setExpanded((current) => !current)} className="portal-stat portal-stat-button"><div className="flex items-start justify-between gap-3"><p className="eyebrow text-[#087f88]">{label}</p><ArrowRight size={16} className={`portal-stat-arrow ${expanded ? 'rotate-90' : ''}`} /></div><p className="portal-stat-value">{value.toLocaleString()}</p><p className="mt-3 text-xs text-slate-500">{expanded ? `Open ${label.toLowerCase()} in the navigation for the full view.` : detail}</p></button>; }
 function ProgressContent({ updates }: { updates: ConstructionUpdate[] }) { return <section><div className="portal-section-heading"><div><p className="eyebrow text-[#087f88]">Verified feed</p><h2>Progress you can<br /><em>see and trust.</em></h2></div><span className="portal-live-badge">Live updates</span></div><div className="portal-timeline">{updates.map((update) => <article key={update.id}>{update.image_url ? <img src={update.image_url} alt={update.title} className="mb-4 h-40 w-full object-cover" /> : null}<span className="portal-timeline-dot">{update.progress_pct}%</span><div><p className="eyebrow text-slate-500">{new Date(update.posted_at).toLocaleDateString()}</p><h3>{update.title}</h3>{update.body && <p>{update.body}</p>}</div></article>)}{updates.length === 0 && <p className="text-sm text-slate-500">The NBG team has not published a construction update yet.</p>}</div></section>; }
-function AvailabilityContent({ units, projects, pendingUnitId, paymentInstructions, onPurchaseComplete }: { units: ProjectUnit[]; projects: Project[]; pendingUnitId: string; paymentInstructions: PurchasePaymentInstructions | null; onPurchaseComplete: (receipt: PurchaseRequestReceipt) => Promise<void> }) {
+function AvailabilityContent({ units, projects, pendingUnitId, search, onSearchChange, onPurchaseComplete }: { units: ProjectUnit[]; projects: Project[]; pendingUnitId: string; search: string; onSearchChange: (value: string) => void; onPurchaseComplete: (receipt: PurchaseRequestReceipt) => Promise<void> }) {
   const [selectedUnit, setSelectedUnit] = useState<ProjectUnit | null>(null);
+  const [locationFilter, setLocationFilter] = useState('All locations');
+  const [projectFilter, setProjectFilter] = useState('All Projects');
+  const [typeFilter, setTypeFilter] = useState('All types');
+  const [bedroomFilter, setBedroomFilter] = useState('Any bedrooms');
+  const [priceFilter, setPriceFilter] = useState('Any price');
+  const [sortOrder, setSortOrder] = useState('Featured');
+  const [layout, setLayout] = useState<'grid' | 'list'>('grid');
+  const [favorites, setFavorites] = useState<string[]>([]);
+  const [page, setPage] = useState(1);
   useEffect(() => {
     const pendingUnit = units.find((unit) => unit.id === pendingUnitId && unit.status === 'AVAILABLE');
     if (pendingUnit) setSelectedUnit(pendingUnit);
   }, [units, pendingUnitId]);
+  const availableUnits = units.filter((unit) => unit.status === 'AVAILABLE');
+  const locations = [...new Set(projects.map((project) => project.locality || project.location).filter((location): location is string => Boolean(location)))];
+  const types = [...new Set(units.map((unit) => unit.type).filter((type): type is string => Boolean(type)))];
+  const filteredUnits = units.filter((unit) => {
+    const project = projects.find((item) => item.id === unit.project_id);
+    const location = project?.locality || project?.location || '';
+    const price = Number((unit.price ?? '').replace(/[^0-9.]/g, '')) || 0;
+    const normalizedQuery = search.trim().toLowerCase();
+    const matchesQuery = !normalizedQuery || [unit.unit_number, unit.type, project?.name, location].some((value) => value?.toLowerCase().includes(normalizedQuery));
+    const matchesPrice = priceFilter === 'Any price' || (priceFilter === 'Under KSh 10M' ? price > 0 && price < 10000000 : priceFilter === 'KSh 10M–20M' ? price >= 10000000 && price <= 20000000 : price > 20000000);
+    return matchesQuery && (locationFilter === 'All locations' || location === locationFilter) && (projectFilter === 'All Projects' || project?.id === projectFilter) && (typeFilter === 'All types' || unit.type === typeFilter) && (bedroomFilter === 'Any bedrooms' || unit.bedrooms === Number(bedroomFilter)) && matchesPrice;
+  }).sort((first, second) => {
+    const firstPrice = Number((first.price ?? '').replace(/[^0-9.]/g, '')) || 0;
+    const secondPrice = Number((second.price ?? '').replace(/[^0-9.]/g, '')) || 0;
+    return sortOrder === 'Price: Low to high' ? (firstPrice || Infinity) - (secondPrice || Infinity) : sortOrder === 'Price: High to low' ? secondPrice - firstPrice : first.unit_number.localeCompare(second.unit_number);
+  });
+  const pageSize = 8;
+  const pageCount = Math.max(1, Math.ceil(filteredUnits.length / pageSize));
+  const visibleUnits = filteredUnits.slice((page - 1) * pageSize, page * pageSize);
+  const changeFilter = (setter: (value: string) => void) => (value: string) => { setter(value); setPage(1); };
   return <section>
-    <div className="portal-section-heading"><div><p className="eyebrow text-[#087f88]">Published inventory</p><h2>Find a place<br /><em>that feels like yours.</em></h2></div></div>
-    <div className="portal-unit-grid">{units.map((unit) => <article key={unit.id} className="flex flex-col justify-between gap-5"><div><p className="eyebrow text-[#087f88]">Unit {unit.unit_number}</p><h3>{unit.type || 'Residence'}</h3><p>{unit.bedrooms ?? 0} bedrooms · {unit.size || 'Size on request'}</p><p className="mt-3 text-sm font-semibold text-[#123b4b]">{unit.price || 'Price on request'}</p></div><div className="flex items-center justify-between gap-3"><span>{unit.status}</span>{unit.status === 'AVAILABLE' && <button type="button" onClick={() => setSelectedUnit(unit)} className="btn-primary !px-4 !py-2.5">Start purchase <ArrowRight size={14} /></button>}</div></article>)}{units.length === 0 && <p className="text-sm text-slate-500">No published homes are available yet.</p>}</div>
-    <LocationMap title="Your available homes, by locality" projects={projects.map((project) => ({ ...project, availableUnits: units.filter((unit) => unit.project_id === project.id && unit.status === 'AVAILABLE').length }))} />
-    {selectedUnit && <PurchaseRequestModal unit={selectedUnit} paymentInstructions={paymentInstructions} onClose={() => setSelectedUnit(null)} onDone={async (receipt) => { setSelectedUnit(null); await onPurchaseComplete(receipt); }} />}
+    <div className="homes-hero" style={{ backgroundImage: `linear-gradient(90deg, rgba(242,250,249,.98) 0%, rgba(242,250,249,.9) 31%, rgba(242,250,249,.08) 69%), url("${projects[0]?.image_url || '/NBG HERO.png'}")` }}><div><p className="eyebrow text-[#087f88]">Explore</p><h2>Available Homes</h2><p>Discover our premium properties and find the perfect home<br className="hidden sm:block" /> or investment opportunity.</p></div></div>
+    <div className="homes-toolbar"><label className="homes-search homes-mobile-search"><Search size={15} /><input aria-label="Search homes, locations, or projects" value={search} onChange={(event) => { onSearchChange(event.target.value); setPage(1); }} placeholder="Search for a home, location or project..." /></label><div className="homes-filter-row"><div className="homes-filters"><label className="homes-all-projects"><Grid2X2 size={14} /><span className="sr-only">Project</span><select value={projectFilter} onChange={(event) => changeFilter(setProjectFilter)(event.target.value)}><option>All Projects</option>{projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}</select><ChevronDown size={13} /></label><label><span className="sr-only">Location</span><select value={locationFilter} onChange={(event) => changeFilter(setLocationFilter)(event.target.value)}><option>All locations</option>{locations.map((location) => <option key={location}>{location}</option>)}</select><ChevronDown size={13} /></label><label><span className="sr-only">Property type</span><select value={typeFilter} onChange={(event) => changeFilter(setTypeFilter)(event.target.value)}><option>All types</option>{types.map((type) => <option key={type}>{type}</option>)}</select><ChevronDown size={13} /></label><label><span className="sr-only">Bedrooms</span><select value={bedroomFilter} onChange={(event) => changeFilter(setBedroomFilter)(event.target.value)}><option>Any bedrooms</option>{[...new Set(units.map((unit) => unit.bedrooms).filter((bedrooms): bedrooms is number => bedrooms !== null))].sort((first, second) => first - second).map((bedrooms) => <option key={bedrooms} value={bedrooms}>{bedrooms} Bedrooms</option>)}</select><ChevronDown size={13} /></label><label><span className="sr-only">Price range</span><select value={priceFilter} onChange={(event) => changeFilter(setPriceFilter)(event.target.value)}><option>Any price</option><option>Under KSh 10M</option><option>KSh 10M–20M</option><option>Over KSh 20M</option></select><ChevronDown size={13} /></label></div><div className="homes-view-tools"><div className="homes-layout-toggle"><button type="button" onClick={() => setLayout('grid')} aria-label="Grid view" aria-pressed={layout === 'grid'}><Grid2X2 size={15} /></button><button type="button" onClick={() => setLayout('list')} aria-label="List view" aria-pressed={layout === 'list'}><List size={15} /></button></div><label className="homes-sort"><span>Sort by:</span><select value={sortOrder} onChange={(event) => setSortOrder(event.target.value)}><option>Featured</option><option>Price: Low to high</option><option>Price: High to low</option></select><ChevronDown size={13} /></label></div></div></div>
+    <div className={`homes-card-grid ${layout === 'list' ? 'homes-card-list' : ''}`}>{visibleUnits.map((unit) => { const project = projects.find((item) => item.id === unit.project_id); const location = project?.locality || project?.location || 'Location on request'; const isFavorite = favorites.includes(unit.id); const canPurchase = unit.status === 'AVAILABLE'; const statusLabel = unit.availability_note || (unit.status === 'SOLD' ? 'Sold Out' : unit.status === 'RESERVED' ? 'Reserved' : 'Available'); return <article key={unit.id} className="homes-card"><div className="homes-card-image"><img src={unit.image_url || project?.image_url || '/NBG HERO.png'} alt={`${project?.name || unit.type || 'Home'}, Unit ${unit.unit_number}`} /><span className={`homes-status homes-status-${unit.status.toLowerCase()}`}>{statusLabel}</span><button type="button" className={`homes-favorite ${isFavorite ? 'is-favorite' : ''}`} aria-label={isFavorite ? 'Remove from saved homes' : 'Save home'} aria-pressed={isFavorite} onClick={() => setFavorites((current) => isFavorite ? current.filter((id) => id !== unit.id) : [...current, unit.id])}><Heart size={17} fill={isFavorite ? 'currentColor' : 'none'} /></button></div><div className="homes-card-body"><p className="homes-location"><MapPin size={12} /> {location}</p><h3>{project?.name || unit.type || 'Residence'}</h3><div className="homes-card-price"><span>From <strong>{unit.price || 'Price on request'}</strong></span><span>{unit.type || 'Residence'}</span></div><div className="homes-card-details"><span><BedDouble size={13} /> {unit.bedrooms ?? '—'} Bedrooms</span><span><Ruler size={13} /> {unit.size || 'Size on request'}</span></div><p className="homes-unit-number">Unit {unit.unit_number}</p><button type="button" onClick={() => setSelectedUnit(unit)} disabled={!canPurchase} className="homes-details-button">{canPurchase ? <>View details <ArrowRight size={14} /></> : statusLabel}</button></div></article>; })}</div>
+    {filteredUnits.length === 0 && <div className="homes-empty"><Search size={20} /><p>{units.length ? 'No homes match those filters.' : 'No published homes are available yet.'}</p><button type="button" onClick={() => { onSearchChange(''); setLocationFilter('All locations'); setProjectFilter('All Projects'); setTypeFilter('All types'); setBedroomFilter('Any bedrooms'); setPriceFilter('Any price'); setPage(1); }}>Clear filters</button></div>}
+    <div className="homes-pagination"><span>Showing {filteredUnits.length ? (page - 1) * pageSize + 1 : 0}–{Math.min(page * pageSize, filteredUnits.length)} of {filteredUnits.length} homes</span><div><button type="button" aria-label="Previous page" disabled={page <= 1} onClick={() => setPage((current) => Math.max(1, current - 1))}><ChevronLeft size={14} /></button>{Array.from({ length: pageCount }, (_, index) => index + 1).map((pageNumber) => <button type="button" key={pageNumber} aria-label={`Page ${pageNumber}`} aria-current={page === pageNumber ? 'page' : undefined} onClick={() => setPage(pageNumber)}>{pageNumber}</button>)}<button type="button" aria-label="Next page" disabled={page >= pageCount} onClick={() => setPage((current) => Math.min(pageCount, current + 1))}><ChevronRight size={14} /></button></div></div>
+    {projects.length > 0 && <LocationMap title="Your available homes, by locality" projects={projects.map((project) => ({ ...project, availableUnits: availableUnits.filter((unit) => unit.project_id === project.id).length }))} />}
+    {selectedUnit && <PurchaseRequestModal unit={selectedUnit} onClose={() => setSelectedUnit(null)} onDone={async (receipt) => { setSelectedUnit(null); await onPurchaseComplete(receipt); }} />}
   </section>;
 }
 
-function PurchaseRequestModal({ unit, paymentInstructions, onClose, onDone }: { unit: ProjectUnit; paymentInstructions: PurchasePaymentInstructions | null; onClose: () => void; onDone: (receipt: PurchaseRequestReceipt) => Promise<void> }) {
+function PurchaseRequestModal({ unit, onClose, onDone }: { unit: ProjectUnit; onClose: () => void; onDone: (receipt: PurchaseRequestReceipt) => Promise<void> }) {
   const price = Number((unit.price ?? '').replace(/[^0-9.]/g, '')) || 0;
   const [deposit, setDeposit] = useState(price ? formatMoneyInput(String(Math.max(1, Math.round(price * 0.1)))) : '');
   const [paymentPlanType, setPaymentPlanType] = useState<'INSTALLMENTS' | 'FULL'>('INSTALLMENTS');
@@ -395,10 +449,6 @@ function PurchaseRequestModal({ unit, paymentInstructions, onClose, onDone }: { 
     const count = paymentPlanType === 'FULL' ? 0 : Number(installmentCount);
     if (!price || depositAmount <= 0 || depositAmount > price || (paymentPlanType === 'INSTALLMENTS' && depositAmount >= price) || (depositAmount < price && count < 1)) {
       setError('Enter a valid payment amount and plan for the confirmed unit price.');
-      return;
-    }
-    if (!paymentInstructions) {
-      setError('Official bank instructions are not available yet. Contact the NBG team; do not transfer funds to unverified details.');
       return;
     }
     setSaving(true);

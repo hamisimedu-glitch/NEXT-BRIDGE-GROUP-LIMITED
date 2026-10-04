@@ -38,13 +38,21 @@ export async function signIn(email: string, password: string) {
   return supabase.auth.signInWithPassword({ email, password });
 }
 
-export async function signUp(email: string, password: string, role: 'client' | 'staff' = 'client') {
+export async function signUp(email: string, password: string, role: 'client' | 'staff' = 'client', profile?: { full_name: string; phone: string }) {
   return supabase.auth.signUp({
     email,
     password,
     options: {
-      data: { role },
+      emailRedirectTo: `${window.location.origin}/portal`,
+      data: { role, ...profile },
     },
+  });
+}
+
+export async function signInWithGoogle() {
+  return supabase.auth.signInWithOAuth({
+    provider: 'google',
+    options: { redirectTo: `${window.location.origin}/portal` },
   });
 }
 

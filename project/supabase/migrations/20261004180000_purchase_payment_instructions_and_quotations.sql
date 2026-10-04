@@ -59,9 +59,6 @@ BEGIN
   IF auth.uid() IS NULL THEN
     RAISE EXCEPTION 'Sign in to submit a purchase request' USING ERRCODE = '42501';
   END IF;
-  IF NOT EXISTS (SELECT 1 FROM public.purchase_payment_instructions WHERE singleton AND is_published) THEN
-    RAISE EXCEPTION 'Official NBG bank payment instructions are not available yet. Please contact the NBG team.' USING ERRCODE = '55000';
-  END IF;
   IF upper(coalesce(p_payment_mode, '')) NOT IN ('INSTALLMENTS', 'FULL') THEN
     RAISE EXCEPTION 'Select a valid payment plan';
   END IF;
