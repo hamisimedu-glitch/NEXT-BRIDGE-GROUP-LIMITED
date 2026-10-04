@@ -9,7 +9,7 @@
 2. New Tables
    - `realtors`
      - id, name, email, phone, id_number (national ID), status (PENDING|ACTIVE|SUSPENDED),
-       commission_rate (numeric, default 5.0 = 5%), total_earned, joined_at, notes
+      commission_rate (numeric, default 3.0 = 3%), total_earned, joined_at, notes
    - `commissions`
      - id, sale_id FK(sales), realtor_id FK(realtors), amount, rate, status (PENDING|APPROVED|PAID),
        paid_at, notes, created_at
@@ -36,7 +36,7 @@ CREATE TABLE IF NOT EXISTS realtors (
   phone text,
   id_number text,
   status text NOT NULL DEFAULT 'PENDING',
-  commission_rate numeric(5,2) NOT NULL DEFAULT 5.00,
+  commission_rate numeric(5,2) NOT NULL DEFAULT 3.00,
   total_earned numeric(14,2) NOT NULL DEFAULT 0.00,
   joined_at timestamptz DEFAULT now(),
   notes text,

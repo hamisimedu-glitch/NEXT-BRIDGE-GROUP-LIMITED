@@ -1,3 +1,5 @@
+import { maskFinancialValue } from '@/lib/financial-privacy';
+
 export type LeadStatus = 'NEW' | 'CONTACTED' | 'QUALIFIED' | 'VIEWING_BOOKED' | 'NEGOTIATING' | 'CONVERTED' | 'LOST';
 export type UnitStatus = 'AVAILABLE' | 'RESERVED' | 'SOLD';
 export type SaleStatus = 'RESERVED' | 'DEPOSIT_PAID' | 'COMPLETED' | 'CANCELLED';
@@ -35,6 +37,8 @@ export type Lead = {
   priority: string;
   next_action: string | null;
   next_action_at: string | null;
+  action_project_id?: string | null;
+  tracking_code?: string | null;
   last_contacted_at: string | null;
   created_at: string;
 };
@@ -62,6 +66,7 @@ export type Project = {
   brochure_url?: string | null;
   map_url?: string | null;
   expected_completion?: string | null;
+  total_floors?: number | null;
   created_at: string;
 };
 
@@ -86,6 +91,8 @@ export type ProjectUnit = {
 
 export type Sale = {
   id: string;
+  unit_id?: string | null;
+  buyer_user_id?: string | null;
   unit_number: string;
   buyer_name: string;
   buyer_phone: string | null;
@@ -153,14 +160,21 @@ export type Commission = {
 
 export type Investment = {
   id: string;
+  reference_code?: string;
   investor_name: string;
   investor_email: string | null;
   investor_phone: string | null;
   project_id: string | null;
   amount_interested: number | null;
+  amount_committed?: number | null;
   currency: string;
   status: string;
   notes: string | null;
+  investment_range?: string | null;
+  investment_structure?: string | null;
+  investor_message?: string | null;
+  consent_to_contact?: boolean;
+  investor_user_id?: string | null;
   created_at: string;
 };
 
@@ -210,5 +224,5 @@ export const INVESTMENT_STATUS_COLORS: Record<string, string> = {
 
 export function fmtKes(amount: number | null | undefined): string {
   if (amount == null) return '—';
-  return `KSh ${amount.toLocaleString('en-KE', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+  return maskFinancialValue(`KSh ${amount.toLocaleString('en-KE', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`);
 }

@@ -1,7 +1,7 @@
 /*
 # Enforce realtor commissions
 
-Linked commissions always use 5% of the related sale price. This keeps imports,
+Linked commissions always use 3% of the related sale price. This keeps imports,
 admin actions, and future integrations consistent with the commission policy.
 */
 
@@ -12,11 +12,11 @@ AS $$
 DECLARE
   linked_sale_price numeric;
 BEGIN
-  NEW.rate := 5.00;
+  NEW.rate := 3.00;
   IF NEW.sale_id IS NOT NULL THEN
     SELECT sale_price INTO linked_sale_price FROM public.sales WHERE id = NEW.sale_id;
     IF linked_sale_price IS NOT NULL THEN
-      NEW.amount := round(linked_sale_price * 0.05, 2);
+      NEW.amount := round(linked_sale_price * 0.03, 2);
     END IF;
   END IF;
   RETURN NEW;

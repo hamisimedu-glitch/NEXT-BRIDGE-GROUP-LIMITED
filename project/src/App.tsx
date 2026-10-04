@@ -22,6 +22,7 @@ import {
   Search,
   ShieldCheck,
   Star,
+  TrendingUp,
   X,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
@@ -30,9 +31,12 @@ import type { ConstructionUpdate, Investment, Project, ProjectUnit } from '@/lib
 import AdminDashboard, { AdminSignIn } from '@/AdminDashboard';
 import ClientPortal, { ClientPortalSignIn } from '@/ClientPortal';
 import LocationMap from '@/LocationMap';
+import ProjectInvestmentPage from '@/ProjectInvestmentPage';
+import ProjectDetailsPackage, { type PublicProjectDetails } from '@/ProjectDetailsPackage';
+import { calculateConstructionProgress, type PublishedConstructionProgress } from '@/lib/construction';
 
 type UnitStatus = 'AVAILABLE' | 'RESERVED' | 'SOLD';
-type View = 'home' | 'projects' | 'project' | 'units' | 'construction' | 'gallery' | 'about' | 'contact' | 'viewing' | 'faq' | 'investor' | 'privacy' | 'terms' | 'verify' | 'portal' | 'admin' | 'not-found';
+type View = 'home' | 'projects' | 'project' | 'project-investment' | 'units' | 'construction' | 'gallery' | 'about' | 'contact' | 'viewing' | 'faq' | 'investor' | 'privacy' | 'terms' | 'verify' | 'portal' | 'admin' | 'not-found';
 
 type Unit = {
   id: string;
@@ -78,6 +82,7 @@ const navItems: { label: string; view: View }[] = [
   { label: 'Location', view: 'about' },
   { label: 'Gallery', view: 'gallery' },
   { label: 'Contact', view: 'contact' },
+  { label: 'Verify document', view: 'verify' },
 ];
 
 function trackContactEvent(channel: 'whatsapp' | 'phone', context: string) {
@@ -85,17 +90,17 @@ function trackContactEvent(channel: 'whatsapp' | 'phone', context: string) {
 }
 
 function viewFromPath(pathname: string): View {
-  if (pathname.startsWith('/project/')) return 'project';
+  if (pathname.startsWith('/project/')) return pathname.endsWith('/invest') ? 'project-investment' : 'project';
   if (pathname.startsWith('/verify/')) return 'verify';
   const route = pathname.replace(/^\//, '') as View;
   if (pathname === '/' || pathname === '') return 'home';
-  return ['projects', 'project', 'units', 'construction', 'gallery', 'about', 'contact', 'viewing', 'faq', 'investor', 'privacy', 'terms', 'verify', 'portal', 'admin'].includes(route) ? route : 'not-found';
+  return ['projects', 'project', 'project-investment', 'units', 'construction', 'gallery', 'about', 'contact', 'viewing', 'faq', 'investor', 'privacy', 'terms', 'verify', 'portal', 'admin'].includes(route) ? route : 'not-found';
 }
 
 function projectIdFromPath(pathname: string): string | null {
   if (!pathname.startsWith('/project/')) return null;
   try {
-    const id = decodeURIComponent(pathname.slice('/project/'.length));
+    const id = decodeURIComponent(pathname.slice('/project/'.length).split('/')[0]);
     return id || null;
   } catch {
     return null;
@@ -190,6 +195,7 @@ function App() {
         {view === 'home' && <HomePage navigate={navigate} setGalleryIndex={setGalleryIndex} />}
         {view === 'projects' && <DatabaseProjectsPage navigate={navigate} />}
         {view === 'project' && projectId ? <ProjectDetailPage projectId={projectId} navigate={navigate} /> : view === 'project' ? <NotFoundPage navigate={navigate} /> : null}
+        {view === 'project-investment' && projectId ? <ProjectInvestmentPage projectId={projectId} navigate={navigate} /> : view === 'project-investment' ? <NotFoundPage navigate={navigate} /> : null}
         {view === 'units' && <DatabaseUnitsPage navigate={navigate} setSelectedUnit={setSelectedUnit} />}
         {view === 'construction' && <ConstructionPage navigate={navigate} />}
         {view === 'gallery' && <GalleryPage setGalleryIndex={setGalleryIndex} />}
@@ -199,8 +205,7 @@ function App() {
         {view === 'investor' && <InvestorPage navigate={navigate} />}
         {view === 'privacy' && <LegalPage kind="privacy" />}
         {view === 'terms' && <LegalPage kind="terms" />}
-        {view === 'verify' && verificationCode && <VerifyDocumentPage code={verificationCode} />}
-        {view === 'verify' && !verificationCode && <NotFoundPage navigate={navigate} />}
+        {view === 'verify' && <VerifyDocumentPage code={verificationCode ?? ''} />}
         {view === 'not-found' && <NotFoundPage navigate={navigate} />}
       </main>
       <Footer navigate={navigate} />
@@ -259,7 +264,10 @@ function Header({ view, navigate, mobileOpen, setMobileOpen }: { view: View; nav
           </button>
         </div>
 
-        <button className="header-menu-mobile flex h-11 w-11 items-center justify-center rounded-full transition lg:hidden" onClick={() => setMobileOpen(!mobileOpen)} aria-label={mobileOpen ? 'Close menu' : 'Open menu'}>{mobileOpen ? <X /> : <Menu />}</button>
+        <div className="flex items-center gap-2 lg:hidden">
+          <button className="header-menu-mobile flex h-11 w-11 items-center justify-center rounded-full transition" onClick={() => navigate('verify')} aria-label="Verify a document" title="Verify a document"><ShieldCheck size={19} /></button>
+          <button className="header-menu-mobile flex h-11 w-11 items-center justify-center rounded-full transition" onClick={() => setMobileOpen(!mobileOpen)} aria-label={mobileOpen ? 'Close menu' : 'Open menu'}>{mobileOpen ? <X /> : <Menu />}</button>
+        </div>
       </div>
       {mobileOpen && <div className="site-mobile-menu absolute right-4 top-[76px] w-[min(360px,calc(100%-2rem))] p-5 md:right-8"><div className="grid gap-1"><button onClick={() => navigate('home')} className="border-b border-white/20 px-2 py-4 text-left text-xs uppercase tracking-[0.16em]">Home</button>{navItems.map((item) => <button key={item.view} onClick={() => navigate(item.view)} className="border-b border-white/20 px-2 py-4 text-left text-xs uppercase tracking-[0.16em]">{item.label}</button>)}<button onClick={() => navigate('portal')} className="border-b border-white/20 px-2 py-4 text-left text-xs uppercase tracking-[0.16em]">Client portal</button><button onClick={() => navigate('viewing')} className="mt-4 bg-[#0b8e92] px-4 py-4 text-left text-xs font-semibold uppercase tracking-[0.16em] text-white">Book a private viewing</button></div></div>}
     </header>
@@ -340,7 +348,35 @@ function HomePage({ navigate, setGalleryIndex }: { navigate: (view: View) => voi
 
 function Highlights({ navigate }: { navigate: (view: View) => void }) { const cards = [{ icon: Building2, title: 'A considered address', text: 'Coastal living in one of Mombasa’s most established neighbourhoods.' }, { icon: Layers3, title: 'Designed for real life', text: 'Homes with space, light and a natural relationship to the outdoors.' }, { icon: ShieldCheck, title: 'Progress you can see', text: 'A transparent construction journey, shared as the work moves forward.' }]; return <section className="section-pad bg-[#f4f1eb]"><div className="mx-auto max-w-[1440px]"><div className="mb-12 flex flex-col justify-between gap-5 md:flex-row md:items-end"><div><p className="eyebrow text-[#20afd1]">The NBG difference</p><h2 className="mt-4 font-serif text-4xl tracking-[-.04em] md:text-6xl">Made for <em>the long view.</em></h2></div><button onClick={() => navigate('about')} className="link-arrow self-start">Why NBG <ArrowRight size={16} /></button></div><div className="grid border-t border-[#c9c5bd] md:grid-cols-3">{cards.map(({ icon: Icon, title, text }, index) => <div key={title} className={`border-b border-[#c9c5bd] py-8 md:border-b-0 md:pr-10 ${index > 0 ? 'md:border-l md:pl-10' : ''}`}><Icon size={24} strokeWidth={1.2} className="text-[#20afd1]" /><h3 className="mt-10 text-xl">{title}</h3><p className="mt-3 max-w-xs text-sm leading-6 text-slate-600">{text}</p></div>)}</div></div></section> }
 
-function ConstructionStrip({ navigate }: { navigate: (view: View) => void }) { return <section className="section-pad bg-[#d9d5cc]"><div className="mx-auto max-w-[1440px]"><div className="grid gap-12 lg:grid-cols-[.8fr_1.2fr] lg:items-center"><div><p className="eyebrow text-[#247b85]">Construction journey</p><h2 className="mt-5 font-serif text-5xl leading-[.96] tracking-[-.04em] md:text-7xl">Built in the<br /><em>open.</em></h2><p className="mt-7 max-w-sm text-sm leading-6 text-slate-600">When verified updates are available, they will live here — from foundation to handover.</p><button onClick={() => navigate('construction')} className="link-arrow mt-8">Follow the journey <ArrowRight size={16} /></button></div><div className="border-y border-[#aaa69d] py-7"><div className="flex items-end justify-between"><div><p className="eyebrow text-slate-500">Current progress</p><p className="mt-3 font-serif text-7xl text-[#17232b]">—<span className="ml-2 text-2xl">%</span></p></div><p className="max-w-[170px] text-right text-xs leading-5 text-slate-500">Progress will appear once published by the project team.</p></div><div className="mt-8 h-1 bg-[#b9b5ac]"><div className="h-full w-0 bg-[#20afd1]" /></div><div className="mt-5 flex justify-between text-[9px] uppercase tracking-[.14em] text-slate-500"><span>Project start</span><span>Handover</span></div></div></div></div></section> }
+function ConstructionStrip({ navigate }: { navigate: (view: View) => void }) {
+  const [published, setPublished] = useState<PublishedConstructionProgress | null>(null);
+  const [project, setProject] = useState<Project | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [offline, setOffline] = useState(false);
+  const load = useCallback(async () => {
+    const { data, error: progressError } = await supabase.from('published_construction_progress').select('*').order('published_at', { ascending: false }).limit(1).maybeSingle();
+    if (progressError) setOffline(true);
+    else {
+      setOffline(false);
+      const row = data as PublishedConstructionProgress | null;
+      setPublished(row);
+      if (row) {
+        const { data: projectRow } = await supabase.from('projects').select('*').eq('id', row.project_id).eq('is_published', true).maybeSingle();
+        setProject((projectRow ?? null) as Project | null);
+      } else setProject(null);
+    }
+    setLoading(false);
+  }, []);
+  useEffect(() => {
+    void load();
+    const channel = supabase.channel('home-construction-progress')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'published_construction_progress' }, () => { void load(); })
+      .subscribe();
+    return () => { void supabase.removeChannel(channel); };
+  }, [load]);
+  const progress = published ? calculateConstructionProgress(published.data) : null;
+  return <section className="section-pad bg-[#d9d5cc]"><div className="mx-auto max-w-[1440px]"><div className="grid gap-12 lg:grid-cols-[.8fr_1.2fr] lg:items-center"><div><p className="eyebrow text-[#247b85]">Construction journey</p><h2 className="mt-5 font-serif text-5xl leading-[.96] tracking-[-.04em] md:text-7xl">Built in the<br /><em>open.</em></h2><p className="mt-7 max-w-sm text-sm leading-6 text-slate-600">Verified progress, published by the project team and updated as work moves forward.</p><button onClick={() => navigate('construction')} className="link-arrow mt-8">Follow the journey <ArrowRight size={16} /></button></div><div className="border-y border-[#aaa69d] py-7"><div className="flex items-end justify-between gap-4"><div><p className="eyebrow text-slate-500">{project?.name || 'Current progress'}</p><p className="mt-3 font-serif text-7xl text-[#17232b]">{loading ? '…' : progress === null ? '—' : progress}<span className="ml-2 text-2xl">%</span></p></div><p className="max-w-[190px] text-right text-xs leading-5 text-slate-500">{offline ? 'Construction progress is temporarily unavailable.' : published ? `${published.total_floors} floors · ${published.data.currentPhase || 'Verified project progress'}` : 'No project progress has been published yet.'}</p></div><div className="mt-8 h-1 bg-[#b9b5ac]"><div className="h-full bg-[#20afd1] transition-all" style={{ width: `${progress ?? 0}%` }} /></div><div className="mt-5 flex justify-between text-[9px] uppercase tracking-[.14em] text-slate-500"><span>Project start</span><span>{published?.data.timeline || project?.expected_completion || 'Handover'}</span></div></div></div></div></section>;
+}
 
 function SectionIntro({ eyebrow, title, copy, action, onAction }: { eyebrow: string; title: React.ReactNode; copy: string; action?: string; onAction?: () => void }) { return <div className="grid gap-6 md:grid-cols-[1fr_1fr] md:items-end"><div><p className="eyebrow text-[#20afd1]">{eyebrow}</p><h2 className="mt-5 font-serif text-5xl leading-[.95] tracking-[-.05em] md:text-7xl">{title}</h2></div><div className="md:pb-1"><p className="max-w-md text-base leading-7 text-slate-600">{copy}</p>{action && onAction && <button onClick={onAction} className="link-arrow mt-7">{action} <ArrowRight size={16} /></button>}</div></div> }
 
@@ -365,38 +401,50 @@ function navigateToPublicProject(id: string) {
   window.dispatchEvent(new PopStateEvent('popstate'));
 }
 
+function navigateToProjectInvestment(id: string) {
+  window.history.pushState({}, '', `/project/${encodeURIComponent(id)}/invest`);
+  window.dispatchEvent(new PopStateEvent('popstate'));
+}
+
 function ProjectDetailPage({ projectId, navigate }: { projectId: string; navigate: (view: View) => void }) {
   const [project, setProject] = useState<Project | null>(null);
   const [units, setUnits] = useState<ProjectUnit[]>([]);
   const [updates, setUpdates] = useState<ConstructionUpdate[]>([]);
+  const [construction, setConstruction] = useState<PublishedConstructionProgress | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const load = useCallback(async () => {
     setLoading(true);
     setError('');
-    const [projectResult, unitsResult, updatesResult] = await Promise.all([
+    const [projectResult, unitsResult, updatesResult, constructionResult] = await Promise.all([
       supabase.from('projects').select('*').eq('id', projectId).eq('is_published', true).maybeSingle(),
       supabase.from('project_units').select('*').eq('project_id', projectId).eq('is_published', true).order('unit_number'),
-      supabase.from('construction_updates').select('*').eq('project_id', projectId).order('posted_at', { ascending: false }),
+      supabase.from('construction_updates').select('*').eq('project_id', projectId).eq('is_published', true).order('posted_at', { ascending: false }),
+      supabase.from('published_construction_progress').select('*').eq('project_id', projectId).maybeSingle(),
     ]);
-    if (projectResult.error || unitsResult.error || updatesResult.error) setError('Project details are temporarily unavailable.');
+    if (projectResult.error || unitsResult.error || updatesResult.error || constructionResult.error) setError('Project details are temporarily unavailable.');
     setProject((projectResult.data ?? null) as Project | null);
     setUnits((unitsResult.data ?? []) as ProjectUnit[]);
     setUpdates((updatesResult.data ?? []) as ConstructionUpdate[]);
+    setConstruction((constructionResult.data ?? null) as PublishedConstructionProgress | null);
     setLoading(false);
   }, [projectId]);
   useEffect(() => {
     void load();
-  }, [load]);
+    const channel = supabase.channel(`project-construction-${projectId}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'published_construction_progress', filter: `project_id=eq.${projectId}` }, () => { void load(); })
+      .subscribe();
+    return () => { void supabase.removeChannel(channel); };
+  }, [load, projectId]);
   if (loading) return <PageFrame eyebrow="Project profile" title={<>Preparing<br /><em>the details.</em></>} intro="Loading verified project information..."><p className="mt-14 text-sm text-slate-500">Please wait...</p></PageFrame>;
   if (error) return <PageFrame eyebrow="Project profile" title={<>Details are<br /><em>temporarily paused.</em></>} intro="We could not retrieve this project right now."><PublicErrorState message={error} onRetry={() => void load()} navigate={navigate} /></PageFrame>;
   if (!project) return <PageFrame eyebrow="Project profile" title={<>Project<br /><em>not found.</em></>} intro="This project is not currently published."><button onClick={() => navigate('projects')} className="btn-primary mt-10">Back to the collection <ArrowRight size={16} /></button></PageFrame>;
-  const progress = updates[0]?.progress_pct ?? 0;
+  const progress = construction ? calculateConstructionProgress(construction.data) : null;
   const priceRange = project.price_min || project.price_max ? `${project.price_min ? `KSh ${project.price_min.toLocaleString()}` : 'Price'} - ${project.price_max ? `KSh ${project.price_max.toLocaleString()}` : 'on request'}` : 'Pricing shared by the NBG team';
   return <PageFrame eyebrow={`${project.status} · ${project.location || 'Kenya'}`} title={<>{project.name}<br /><em>in full view.</em></>} intro={project.description || 'A considered collection of homes, designed for coastal living and long-term value.'}>
     <div className="mt-14 grid gap-10 lg:grid-cols-[1.25fr_.75fr]"><div className="relative min-h-[520px] overflow-hidden"><img src={project.image_url || images.exterior} alt={project.name} className="absolute inset-0 h-full w-full object-cover" /><div className="absolute inset-0 bg-gradient-to-t from-[#17232b]/75 via-transparent to-transparent" /><div className="absolute bottom-7 left-7 text-white"><p className="eyebrow text-[#9edfeb]">From {priceRange}</p><p className="mt-3 text-sm">Expected completion: {project.expected_completion || 'To be announced'}</p></div></div><div className="border-t border-[#c9c5bd] pt-6"><p className="eyebrow text-[#087f88]">The project brief</p><div className="mt-7 grid grid-cols-2 gap-y-7 border-y border-[#c9c5bd] py-7"><div><p className="eyebrow text-slate-500">Availability</p><p className="mt-2 text-2xl text-[#123b4b]">{units.filter((unit) => unit.status === 'AVAILABLE').length} homes</p></div><div><p className="eyebrow text-slate-500">Progress</p><p className="mt-2 text-2xl text-[#087f88]">{progress}%</p></div><div><p className="eyebrow text-slate-500">Location</p><p className="mt-2 text-sm">{project.location || 'Coastal Kenya'}</p></div><div><p className="eyebrow text-slate-500">Price range</p><p className="mt-2 text-sm">{priceRange}</p></div></div><div className="mt-8 flex flex-wrap gap-3">{project.brochure_url && <a href={project.brochure_url} download className="btn-primary">Brochure <Download size={16} /></a>}{project.floor_plan_url && <a href={project.floor_plan_url} target="_blank" rel="noreferrer" className="btn-secondary">Floor plans <ExternalLink size={16} /></a>}<button onClick={() => navigate('viewing')} className="btn-secondary">Book a viewing <CalendarDays size={16} /></button></div></div></div>
     <div className="mt-16 grid gap-12 lg:grid-cols-[1fr_1fr]"><section><p className="eyebrow text-[#087f88]">Amenities</p><h2 className="mt-4 font-serif text-5xl text-[#123b4b]">Made for<br /><em>daily life.</em></h2><div className="mt-8 grid grid-cols-2 gap-3">{(project.amenities?.length ? project.amenities : ['24/7 security', 'Residents lounge', 'Swimming pool', 'Fitness studio', 'Secure parking', 'Landscaped grounds']).map((amenity) => <div key={amenity} className="border border-[#a9d9d8] bg-[#eefbf9] p-4 text-sm text-[#315a62]">{amenity}</div>)}</div></section><section><p className="eyebrow text-[#087f88]">Published availability</p><div className="mt-4 space-y-3">{units.length === 0 ? <p className="text-sm text-slate-500">Availability will be published as homes are released.</p> : units.map((unit) => <div key={unit.id} className="flex items-center justify-between border-b border-[#c9c5bd] py-4"><div><p className="text-sm font-semibold text-[#123b4b]">{unit.unit_number} · {unit.type || 'Residence'}</p><p className="mt-1 text-xs text-slate-500">{unit.size || 'Size on request'} · {unit.view || 'View on request'}</p></div><span className="text-[10px] uppercase tracking-[.12em] text-[#087f88]">{unit.status}</span></div>)}</div></section></div>
-    <section className="mt-16 border-t border-[#c9c5bd] pt-8"><div className="flex items-end justify-between gap-5"><div><p className="eyebrow text-[#087f88]">Construction progress</p><h2 className="mt-3 font-serif text-4xl text-[#123b4b]">Built in the open.</h2></div><span className="font-serif text-5xl text-[#087f88]">{progress}%</span></div><div className="mt-6 h-2 bg-[#d9f6f3]"><div className="h-full bg-[#19c6c9]" style={{ width: `${progress}%` }} /></div>{updates[0] && <p className="mt-5 text-sm text-slate-600">{updates[0].title}: {updates[0].body}</p>}</section>
+    <section className="mt-16 border-t border-[#c9c5bd] pt-8"><div className="flex flex-wrap items-end justify-between gap-5"><div><p className="eyebrow text-[#087f88]">Construction progress</p><h2 className="mt-3 font-serif text-4xl text-[#123b4b]">Built in the open.</h2><p className="mt-2 text-sm text-slate-500">{construction ? `${construction.total_floors} floors · Updated ${new Date(construction.published_at).toLocaleString()}` : 'No verified progress has been published yet.'}</p></div><span className="font-serif text-5xl text-[#087f88]">{progress === null ? '—' : `${progress}%`}</span></div>{construction ? <><div className="mt-6 h-2 bg-[#d9f6f3]"><div className="h-full bg-[#19c6c9] transition-all" style={{ width: `${progress ?? 0}%` }} /></div><p className="mt-5 text-sm leading-6 text-slate-600">Current phase: {construction.data.currentPhase || 'To be confirmed'}. {construction.data.progressNote}</p><p className="mt-2 text-xs text-slate-500">Timeline: {construction.data.timeline || project.expected_completion || 'To be confirmed'}</p><div className="mt-7 grid gap-8 lg:grid-cols-2"><div><h3 className="eyebrow text-[#087f88]">Floor-by-floor progress</h3><div className="mt-3 grid grid-cols-2 gap-x-5">{construction.data.floors.map((floor) => <p key={floor.number} className={`border-b border-[#e6e2da] py-2 text-xs ${floor.status === 'COMPLETED' ? 'text-[#2e6b3e]' : floor.status === 'IN_PROGRESS' ? 'text-[#2e5f7a]' : 'text-slate-400'}`}>{floor.status === 'COMPLETED' ? '✓' : floor.status === 'IN_PROGRESS' ? '→' : '○'} {floor.label}</p>)}</div></div><div><h3 className="eyebrow text-[#087f88]">Construction milestones</h3><div className="mt-3 space-y-2">{construction.data.milestones.map((milestone) => <div key={milestone.id} className="flex justify-between gap-4 border-b border-[#e6e2da] py-2 text-xs"><span>{milestone.title}</span><span className={milestone.status === 'COMPLETED' ? 'text-[#2e6b3e]' : milestone.status === 'IN_PROGRESS' ? 'text-[#2e5f7a]' : 'text-slate-400'}>{milestone.status.replace('_', ' ')}</span></div>)}</div></div></div><div className="mt-7 grid gap-3 sm:grid-cols-2">{construction.data.media.map((media) => media.type === 'video' ? <video key={media.url} src={media.url} controls className="aspect-video w-full bg-black object-cover" /> : <img key={media.url} src={media.url} alt={media.caption || project.name} className="aspect-video w-full object-cover" />)}</div></> : updates[0] ? <p className="mt-5 text-sm text-slate-600">{updates[0].title}: {updates[0].body}</p> : <p className="mt-5 text-sm text-slate-500">Construction milestones will appear here after the project team publishes verified progress.</p>}<button onClick={() => navigateToProjectInvestment(project.id)} className="btn-primary mt-8">Invest in This Project <TrendingUp size={16} /></button></section>
     <InvestorCallout navigate={navigate} />
   </PageFrame>;
 }
@@ -434,40 +482,52 @@ function UnitCard({ unit, onClick }: { unit: Unit; onClick: () => void }) { retu
 function ConstructionPage({ navigate }: { navigate: (view: View) => void }) {
   const [projects, setProjects] = useState<Project[]>([]);
   const [updates, setUpdates] = useState<ConstructionUpdate[]>([]);
+  const [progressRows, setProgressRows] = useState<PublishedConstructionProgress[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
-  const load = async () => {
+  const load = useCallback(async () => {
     setLoading(true);
     setError('');
-    Promise.all([
+    const [projectsResult, updatesResult, progressResult] = await Promise.all([
       supabase.from('projects').select('*').eq('is_published', true).order('created_at', { ascending: false }),
-      supabase.from('construction_updates').select('*').order('posted_at', { ascending: false }),
-    ]).then(([projectsResult, updatesResult]) => {
-      if (projectsResult.error || updatesResult.error) setError('Construction updates are temporarily unavailable.');
-      setProjects((projectsResult.data ?? []) as Project[]);
-      setUpdates((updatesResult.data ?? []) as ConstructionUpdate[]);
-      setLoading(false);
-    });
-  };
-  useEffect(() => { void load(); }, []);
+      supabase.from('construction_updates').select('*').eq('is_published', true).order('posted_at', { ascending: false }),
+      supabase.from('published_construction_progress').select('*').order('published_at', { ascending: false }),
+    ]);
+    if (projectsResult.error || updatesResult.error || progressResult.error) setError('Construction updates are temporarily unavailable.');
+    setProjects((projectsResult.data ?? []) as Project[]);
+    setUpdates((updatesResult.data ?? []) as ConstructionUpdate[]);
+    setProgressRows((progressResult.data ?? []) as PublishedConstructionProgress[]);
+    setLoading(false);
+  }, []);
 
-  const projectCards = projects.map((project) => {
-    const projectUpdates = updates.filter((update) => update.project_id === project.id);
-    const latest = projectUpdates[0];
-    return { project, projectUpdates, latest, progress: latest?.progress_pct ?? 0 };
-  });
-  const unassignedUpdates = updates.filter((update) => !update.project_id);
+  useEffect(() => {
+    void load();
+    const channel = supabase.channel('public-construction-progress')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'published_construction_progress' }, () => { void load(); })
+      .subscribe();
+    return () => { void supabase.removeChannel(channel); };
+  }, [load]);
 
-  return <PageFrame eyebrow="Construction journey" title={<>Progress you can<br /><em>see and trust.</em></>} intro="Track verified construction milestones published by the NBG team. Each project displays its latest progress, site note, and update history as work moves forward.">
-    {error ? <PublicErrorState message={error} onRetry={() => void load()} navigate={navigate} /> : loading ? <p className="mt-14 text-sm text-slate-500">Loading published construction progress...</p> : projects.length === 0 ? <EmptyState title="Project progress is being prepared" text="Published construction updates will appear here once the project team makes them available." action="Back to home" onAction={() => navigate('home')} /> : <div className="mt-14 space-y-14">
-      {projectCards.map(({ project, projectUpdates, latest, progress }) => <article key={project.id} className="border-t border-[#a9d9d8] pt-7">
-        <div className="flex flex-col justify-between gap-5 md:flex-row md:items-end"><div><p className="eyebrow text-[#087f88]">{project.status}</p><h2 className="mt-3 font-serif text-4xl text-[#123b4b] md:text-5xl">{project.name}</h2><p className="mt-2 text-sm text-slate-500">{project.location || 'Location to be announced'}</p></div><p className="font-serif text-6xl text-[#087f88]">{progress}<span className="ml-1 text-xl">%</span></p></div>
-        <div className="mt-7 h-2 overflow-hidden rounded-full bg-[#d9f6f3]"><div className="h-full rounded-full bg-[#19c6c9] transition-all" style={{ width: `${Math.min(100, Math.max(0, progress))}%` }} /></div>
-        <div className="mt-8 grid gap-8 lg:grid-cols-[1.1fr_.9fr]">{latest?.image_url ? <img src={latest.image_url} alt={latest.title} className="h-72 w-full object-cover" /> : <div className="flex h-72 items-center justify-center bg-[#eefbf9] text-sm text-[#55777d]">No site image published yet</div>}<div><p className="eyebrow text-[#087f88]">Latest site note</p><h3 className="mt-3 font-serif text-3xl text-[#123b4b]">{latest?.title ?? 'Awaiting first update'}</h3><p className="mt-4 text-sm leading-6 text-slate-600">{latest?.body ?? 'The NBG team has not published a construction milestone for this project yet.'}</p>{latest && <p className="mt-5 text-[10px] uppercase tracking-[.14em] text-slate-400">Published {new Date(latest.posted_at).toLocaleDateString()}</p>}<button onClick={() => navigate('contact')} className="link-arrow mt-7">Ask about this project <ArrowRight size={16} /></button></div></div>
-        {projectUpdates.length > 0 && <div className="mt-10 border-t border-[#c9c5bd] pt-6"><p className="eyebrow text-[#087f88]">Milestone history</p><div className="mt-5 grid gap-3 md:grid-cols-2">{projectUpdates.map((update) => <div key={update.id} className="flex items-start gap-4 border-b border-[#e2eeec] pb-4"><span className="mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#d9f6f3] text-[10px] font-semibold text-[#087f88]">{update.progress_pct}%</span><div><h4 className="text-sm font-semibold text-[#123b4b]">{update.title}</h4><p className="mt-1 text-xs text-slate-500">{new Date(update.posted_at).toLocaleDateString()}</p></div></div>)}</div></div>}
-      </article>)}
-      {unassignedUpdates.length > 0 && <p className="text-xs text-slate-500">{unassignedUpdates.length} general site update{unassignedUpdates.length === 1 ? '' : 's'} available.</p>}
+  return <PageFrame eyebrow="Construction journey" title={<>Progress you can<br /><em>see and trust.</em></>} intro="Follow verified construction progress, floor by floor. Every percentage and milestone comes from the latest project update approved by the NBG team.">
+    {error ? <PublicErrorState message={error} onRetry={() => void load()} navigate={navigate} /> : loading ? <p className="mt-14 text-sm text-slate-500">Loading published construction progress...</p> : projects.length === 0 ? <EmptyState title="Project progress is being prepared" text="Published project information will appear here once the NBG team makes it available." action="Back to home" onAction={() => navigate('home')} /> : <div className="mt-14 space-y-16">
+      {projects.map((project) => {
+        const published = progressRows.find((row) => row.project_id === project.id);
+        const plan = published?.data;
+        const progress = plan ? calculateConstructionProgress(plan) : null;
+        const projectUpdates = updates.filter((update) => update.project_id === project.id);
+        const latestUpdate = projectUpdates[0];
+        const latestMedia = plan?.media[plan.media.length - 1];
+        const activeMilestone = plan?.milestones.find((milestone) => milestone.status === 'IN_PROGRESS') || plan?.milestones.find((milestone) => milestone.status === 'PENDING');
+        const currentFloor = plan?.floors.find((floor) => floor.status === 'IN_PROGRESS');
+        return <article key={project.id} className="border-t border-[#a9d9d8] pt-7">
+          <div className="grid gap-10 lg:grid-cols-[1fr_.55fr] lg:items-end"><div><p className="eyebrow text-[#087f88]">{project.status}</p><h2 className="mt-3 font-serif text-4xl text-[#123b4b] md:text-6xl">{project.name}</h2><p className="mt-2 flex items-center gap-2 text-sm text-slate-500"><MapPin size={14} className="text-[#087f88]" />{project.location || 'Location to be announced'}</p></div><div><div className="flex items-end justify-between"><span className="eyebrow text-slate-500">Project completion</span><span className="font-serif text-6xl text-[#087f88]">{progress === null ? '—' : `${progress}%`}</span></div><div className="mt-3 h-2 overflow-hidden bg-[#d9f6f3]"><div className="h-full bg-[#19c6c9] transition-all" style={{ width: `${progress ?? 0}%` }} /></div><p className="mt-3 text-right text-xs text-slate-500">{plan ? `${plan.totalFloors} floors` : 'Construction plan not yet published'}</p></div></div>
+          {plan ? <><div className="mt-8 grid gap-8 border-y border-[#c9c5bd] py-7 lg:grid-cols-[1fr_1fr]"><div>{latestMedia?.type === 'video' ? <video src={latestMedia.url} controls className="aspect-[16/10] w-full bg-black object-cover" /> : latestMedia ? <img src={latestMedia.url} alt={latestMedia.caption || `${project.name} construction site`} className="aspect-[16/10] w-full object-cover" /> : latestUpdate?.image_url ? <img src={latestUpdate.image_url} alt={latestUpdate.title} className="aspect-[16/10] w-full object-cover" /> : <div className="flex aspect-[16/10] items-center justify-center bg-[#e9e5dc] text-sm text-slate-500">No construction media has been published.</div>}<p className="mt-2 text-xs text-slate-500">{latestMedia?.caption || latestUpdate?.title || 'Latest approved site media'}</p></div><div><p className="eyebrow text-[#087f88]">Current activity</p><h3 className="mt-3 font-serif text-3xl text-[#123b4b]">{plan.currentPhase || activeMilestone?.title || 'Progress update'}</h3><p className="mt-4 text-sm leading-6 text-slate-600">{plan.progressNote || latestUpdate?.body || 'The project team has not added a site note to this update.'}</p><p className="mt-5 text-xs text-slate-500">Published {new Date(published!.published_at).toLocaleString()}</p><p className="mt-2 text-xs text-slate-500">Timeline: {plan.timeline || project.expected_completion || 'To be confirmed'}</p><p className="mt-5 border-l-2 border-[#19c6c9] pl-3 text-sm text-[#315a62]">{currentFloor ? `${currentFloor.label} is currently under construction.` : activeMilestone ? `Next milestone: ${activeMilestone.title}.` : 'All published milestones are complete.'}</p><button onClick={() => navigateToPublicProject(project.id)} className="link-arrow mt-6">Explore this project <ArrowRight size={16} /></button><button onClick={() => navigateToProjectInvestment(project.id)} className="btn-primary mt-5">Invest in This Project <TrendingUp size={16} /></button></div></div>
+            <div className="mt-8 grid gap-10 lg:grid-cols-[1fr_1fr]"><section><p className="eyebrow text-[#087f88]">Floor-by-floor progress</p><div className="mt-4 grid gap-x-6 sm:grid-cols-2">{plan.floors.map((floor) => <div key={floor.number} className="flex items-center justify-between gap-3 border-b border-[#e6e2da] py-3"><span className="text-sm text-[#123b4b]">{floor.label}</span><span className={`text-xs ${floor.status === 'COMPLETED' ? 'text-[#2e6b3e]' : floor.status === 'IN_PROGRESS' ? 'text-[#2e5f7a]' : 'text-slate-400'}`}>{floor.status === 'COMPLETED' ? 'Complete' : floor.status === 'IN_PROGRESS' ? 'In progress' : 'Pending'}</span></div>)}</div></section><section><p className="eyebrow text-[#087f88]">Construction timeline</p><div className="mt-4">{plan.milestones.map((milestone) => <div key={milestone.id} className="flex items-center justify-between gap-4 border-b border-[#e6e2da] py-3"><span className="text-sm text-[#123b4b]">{milestone.title}</span><span className={`text-xs ${milestone.status === 'COMPLETED' ? 'text-[#2e6b3e]' : milestone.status === 'IN_PROGRESS' ? 'text-[#2e5f7a]' : 'text-slate-400'}`}>{milestone.status === 'COMPLETED' ? 'Complete' : milestone.status === 'IN_PROGRESS' ? 'In progress' : 'Upcoming'}</span></div>)}</div></section></div>
+          </> : <div className="mt-8 border-y border-[#c9c5bd] py-8"><p className="font-serif text-2xl text-[#123b4b]">Progress is not yet published</p><p className="mt-2 max-w-xl text-sm leading-6 text-slate-500">The project team has not published a verified floor and milestone plan. We will show progress here as soon as it is available.</p><button onClick={() => navigateToPublicProject(project.id)} className="link-arrow mt-5">View project profile <ArrowRight size={16} /></button></div>}
+          {projectUpdates.length > 0 && <div className="mt-8 border-t border-[#c9c5bd] pt-6"><p className="eyebrow text-[#087f88]">Published site notes</p><div className="mt-4 grid gap-4 md:grid-cols-2">{projectUpdates.map((update) => <article key={update.id} className="border-b border-[#e2eeec] pb-4"><p className="text-sm font-semibold text-[#123b4b]">{update.title}</p><p className="mt-1 text-xs text-slate-500">{new Date(update.posted_at).toLocaleDateString()}</p>{update.body && <p className="mt-2 text-sm leading-6 text-slate-600">{update.body}</p>}</article>)}</div></div>}
+        </article>;
+      })}
     </div>}
   </PageFrame>;
 }
@@ -500,7 +560,81 @@ function InvestorCallout({ navigate }: { navigate: (view: View) => void }) { ret
 
 function InvestorPage({ navigate }: { navigate: (view: View) => void }) { const steps = [['01', 'Discover', 'Review the published project, availability, payment options, and verified progress.'], ['02', 'Connect', 'Speak with a consultant, book a private viewing, and confirm the home that fits your plans.'], ['03', 'Reserve', 'Agree the reservation terms, deposit schedule, and documentation before committing.'], ['04', 'Own', 'Track construction, payments, documents, and handover through your private client portal.']]; return <PageFrame eyebrow="The investor journey" title={<>Invest with<br /><em>clearer steps.</em></>} intro="Whether you are close to Nyali or investing from abroad, NBG is designed to make the journey visible, considered, and accountable."><div className="mt-14 grid gap-4 md:grid-cols-2">{steps.map(([number, title, text]) => <article key={number} className="border border-[#a9d9d8] bg-[#eefbf9] p-7 md:p-9"><span className="text-xs text-[#20afd1]">{number}</span><h2 className="mt-10 font-serif text-4xl text-[#123b4b]">{title}</h2><p className="mt-4 max-w-sm text-sm leading-6 text-slate-600">{text}</p></article>)}</div><section className="mt-14 grid gap-10 border-y border-[#c9c5bd] py-10 lg:grid-cols-[1fr_1fr]"><div><p className="eyebrow text-[#087f88]">Payment planning</p><h2 className="mt-4 font-serif text-4xl text-[#123b4b]">Plan the commitment<br /><em>before the decision.</em></h2></div><div className="grid gap-4 text-sm text-slate-600"><p><strong className="text-[#123b4b]">Reservation:</strong> Confirm the selected home and agreed reservation terms.</p><p><strong className="text-[#123b4b]">Deposit:</strong> Follow the documented deposit schedule shared by your consultant.</p><p><strong className="text-[#123b4b]">Progress payments:</strong> Track agreed milestones and receipts in your private portal.</p><p><strong className="text-[#123b4b]">Handover:</strong> Receive completion guidance, documentation, and next-step support.</p></div></section><button onClick={() => navigate('contact')} className="btn-primary mt-10">Speak with an investment consultant <ArrowRight size={16} /></button></PageFrame>; }
 
-function VerifyDocumentPage({ code }: { code: string }) { const [result, setResult] = useState<{ title: string; category: string; document_ref: string; verification_code: string; content_hash: string; generated_at: string } | null>(null); const [loading, setLoading] = useState(true); useEffect(() => { void supabase.rpc('verify_client_document', { code }).then(({ data }) => { setResult((data?.[0] ?? null) as typeof result); setLoading(false); }); }, [code]); return <PageFrame eyebrow="Document verification" title={result ? <>Document<br /><em>verified.</em></> : <>Check a document<br /><em>with NBG.</em></>} intro="Use the verification code printed on an NBG-generated PDF to confirm that it exists in the NBG document registry."><div className="mt-14 max-w-2xl border border-[#a9d9d8] bg-[#eefbf9] p-7 md:p-10">{loading ? <p className="text-sm text-slate-500">Checking the NBG registry...</p> : result ? <><div className="flex items-center gap-3 text-[#2e6b3e]"><Check size={20} /><p className="eyebrow">Authenticity record found</p></div><h2 className="mt-5 font-serif text-4xl text-[#123b4b]">{result.title}</h2><div className="mt-7 grid gap-5 border-y border-[#a9d9d8] py-6 sm:grid-cols-2"><div><p className="eyebrow text-slate-500">Reference</p><p className="mt-2 text-sm">{result.document_ref}</p></div><div><p className="eyebrow text-slate-500">Type</p><p className="mt-2 text-sm">{result.category}</p></div><div><p className="eyebrow text-slate-500">Issued</p><p className="mt-2 text-sm">{new Date(result.generated_at).toLocaleString()}</p></div><div><p className="eyebrow text-slate-500">Integrity hash</p><p className="mt-2 break-all text-xs text-slate-500">{result.content_hash}</p></div></div><p className="mt-6 text-sm leading-6 text-slate-600">This confirms that the document reference and verification code are registered by Next Bridge Group. Confirm financial commitments directly with an authorized NBG representative.</p></> : <><p className="text-sm text-[#a55445]">No matching document was found for this verification code.</p><p className="mt-4 text-sm leading-6 text-slate-600">Do not make a payment based on an unverified document. Contact NBG using the official phone or WhatsApp details on this website.</p></>}</div></PageFrame>; }
+function VerifyDocumentPage({ code }: { code: string }) {
+  type VerificationResult = { title: string; category: string; document_ref: string; verification_code: string; content_hash: string | null; generated_at: string; document_type: string; document_status: string; approval_status: string };
+  type EnquiryTrackingResult = { tracking_code: string; request_type: string; status: string; submitted_at: string; project_name: string | null; project_details: PublicProjectDetails | null };
+  type PaymentLookupResult = { transaction_ref: string; received_date: string; posted_at: string; amount: number; currency: string; payment_method: string; external_reference: string | null; unit_number: string; buyer_display: string; installment_number: number | null; scheduled_due_date: string | null; posted_by: string; record_status: string };
+  const [codeInput, setCodeInput] = useState(code);
+  const [result, setResult] = useState<VerificationResult | null>(null);
+  const [trackingResult, setTrackingResult] = useState<EnquiryTrackingResult | null>(null);
+  const [paymentResult, setPaymentResult] = useState<PaymentLookupResult | null>(null);
+  const [loading, setLoading] = useState(Boolean(code));
+  const [checked, setChecked] = useState(false);
+  const [error, setError] = useState('');
+  const [file, setFile] = useState<File | null>(null);
+  const [fileMatch, setFileMatch] = useState<boolean | null>(null);
+
+  const verify = useCallback(async (rawCode: string) => {
+    const normalizedCode = rawCode.trim().toUpperCase();
+    if (!normalizedCode) { setError('Enter the verification code printed on the NBG document.'); return; }
+    setLoading(true);
+    setChecked(true);
+    setError('');
+    setResult(null);
+    setTrackingResult(null);
+    setPaymentResult(null);
+    setFileMatch(null);
+    let timeoutId = 0;
+    try {
+      const isTrackingCode = /^(NBGL|NBGI|NBG-ENQ-\d{8}-|NBG-\d{8}-)/.test(normalizedCode);
+      const isPaymentReference = /^NBG-PAY-/.test(normalizedCode);
+      const response = await Promise.race([
+        (isPaymentReference ? supabase.rpc('lookup_buyer_payment', { p_transaction_ref: normalizedCode }) : isTrackingCode ? supabase.rpc('track_public_enquiry', { code: normalizedCode }) : supabase.rpc('verify_client_document', { code: normalizedCode })).then((value) => ({ kind: 'response' as const, value })),
+        new Promise<{ kind: 'timeout' }>((resolve) => { timeoutId = window.setTimeout(() => resolve({ kind: 'timeout' }), 12000); }),
+      ]);
+      if (response.kind === 'timeout') setError('The registry did not respond in time. Check your connection and retry.');
+      else if (response.value.error) setError('Verification is temporarily unavailable. Please retry or contact NBG.');
+      else if (isPaymentReference) setPaymentResult(((response.value.data as PaymentLookupResult[] | null)?.[0] ?? null));
+      else if (isTrackingCode) setTrackingResult(((response.value.data as EnquiryTrackingResult[] | null)?.[0] ?? null));
+      else setResult(((response.value.data as VerificationResult[] | null)?.[0] ?? null));
+    } catch {
+      setError('Verification is temporarily unavailable. Please retry or contact NBG.');
+    } finally {
+      if (timeoutId) window.clearTimeout(timeoutId);
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    setCodeInput(code);
+    if (code) void verify(code);
+    else { setLoading(false); setChecked(false); setResult(null); setTrackingResult(null); setPaymentResult(null); }
+  }, [code, verify]);
+
+  const checkUploadedFile = async (selectedFile: File | null) => {
+    setFile(selectedFile);
+    setFileMatch(null);
+    if (!selectedFile || !result?.content_hash) return;
+    const digest = await crypto.subtle.digest('SHA-256', await selectedFile.arrayBuffer());
+    const hash = Array.from(new Uint8Array(digest)).map((byte) => byte.toString(16).padStart(2, '0')).join('');
+    setFileMatch(hash.toLowerCase() === result.content_hash.toLowerCase());
+  };
+
+  return <PageFrame eyebrow="NBG verification registry" title={<>Verify documents<br /><em>and track requests.</em></>} intro="Check NBG document codes or use the tracking code received after submitting an enquiry. Original files can be fingerprint-checked when a hash is registered.">
+    <section className="mt-12 max-w-3xl border-y border-[#a9d9d8] py-7 md:py-10">
+      <form onSubmit={(event) => { event.preventDefault(); void verify(codeInput); }} className="grid gap-4 sm:grid-cols-[1fr_auto] sm:items-end"><label className="grid gap-2 text-xs text-slate-500">Enter verification code or document reference<input autoComplete="off" spellCheck={false} value={codeInput} onChange={(event) => setCodeInput(event.target.value.toUpperCase())} placeholder="NBGV-... · NBG-DOC-... · NBGL-... · NBG-PAY-..." className="admin-input font-mono uppercase" /></label><button disabled={loading || !codeInput.trim()} className="btn-primary justify-center disabled:opacity-50">{loading ? 'Checking registry...' : 'Check code'} <ShieldCheck size={16} /></button></form>
+      {error && <p role="alert" className="mt-5 border border-[#e4b8ad] bg-[#fff7f4] p-4 text-sm text-[#a55445]">{error}</p>}
+      {checked && !loading && !error && !result && !trackingResult && !paymentResult && <div className="mt-6 border border-[#e4b8ad] bg-[#fff7f4] p-5"><p className="font-semibold text-[#a55445]">No matching NBG document, enquiry, or payment was found.</p><p className="mt-2 text-sm leading-6 text-slate-600">Check the code or document reference and contact NBG through the official details on this website.</p></div>}
+      {trackingResult && <><div className="mt-7 border border-[#a9d9d8] bg-[#eefbf9] p-5 md:p-7"><div className="flex items-center gap-3 text-[#2e6b3e]"><Check size={20} /><p className="eyebrow">Enquiry tracking code confirmed</p></div><h2 className="mt-5 font-serif text-3xl text-[#123b4b]">{trackingResult.request_type.replace(/_/g, ' ')}</h2><div className="mt-5 grid gap-4 border-y border-[#a9d9d8] py-5 sm:grid-cols-2"><div><p className="eyebrow text-slate-500">Tracking code</p><p className="mt-1 font-mono text-sm">{trackingResult.tracking_code}</p></div><div><p className="eyebrow text-slate-500">Current status</p><p className="mt-1 text-sm">{trackingResult.status.replace(/_/g, ' ')}</p></div><div><p className="eyebrow text-slate-500">Submitted</p><p className="mt-1 text-sm">{new Date(trackingResult.submitted_at).toLocaleString()}</p></div><div><p className="eyebrow text-slate-500">Project</p><p className="mt-1 text-sm">{trackingResult.project_name || 'NBG enquiry'}</p></div></div><p className="mt-4 text-xs leading-5 text-slate-500">This lookup confirms the request and its latest workflow status. Personal contact details and enquiry contents are not shown.</p></div>{trackingResult.project_details && <ProjectDetailsPackage details={trackingResult.project_details} trackingCode={trackingResult.tracking_code} />}</>}
+      {result && <div className="mt-7 border border-[#a9d9d8] bg-[#eefbf9] p-5 md:p-7"><div className="flex flex-wrap items-center justify-between gap-3"><div className="flex items-center gap-3 text-[#2e6b3e]"><Check size={20} /><p className="eyebrow">Code found in NBG document registry</p></div><span className="text-xs font-semibold uppercase text-[#315a62]">{result.approval_status === 'NOT_REQUIRED' ? result.document_status : result.approval_status}</span></div><h2 className="mt-5 font-serif text-3xl text-[#123b4b]">{result.document_type || result.category}</h2><div className="mt-5 grid gap-4 border-y border-[#a9d9d8] py-5 sm:grid-cols-2"><div><p className="eyebrow text-slate-500">Document number</p><p className="mt-1 text-sm">{result.document_ref || 'Not recorded'}</p></div><div><p className="eyebrow text-slate-500">Verification code</p><p className="mt-1 font-mono text-sm">{result.verification_code}</p></div><div><p className="eyebrow text-slate-500">Registered</p><p className="mt-1 text-sm">{result.generated_at ? new Date(result.generated_at).toLocaleString() : 'Date not recorded'}</p></div><div><p className="eyebrow text-slate-500">Workflow status</p><p className="mt-1 text-sm">{result.document_status || 'Registered'} · {result.approval_status || 'Approval status not recorded'}</p></div></div><label className="mt-5 grid gap-2 text-xs text-slate-500">Optional: compare the original file fingerprint<input type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation" onChange={(event) => void checkUploadedFile(event.target.files?.[0] ?? null)} className="block w-full text-xs file:mr-3 file:border-0 file:bg-white file:px-3 file:py-2 file:text-xs file:text-[#087f88]" /></label>{file && fileMatch !== null && <p role="status" className={`mt-3 text-sm font-semibold ${fileMatch ? 'text-[#2e6b3e]' : 'text-[#a55445]'}`}>{fileMatch ? 'The uploaded file exactly matches the registered document.' : 'The file hash does not match the registered document. Do not treat this copy as authentic.'}</p>}<p className="mt-4 break-all text-[10px] leading-5 text-slate-500">Registered SHA-256: {result.content_hash || 'Not available for this record.'}</p><p className="mt-4 text-xs leading-5 text-slate-500">A registry match confirms that this code belongs to an NBG-registered document. It does not itself approve draft terms or guarantee the accuracy of statements in the document. Verify approval status and financial instructions directly with NBG.</p></div>}
+    </section>
+    {paymentResult && <PaymentTransactionResult result={paymentResult} />}
+  </PageFrame>;
+}
+
+function PaymentTransactionResult({ result }: { result: { transaction_ref: string; received_date: string; posted_at: string; amount: number; currency: string; payment_method: string; external_reference: string | null; unit_number: string; buyer_display: string; installment_number: number | null; scheduled_due_date: string | null; posted_by: string; record_status: string } }) {
+  return <section className="mt-7 border border-[#a9d9d8] bg-[#eefbf9] p-5 md:p-7"><div className="flex flex-wrap items-start justify-between gap-4"><div><p className="eyebrow text-[#087f88]">NBG transaction registry</p><h2 className="mt-2 font-serif text-3xl text-[#123b4b]">Payment record confirmed</h2><p className="mt-2 font-mono text-sm text-[#087f88]">{result.transaction_ref}</p></div><span className={`border px-3 py-2 text-[10px] font-bold uppercase tracking-wide ${result.record_status === 'ADVANCE PAYMENT' ? 'border-[#e2cf9e] bg-[#fbf6e8] text-[#856b2e]' : 'border-[#a9d9d8] bg-white text-[#087f88]'}`}>{result.record_status}</span></div><dl className="mt-6 grid gap-4 border-y border-[#a9d9d8] py-5 sm:grid-cols-2"><div><dt className="eyebrow text-slate-500">Amount</dt><dd className="mt-1 text-sm font-semibold text-[#123b4b]">{result.currency} {Number(result.amount).toLocaleString()}</dd></div><div><dt className="eyebrow text-slate-500">Payment method</dt><dd className="mt-1 text-sm text-[#123b4b]">{result.payment_method.replace(/_/g, ' ')}</dd></div><div><dt className="eyebrow text-slate-500">Received date</dt><dd className="mt-1 text-sm text-[#123b4b]">{result.received_date}</dd></div><div><dt className="eyebrow text-slate-500">Posted to ledger</dt><dd className="mt-1 text-sm text-[#123b4b]">{new Date(result.posted_at).toLocaleString()}</dd></div><div><dt className="eyebrow text-slate-500">Posted by</dt><dd className="mt-1 text-sm text-[#123b4b]">{result.posted_by}</dd></div><div><dt className="eyebrow text-slate-500">Buyer</dt><dd className="mt-1 text-sm text-[#123b4b]">{result.buyer_display}</dd></div><div><dt className="eyebrow text-slate-500">Property</dt><dd className="mt-1 text-sm text-[#123b4b]">Unit {result.unit_number}</dd></div><div><dt className="eyebrow text-slate-500">Allocation</dt><dd className="mt-1 text-sm text-[#123b4b]">{result.installment_number ? `Installment ${result.installment_number}${result.scheduled_due_date ? ` · due ${result.scheduled_due_date}` : ''}` : 'Unscheduled sale balance'}</dd></div>{result.external_reference && <div className="sm:col-span-2"><dt className="eyebrow text-slate-500">External payment reference</dt><dd className="mt-1 font-mono text-sm text-[#123b4b]">{result.external_reference}</dd></div>}</dl><p className="mt-4 text-xs leading-5 text-slate-500">This public lookup confirms the recorded transaction details. Buyer contact information and internal notes are not shown.</p></section>;
+}
 
 function LegalPage({ kind }: { kind: 'privacy' | 'terms' }) { const privacy = kind === 'privacy'; return <PageFrame eyebrow={privacy ? 'Your information' : 'Working together'} title={privacy ? <>Privacy<br /><em>at NBG.</em></> : <>Terms of<br /><em>engagement.</em></>} intro={privacy ? 'We use the information you share to respond to enquiries, arrange viewings, provide client services, and improve the NBG experience.' : 'These practical terms describe how enquiries, project information, pricing, availability, and client conversations should be understood.'}><div className="mt-14 max-w-3xl space-y-10 text-sm leading-7 text-slate-600"><section><h2 className="font-serif text-3xl text-[#123b4b]">Verified information</h2><p className="mt-3">Project status, availability, pricing, imagery, and completion dates are published by the NBG team and may change as information is verified. Please confirm the latest details with a consultant before making a financial decision.</p></section><section><h2 className="font-serif text-3xl text-[#123b4b]">{privacy ? 'How we use enquiries' : 'Enquiries and reservations'}</h2><p className="mt-3">{privacy ? 'Name, phone, email, preferences, and messages are used to respond to your request. We do not sell enquiry information. You may ask the team to correct or remove your details.' : 'An enquiry or viewing request does not create a reservation or purchase contract. Reservations, payment schedules, and agreements become binding only when confirmed in writing by authorized NBG representatives.'}</p></section><section><h2 className="font-serif text-3xl text-[#123b4b]">Contact</h2><p className="mt-3">Next Bridge Group Limited · Nyali, Mombasa, Kenya · +254 741 121 575 · hello@nextbridgegroup.com</p></section></div></PageFrame>; }
 
@@ -515,25 +649,23 @@ function EnquiryPage({ mode, navigate }: { mode: 'contact' | 'viewing'; navigate
     setLoading(true);
     setError('');
     const form = new FormData(event.currentTarget);
-    const referenceId = `NBG-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${Math.random().toString(36).slice(2, 7).toUpperCase()}`;
     const viewingDetails = mode === 'viewing'
       ? `Preferred date: ${form.get('date') || 'Not specified'}\nPreferred time: ${form.get('time') || 'Not specified'}\nApartment type: ${form.get('apartment') || 'Not specified'}`
       : '';
-    const { error: insertError } = await supabase.from('leads').insert({
-      name: form.get('name'),
-      phone: form.get('phone'),
-      email: form.get('email'),
-      project: 'Next Bridge Residences',
-      source: mode === 'viewing' ? 'private-viewing' : 'contact-form',
-      message: [`Reference: ${referenceId}`, viewingDetails, String(form.get('message') || '')].filter(Boolean).join('\n\n'),
-      status: 'NEW',
+    const { data: trackingCode, error: insertError } = await supabase.rpc('submit_public_lead_enquiry', {
+      p_name: String(form.get('name') || ''),
+      p_phone: String(form.get('phone') || ''),
+      p_email: String(form.get('email') || ''),
+      p_project: 'Next Bridge Residences',
+      p_source: mode === 'viewing' ? 'private-viewing' : 'contact-form',
+      p_message: [viewingDetails, String(form.get('message') || '')].filter(Boolean).join('\n\n'),
     });
     setLoading(false);
     if (insertError) {
       setError('We could not send your request just now. Please try WhatsApp or call the team directly.');
       return;
     }
-    setReference(referenceId);
+    setReference(String(trackingCode));
     setSubmitted(true);
   };
 
@@ -550,7 +682,8 @@ function EnquiryPage({ mode, navigate }: { mode: 'contact' | 'viewing'; navigate
               <span className="flex h-12 w-12 items-center justify-center rounded-full bg-[#dceeea] text-[#3a6f69]"><Check /></span>
               <h2 className="mt-7 font-serif text-5xl">Thank you.</h2>
               <p className="mt-5 max-w-md text-sm leading-6 text-slate-600">Your request is with the NBG team. We will be in touch using the details you shared.</p>
-              <p className="mt-5 border border-[#a9d9d8] bg-[#eefbf9] px-4 py-3 text-sm text-[#087f88]">Reference: <strong>{reference}</strong></p>
+              <p className="mt-5 border border-[#a9d9d8] bg-[#eefbf9] px-4 py-3 text-sm text-[#087f88]">Tracking code: <strong className="font-mono">{reference}</strong></p>
+              <a href={`/verify/${encodeURIComponent(reference)}`} className="link-arrow mt-4 self-start">Track this request <ArrowRight size={16} /></a>
               <button onClick={() => navigate('home')} className="link-arrow mt-8 self-start">Return home <ArrowRight size={16} /></button>
             </div>
           ) : (
@@ -660,16 +793,18 @@ function UnitModal({ unit, close, navigate }: { unit: Unit; close: () => void; n
         <div className="p-7 md:p-10">
           <p className="eyebrow text-[#20afd1]">Unit {unit.number}</p>
           <h2 className="mt-4 font-serif text-5xl leading-none">{unit.type}</h2>
-          <p className="mt-5 text-sm leading-6 text-slate-600">A demonstration unit profile. Verified pricing, floor plans and specifications will appear here when entered by the NBG team.</p>
+          <p className="mt-5 text-sm leading-6 text-slate-600">Review the published home details, then continue securely in the client portal to submit a purchase request.</p>
           <div className="mt-8 grid grid-cols-2 gap-y-6 border-y border-[#c9c5bd] py-6">
-            {[['Size', unit.size], ['Floor', unit.floor], ['Parking', unit.parking], ['Orientation', unit.view], ['Price', 'Not published'], ['Project', 'Next Bridge Residences']].map(([label, value]) => (
+            {[['Size', unit.size], ['Floor', unit.floor], ['Parking', unit.parking], ['Orientation', unit.view], ['Price', unit.price || 'On request'], ['Project', 'Next Bridge Residences']].map(([label, value]) => (
               <div key={label}>
                 <p className="eyebrow text-slate-500">{label}</p>
                 <p className="mt-2 text-sm">{value}</p>
               </div>
             ))}
           </div>
-          <button onClick={() => { close(); navigate('viewing'); }} className="btn-primary mt-8 w-full">Request more information <ArrowRight size={16} /></button>
+          {unit.status === 'AVAILABLE' && <button onClick={() => { localStorage.setItem('nbg_pending_purchase', unit.id); close(); navigate('portal'); }} className="btn-primary mt-8 w-full">Continue to secure purchase portal <ArrowRight size={16} /></button>}
+          {unit.status !== 'AVAILABLE' && <p className="mt-8 border border-[#c9c5bd] px-4 py-3 text-center text-xs text-slate-500">This home is {unit.status.toLowerCase()}. Contact NBG about other availability.</p>}
+          <button onClick={() => { close(); navigate('viewing'); }} className="btn-secondary mt-3 w-full justify-center">Request a viewing <ArrowRight size={16} /></button>
         </div>
       </div>
     </div>
@@ -716,6 +851,7 @@ function Footer({ navigate }: { navigate: (view: View) => void }) {
               <a href="https://wa.me/254741121575" onClick={() => trackContactEvent('whatsapp', 'footer')} className="flex items-center gap-2 text-left hover:text-[#087f88]"><MessageCircle size={15} /> WhatsApp</a>
               <button onClick={() => navigate('viewing')} className="flex items-center gap-2 text-left hover:text-[#087f88]"><CalendarDays size={15} /> Book a viewing</button>
               <button onClick={() => navigate('portal')} className="flex items-center gap-2 text-left hover:text-[#087f88]"><ShieldCheck size={15} /> Client portal</button>
+              <button onClick={() => navigate('verify')} className="flex items-center gap-2 text-left hover:text-[#087f88]"><Check size={15} /> Verify a document</button>
               <span className="flex items-center gap-2"><Instagram size={15} /> Instagram</span>
             </div>
           </div>
