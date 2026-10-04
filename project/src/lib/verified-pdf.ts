@@ -9,7 +9,7 @@ async function sha256(blob: Blob) {
   return Array.from(new Uint8Array(hash)).map((byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
-export async function createVerifiedPdf(title: string, documentType: string, rows: VerifiedPdfRow[], _dataSnapshot?: unknown) {
+export async function createVerifiedPdf(title: string, documentType: string, rows: VerifiedPdfRow[], _dataSnapshot?: unknown, purchaseSaleId?: string) {
   const { data: reservedCode, error: reserveError } = await supabase.rpc('reserve_export_verification_code');
   if (reserveError || !reservedCode) throw new Error(reserveError?.message || 'Could not reserve a verification code. Apply the verified PDF exports migration first.');
   const verificationCode = String(reservedCode);
@@ -128,7 +128,11 @@ export async function createVerifiedPdf(title: string, documentType: string, row
     p_category: documentType,
     p_document_ref: documentRef,
     p_content_hash: contentHash,
+    p_purchase_sale_id: purchaseSaleId ?? null,
   });
+  if (registrationError?.code === 'PGRST202') {
+    throw new Error('NBG’s quotation-verification migration is not active yet. Ask the administrator to apply the latest Supabase migrations, then retry the PDF download.');
+  }
   if (registrationError) throw new Error(`The PDF was created but its verification record could not be registered: ${registrationError.message}`);
   return { blob, verificationCode, documentRef };
 }

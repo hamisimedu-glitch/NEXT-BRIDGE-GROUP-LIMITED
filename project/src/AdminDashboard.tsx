@@ -428,6 +428,45 @@ type VaultSale = Pick<Sale, 'id' | 'unit_id' | 'unit_number' | 'sale_price' | 's
 type VaultCommission = Pick<Commission, 'sale_id' | 'amount' | 'status'>;
 type VaultPayment = { sale_id: string; amount: number };
 type VaultDraft = { recorded_price: string; construction_cost: string; additional_costs: string; notes: string };
+type PurchasePaymentInstructions = { bank_name: string; bank_branch: string; account_name: string; account_number: string; swift_code: string; payment_instructions: string; is_published: boolean };
+
+function PurchasePaymentInstructionsPanel({ user }: { user: AdminUser }) {
+  const [details, setDetails] = useState<PurchasePaymentInstructions>({ bank_name: '', bank_branch: '', account_name: '', account_number: '', swift_code: '', payment_instructions: '', is_published: false });
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const [saved, setSaved] = useState('');
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    const { data, error: loadError } = await supabase.from('purchase_payment_instructions').select('bank_name,bank_branch,account_name,account_number,swift_code,payment_instructions,is_published').eq('singleton', true).maybeSingle();
+    if (loadError) setError(`Payment details could not be loaded: ${loadError.message}`);
+    else if (data) setDetails(data as PurchasePaymentInstructions);
+    setLoading(false);
+  }, []);
+
+  useEffect(() => { void load(); }, [load]);
+
+  const save = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setSaving(true);
+    setError('');
+    setSaved('');
+    if (details.is_published && (!details.bank_name.trim() || !details.account_name.trim() || !details.account_number.trim())) {
+      setError('Add the verified bank name, account name, and account number before publishing payment instructions.');
+      setSaving(false);
+      return;
+    }
+    const { error: saveError } = await supabase.from('purchase_payment_instructions').upsert({ singleton: true, ...details, updated_by: user.id, updated_at: new Date().toISOString() }, { onConflict: 'singleton' });
+    setSaving(false);
+    if (saveError) { setError(`Payment instructions were not saved: ${saveError.message}`); return; }
+    setSaved(details.is_published ? 'Payment instructions saved and published to client purchase confirmations.' : 'Payment instructions saved as a draft and are hidden from clients.');
+  };
+
+  const update = (key: keyof PurchasePaymentInstructions, value: string | boolean) => setDetails((current) => ({ ...current, [key]: value }));
+
+  return <section className="border border-[#a9d9d8] bg-white p-5 md:p-7"><div className="flex items-start gap-3"><Building2 className="mt-1 text-[#087f88]" /><div><p className="eyebrow text-[#087f88]">Client payment setup</p><h2 className="mt-2 font-serif text-2xl text-[#123b4b]">Official bank instructions</h2><p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500">Enter the bank-verified remittance details clients should use. Only published instructions appear after a purchase request.</p></div></div>{loading ? <p className="mt-5 text-sm text-slate-500">Loading payment instructions...</p> : <form onSubmit={save} className="mt-5 grid gap-4"><div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3"><label className="grid gap-1.5 text-xs text-slate-500"><span className="eyebrow">Bank name *</span><input required value={details.bank_name} onChange={(event) => update('bank_name', event.target.value)} className="admin-input" placeholder="Enter verified bank name" /></label><label className="grid gap-1.5 text-xs text-slate-500"><span className="eyebrow">Branch</span><input value={details.bank_branch} onChange={(event) => update('bank_branch', event.target.value)} className="admin-input" placeholder="Branch name or location" /></label><label className="grid gap-1.5 text-xs text-slate-500"><span className="eyebrow">Account name *</span><input required value={details.account_name} onChange={(event) => update('account_name', event.target.value)} className="admin-input" placeholder="Verified beneficiary name" /></label><label className="grid gap-1.5 text-xs text-slate-500"><span className="eyebrow">Account number *</span><input required value={details.account_number} onChange={(event) => update('account_number', event.target.value)} className="admin-input font-mono" placeholder="Verified account number" /></label><label className="grid gap-1.5 text-xs text-slate-500"><span className="eyebrow">SWIFT / BIC</span><input value={details.swift_code} onChange={(event) => update('swift_code', event.target.value)} className="admin-input font-mono" placeholder="For international transfers" /></label></div><label className="grid gap-1.5 text-xs text-slate-500"><span className="eyebrow">Payment instructions</span><textarea value={details.payment_instructions} onChange={(event) => update('payment_instructions', event.target.value)} rows={3} className="admin-input resize-y" placeholder="Transfer notes, accepted currency, proof-of-payment channel, or other verified directions" /></label><div className="flex flex-wrap items-center justify-between gap-4 border-t border-[#e2eeec] pt-4"><label className="flex items-center gap-3 text-sm text-[#123b4b]"><input type="checkbox" checked={details.is_published} onChange={(event) => update('is_published', event.target.checked)} className="size-4 accent-[#087f88]" /><span>Publish to client purchase confirmations</span></label><button type="submit" disabled={saving} className="btn-primary disabled:opacity-60">{saving ? 'Saving...' : 'Save payment instructions'} <Check size={15} /></button></div>{error && <p role="alert" className="text-sm text-[#a55445]">{error}</p>}{saved && <p role="status" className="text-sm text-[#2e6b3e]">{saved}</p>}</form>}</section>;
+}
 
 function FinancialVaultTab({ user, goTo }: { user: AdminUser; goTo?: (tab: AdminTab) => void }) {
   const [units, setUnits] = useState<ProjectUnit[]>([]);
@@ -546,6 +585,7 @@ function FinancialVaultTab({ user, goTo }: { user: AdminUser; goTo?: (tab: Admin
   if (!advice.length) advice.push('Recorded costs, receivables, and completed-sale margin show no immediate action flags. Keep monthly costs and payments up to date.');
 
   return <div className="grid gap-7">
+    <PurchasePaymentInstructionsPanel user={user} />
     <section className="rounded-xl border border-[#a9d9d8] bg-[#eefbf9] p-5">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
         <div>
