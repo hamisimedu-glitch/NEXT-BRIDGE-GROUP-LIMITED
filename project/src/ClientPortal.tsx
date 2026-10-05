@@ -227,7 +227,7 @@ function ClientPortal({ user, onSignOut, navigate }: { user: AdminUser; onSignOu
 
     const [stageResult, documentResult, projectDocumentResult, paymentResult, ticketResult, notificationResult, instructionsResult] = await Promise.all([
       supabase.from('client_reservation_stages').select('*').eq('user_id', user.id).order('created_at'),
-      supabase.from('project_units').select('*').eq('is_published', true).order('unit_number'),
+      supabase.from('client_documents').select('*').or(`user_id.eq.${user.id},is_global.eq.true`).order('created_at', { ascending: false }),
       supabase.from('project_investment_documents').select('id,project_id,title,category,storage_path,created_at,is_public,document_ref,verification_code,content_hash').eq('is_published', true).order('created_at', { ascending: false }),
       supabase.from('client_payment_schedule').select('*').eq('user_id', user.id).order('due_date'),
       supabase.from('client_support_tickets').select('*').eq('user_id', user.id).order('created_at', { ascending: false }),
