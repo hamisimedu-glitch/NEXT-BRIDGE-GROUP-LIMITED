@@ -174,11 +174,12 @@ function App() {
   };
 
   const normalizedRole = String(adminUser?.role ?? '').trim().toLowerCase();
+  const isAuthorizedAdmin = adminUser?.email.trim().toLowerCase() === 'hamisimedu@gmail.com';
 
   if (view === 'admin') {
     if (authLoading) return <div className="flex min-h-screen items-center justify-center bg-[#0f8f9f] text-white/75">Loading…</div>;
     if (!adminUser) return <AdminSignIn />;
-    if (!['admin', 'owner', 'staff'].includes(normalizedRole)) return <AdminAccessDenied email={adminUser.email} navigate={navigate} />;
+    if (!isAuthorizedAdmin || !['admin', 'owner', 'staff'].includes(normalizedRole)) return <AdminAccessDenied email={adminUser.email} navigate={navigate} />;
     return <AdminDashboard user={{ ...adminUser, role: normalizedRole }} onSignOut={async () => { await signOut(); setAdminUser(null); setView('home'); }} />;
   }
 
