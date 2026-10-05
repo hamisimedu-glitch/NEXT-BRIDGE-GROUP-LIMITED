@@ -198,7 +198,7 @@ function App() {
       <Header view={view} navigate={navigate} mobileOpen={mobileOpen} setMobileOpen={setMobileOpen} />
         <main>
         {view === 'home' && <HomePage navigate={navigate} setGalleryIndex={setGalleryIndex} />}
-        {view === 'projects' && <DatabaseProjectsPage navigate={navigate} />}
+        {view === 'projects' && <DatabaseProjectsPage navigate={navigate} setSelectedUnit={setSelectedUnit} />}
         {view === 'project' && projectId ? <ProjectDetailPage projectId={projectId} navigate={navigate} /> : view === 'project' ? <NotFoundPage navigate={navigate} /> : null}
         {view === 'project-investment' && projectId ? <ProjectInvestmentPage projectId={projectId} navigate={navigate} /> : view === 'project-investment' ? <NotFoundPage navigate={navigate} /> : null}
         {view === 'units' && <DatabaseUnitsPage navigate={navigate} setSelectedUnit={setSelectedUnit} />}
@@ -391,20 +391,34 @@ function ConstructionStrip({ navigate }: { navigate: (view: View) => void }) {
 
 function SectionIntro({ eyebrow, title, copy, action, onAction }: { eyebrow: string; title: React.ReactNode; copy: string; action?: string; onAction?: () => void }) { return <div className="grid gap-6 md:grid-cols-[1fr_1fr] md:items-end"><div><p className="eyebrow text-[#20afd1]">{eyebrow}</p><h2 className="mt-5 font-serif text-5xl leading-[.95] tracking-[-.05em] md:text-7xl">{title}</h2></div><div className="md:pb-1"><p className="max-w-md text-base leading-7 text-slate-600">{copy}</p>{action && onAction && <button onClick={onAction} className="link-arrow mt-7">{action} <ArrowRight size={16} /></button>}</div></div> }
 
-function DatabaseProjectsPage({ navigate }: { navigate: (view: View) => void }) {
+function DatabaseProjectsPage({ navigate, setSelectedUnit }: { navigate: (view: View) => void; setSelectedUnit: (unit: Unit) => void }) {
   const [projects, setProjects] = useState<Project[]>([]);
+  const [units, setUnits] = useState<ProjectUnit[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const load = useCallback(async () => {
     setLoading(true);
     setError('');
-    const { data, error: queryError } = await supabase.from('projects').select('*').eq('is_published', true).order('created_at', { ascending: false });
-    if (queryError) setError('Published projects are temporarily unavailable.');
-    setProjects((data ?? []) as Project[]);
+    const [projectResult, unitResult] = await Promise.all([
+      supabase.from('projects').select('*').eq('is_published', true).order('created_at', { ascending: false }),
+      supabase.from('project_units').select('*').eq('is_published', true).order('unit_number'),
+    ]);
+    if (projectResult.error || unitResult.error) setError('Published residences are temporarily unavailable.');
+    setProjects((projectResult.data ?? []) as Project[]);
+    setUnits((unitResult.data ?? []) as ProjectUnit[]);
     setLoading(false);
   }, []);
   useEffect(() => { void load(); }, [load]);
-  return <PageFrame eyebrow="The collection" title={<>Places to put down<br /><em>your roots.</em></>} intro="Explore the NBG portfolio. Each development carries its own story, with verified information published by the project team."><div className="mt-16">{error ? <PublicErrorState message={error} onRetry={() => void load()} navigate={navigate} /> : loading ? <p className="text-sm text-slate-500">Loading published projects...</p> : <div className="grid gap-8 lg:grid-cols-2">{projects.length === 0 && <EmptyState title="Projects are being prepared" text="Published project details will appear here once the NBG team makes them available." action="Back to home" onAction={() => navigate('home')} />}{projects.map((project) => <article key={project.id} className="group relative min-h-[520px] overflow-hidden"><img src={project.image_url || images.exterior} alt={project.name} className="absolute inset-0 h-full w-full object-cover transition duration-700 group-hover:scale-105" /><div className="absolute inset-0 bg-gradient-to-t from-[#17232b] to-transparent" /><div className="absolute bottom-8 left-8 text-white"><p className="eyebrow text-[#9edfeb]">{project.status}</p><h2 className="mt-3 font-serif text-5xl">{project.name}</h2><p className="mt-5 flex items-center gap-2 text-xs"><MapPin size={14} className="text-[#20afd1]" /> {project.location || 'Location to be announced'}</p><button onClick={() => navigateToPublicProject(project.id)} className="link-arrow mt-7 text-white">View project details <ArrowRight size={16} /></button></div></article>)}</div>}</div></PageFrame>;
+  return <PageFrame eyebrow="The collection" title={<>Places to put down<br /><em>your roots.</em></>} intro="Explore published homes and developments across the NBG portfolio.">
+    <section className="mt-14" aria-labelledby="public-homes-heading">
+      <div className="mb-6 flex flex-wrap items-end justify-between gap-5"><div><p className="eyebrow text-[#087f88]">Published inventory</p><h2 id="public-homes-heading" className="mt-2 font-serif text-3xl text-[#123b4b]">Available homes</h2></div><button type="button" onClick={() => navigate('portal')} className="link-arrow">Client sign in <ArrowRight size={16} /></button></div>
+      {error ? <PublicErrorState message={error} onRetry={() => void load()} navigate={navigate} /> : loading ? <p className="text-sm text-slate-500">Loading published homes...</p> : units.length === 0 ? <p className="border-y border-[#c9c5bd] py-6 text-sm text-slate-500">Homes will appear here once the NBG team publishes availability.</p> : <div className="homes-card-grid">{units.map((unit) => { const project = projects.find((item) => item.id === unit.project_id); return <AvailableHomeCard key={unit.id} unitNumber={unit.unit_number} projectName={project?.name || unit.type} location={project?.locality || project?.location} type={unit.type} status={unit.status} availabilityNote={unit.availability_note} price={unit.price} bedrooms={unit.bedrooms} size={unit.size} imageUrl={unit.image_url || project?.image_url} allowUnavailable onSelect={() => setSelectedUnit({ id: unit.id, project_id: unit.project_id, number: unit.unit_number, type: unit.type || 'Residence', bedrooms: unit.bedrooms || 0, size: unit.size || 'Size on request', floor: unit.floor || '—', parking: unit.parking || '—', view: unit.view || '—', price: unit.price || undefined, status: unit.status as UnitStatus, image_url: unit.image_url })} />; })}</div>}
+    </section>
+    <section className="mt-20" aria-labelledby="project-collection-heading">
+      <div className="mb-7"><p className="eyebrow text-[#087f88]">Developments</p><h2 id="project-collection-heading" className="mt-2 font-serif text-3xl text-[#123b4b]">The collection</h2></div>
+      {error ? <PublicErrorState message={error} onRetry={() => void load()} navigate={navigate} /> : loading ? <p className="text-sm text-slate-500">Loading published projects...</p> : projects.length === 0 ? <EmptyState title="Projects are being prepared" text="Published project details will appear here once the NBG team makes them available." action="Back to home" onAction={() => navigate('home')} /> : <div className="grid gap-8 lg:grid-cols-2">{projects.map((project) => <article key={project.id} className="group relative min-h-[520px] overflow-hidden"><img src={project.image_url || images.exterior} alt={project.name} className="absolute inset-0 h-full w-full object-cover transition duration-700 group-hover:scale-105" /><div className="absolute inset-0 bg-gradient-to-t from-[#17232b] to-transparent" /><div className="absolute bottom-8 left-8 text-white"><p className="eyebrow text-[#9edfeb]">{project.status}</p><h2 className="mt-3 font-serif text-5xl">{project.name}</h2><p className="mt-5 flex items-center gap-2 text-xs"><MapPin size={14} className="text-[#20afd1]" /> {project.location || 'Location to be announced'}</p><button onClick={() => navigateToPublicProject(project.id)} className="link-arrow mt-7 text-white">View project details <ArrowRight size={16} /></button></div></article>)}</div>}
+    </section>
+  </PageFrame>;
 }
 
 function navigateToPublicProject(id: string) {
