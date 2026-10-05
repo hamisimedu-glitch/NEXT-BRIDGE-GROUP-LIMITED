@@ -23,6 +23,7 @@ import {
   ShieldCheck,
   Star,
   TrendingUp,
+  UserRound,
   X,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
@@ -239,6 +240,10 @@ function WatermarkedImage({ src, alt, className = '', imageClassName = '' }: { s
 
 function Header({ view, navigate, mobileOpen, setMobileOpen }: { view: View; navigate: (view: View) => void; mobileOpen: boolean; setMobileOpen: (open: boolean) => void }) {
   const isHome = view === 'home';
+  const openSignup = () => {
+    navigate('portal');
+    window.history.replaceState({}, '', '/portal?mode=signup');
+  };
   return (
     <header className={`site-header site-header-global absolute top-0 z-30 w-full text-white ${isHome ? 'site-header-home' : 'site-header-inner'}`}>
       <div className="mx-auto flex max-w-[1600px] items-center justify-between px-4 py-4 md:px-8 md:py-5">
@@ -250,12 +255,14 @@ function Header({ view, navigate, mobileOpen, setMobileOpen }: { view: View; nav
           </span>
         </button>
 
-        <nav className="hidden items-center gap-8 lg:flex">
+        <nav className="hidden items-center gap-8 xl:flex">
           <button onClick={() => navigate('home')} className={`nav-link text-[10px] font-medium uppercase tracking-[0.18em] ${view === 'home' ? 'nav-link-active' : ''}`}>Home</button>
           {navItems.map((item) => <button key={item.view} onClick={() => navigate(item.view)} className={`nav-link text-[10px] font-medium uppercase tracking-[0.18em] ${item.view === view ? 'nav-link-active' : ''}`}>{item.label}</button>)}
         </nav>
 
-        <div className="hidden items-center gap-4 lg:flex">
+        <div className="hidden items-center gap-3 xl:flex">
+          <button type="button" onClick={() => navigate('portal')} className="header-auth-link">Sign in</button>
+          <button type="button" onClick={openSignup} className="header-auth-cta">Create account</button>
           <button onClick={() => navigate('contact')} className="header-contact inline-flex items-center gap-2 rounded-full px-3 py-2 text-[10px] font-medium uppercase tracking-[0.18em] transition">
             <span className="header-contact-icon flex h-5 w-5 items-center justify-center rounded-full"><Phone size={10} strokeWidth={1.8} /></span>
             NYALI · MOMBASA · KENYA
@@ -265,12 +272,12 @@ function Header({ view, navigate, mobileOpen, setMobileOpen }: { view: View; nav
           </button>
         </div>
 
-        <div className="flex items-center gap-2 lg:hidden">
+        <div className="flex items-center gap-2 xl:hidden">
           <button className="header-menu-mobile flex h-11 w-11 items-center justify-center rounded-full transition" onClick={() => navigate('verify')} aria-label="Verify a document" title="Verify a document"><ShieldCheck size={19} /></button>
           <button className="header-menu-mobile flex h-11 w-11 items-center justify-center rounded-full transition" onClick={() => setMobileOpen(!mobileOpen)} aria-label={mobileOpen ? 'Close menu' : 'Open menu'}>{mobileOpen ? <X /> : <Menu />}</button>
         </div>
       </div>
-      {mobileOpen && <div className="site-mobile-menu absolute right-4 top-[76px] w-[min(360px,calc(100%-2rem))] p-5 md:right-8"><div className="grid gap-1"><button onClick={() => navigate('home')} className="border-b border-white/20 px-2 py-4 text-left text-xs uppercase tracking-[0.16em]">Home</button>{navItems.map((item) => <button key={item.view} onClick={() => navigate(item.view)} className="border-b border-white/20 px-2 py-4 text-left text-xs uppercase tracking-[0.16em]">{item.label}</button>)}<button onClick={() => navigate('portal')} className="border-b border-white/20 px-2 py-4 text-left text-xs uppercase tracking-[0.16em]">Client portal</button><button onClick={() => navigate('viewing')} className="mt-4 bg-[#0b8e92] px-4 py-4 text-left text-xs font-semibold uppercase tracking-[0.16em] text-white">Book a private viewing</button></div></div>}
+      {mobileOpen && <div className="site-mobile-menu absolute right-4 top-[76px] w-[min(360px,calc(100%-2rem))] p-5 md:right-8"><div className="grid gap-1"><button onClick={() => navigate('home')} className="border-b border-white/20 px-2 py-4 text-left text-xs uppercase tracking-[0.16em]">Home</button>{navItems.map((item) => <button key={item.view} onClick={() => navigate(item.view)} className="border-b border-white/20 px-2 py-4 text-left text-xs uppercase tracking-[0.16em]">{item.label}</button>)}<button onClick={() => navigate('portal')} className="border-b border-white/20 px-2 py-4 text-left text-xs uppercase tracking-[0.16em]">Sign in</button><button onClick={openSignup} className="border-b border-white/20 px-2 py-4 text-left text-xs uppercase tracking-[0.16em]">Create account</button><button onClick={() => navigate('viewing')} className="mt-4 bg-[#0b8e92] px-4 py-4 text-left text-xs font-semibold uppercase tracking-[0.16em] text-white">Book a private viewing</button></div></div>}
     </header>
   );
 }
@@ -851,7 +858,8 @@ function Footer({ navigate }: { navigate: (view: View) => void }) {
               <a href="tel:+254741121575" onClick={() => trackContactEvent('phone', 'footer')} className="flex items-center gap-2 text-left hover:text-[#087f88]"><Phone size={15} /> Call +254 741 121 575</a>
               <a href="https://wa.me/254741121575" onClick={() => trackContactEvent('whatsapp', 'footer')} className="flex items-center gap-2 text-left hover:text-[#087f88]"><MessageCircle size={15} /> WhatsApp</a>
               <button onClick={() => navigate('viewing')} className="flex items-center gap-2 text-left hover:text-[#087f88]"><CalendarDays size={15} /> Book a viewing</button>
-              <button onClick={() => navigate('portal')} className="flex items-center gap-2 text-left hover:text-[#087f88]"><ShieldCheck size={15} /> Client portal</button>
+              <button onClick={() => navigate('portal')} className="flex items-center gap-2 text-left hover:text-[#087f88]"><ShieldCheck size={15} /> Sign in</button>
+              <button onClick={() => { navigate('portal'); window.history.replaceState({}, '', '/portal?mode=signup'); }} className="flex items-center gap-2 text-left hover:text-[#087f88]"><UserRound size={15} /> Create account</button>
               <button onClick={() => navigate('verify')} className="flex items-center gap-2 text-left hover:text-[#087f88]"><Check size={15} /> Verify a document</button>
               <span className="flex items-center gap-2"><Instagram size={15} /> Instagram</span>
             </div>

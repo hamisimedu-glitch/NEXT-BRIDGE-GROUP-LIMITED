@@ -30,7 +30,7 @@ function kenyaCalendarDate() {
 }
 
 export function ClientPortalSignIn() {
-  const [mode, setMode] = useState<'signin' | 'magic' | 'signup' | 'reset' | 'created'>(() => localStorage.getItem('nbg_pending_purchase') ? 'signup' : 'signin');
+  const [mode, setMode] = useState<'signin' | 'magic' | 'signup' | 'reset' | 'created'>(() => localStorage.getItem('nbg_pending_purchase') || new URLSearchParams(window.location.search).get('mode') === 'signup' ? 'signup' : 'signin');
   const [step, setStep] = useState<1 | 2>(1);
   const [email, setEmail] = useState('');
   const [fullName, setFullName] = useState('');

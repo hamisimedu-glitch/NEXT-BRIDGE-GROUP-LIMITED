@@ -69,6 +69,10 @@ button { cursor: pointer; }
 .site-header-global .nav-link-active::after { background: var(--aqua-light); }
 .header-contact { border: 1px solid rgba(255,255,255,.32); background: rgba(255,255,255,.06); color: rgba(255,255,255,.92); }
 .header-contact:hover { background: rgba(255,255,255,.14); }
+.header-auth-link { color: rgba(255,255,255,.86); font-size: 10px; font-weight: 600; }
+.header-auth-link:hover { color: white; }
+.header-auth-cta { border: 1px solid rgba(141,231,226,.75); border-radius: 999px; background: #19bfc2; padding: 11px 14px; color: white; font-size: 9px; font-weight: 700; text-transform: uppercase; transition: background .2s ease, transform .2s ease; }
+.header-auth-cta:hover { transform: translateY(-1px); background: #087f88; }
 .header-contact-icon { border: 1px solid currentColor; }
 .header-menu, .header-menu-mobile { border: 1px solid rgba(255,255,255,.42); background: rgba(255,255,255,.08); color: white; }
 .header-menu:hover, .header-menu-mobile:hover { background: rgba(255,255,255,.18); }
