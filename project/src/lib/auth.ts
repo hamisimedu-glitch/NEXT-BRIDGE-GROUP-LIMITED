@@ -16,6 +16,15 @@ function normalizeRole(role: string | null | undefined): string {
   return String(role ?? 'client').trim().toLowerCase();
 }
 
+const DEFAULT_VERCEL_SITE_URL = 'https://next-bridge-group-limited-qfk17ns6k-hamisedu-7859.vercel.app';
+
+function portalRedirectUrl(query = ''): string {
+  const configuredOrigin = import.meta.env.VITE_PUBLIC_SITE_URL?.trim().replace(/\/+$/, '');
+  const isVercelHost = window.location.hostname.endsWith('.vercel.app');
+  const redirectOrigin = configuredOrigin || (isVercelHost ? DEFAULT_VERCEL_SITE_URL : window.location.origin);
+  return `${redirectOrigin}/portal${query}`;
+}
+
 export async function fetchProfile(userId: string): Promise<AdminUser | null> {
   const { data, error } = await supabase
     .from('profiles')
@@ -43,7 +52,7 @@ export async function signUp(email: string, password: string, role: 'client' | '
     email,
     password,
     options: {
-      emailRedirectTo: `${window.location.origin}/portal`,
+      emailRedirectTo: portalRedirectUrl(),
       data: { role, ...profile },
     },
   });
@@ -52,14 +61,14 @@ export async function signUp(email: string, password: string, role: 'client' | '
 export async function signInWithGoogle() {
   return supabase.auth.signInWithOAuth({
     provider: 'google',
-    options: { redirectTo: `${window.location.origin}/portal` },
+    options: { redirectTo: portalRedirectUrl() },
   });
 }
 
 export async function sendMagicLink(email: string) {
   return supabase.auth.signInWithOtp({
     email,
-    options: { emailRedirectTo: `${window.location.origin}/portal` },
+    options: { emailRedirectTo: portalRedirectUrl() },
   });
 }
 
@@ -68,7 +77,7 @@ export async function signInWithPassword(email: string, password: string) {
 }
 
 export async function sendPasswordReset(email: string) {
-  return supabase.auth.resetPasswordForEmail(email, { redirectTo: `${window.location.origin}/portal?reset=1` });
+  return supabase.auth.resetPasswordForEmail(email, { redirectTo: portalRedirectUrl('?reset=1') });
 }
 
 export async function updatePassword(password: string) {
