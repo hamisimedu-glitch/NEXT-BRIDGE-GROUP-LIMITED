@@ -33,6 +33,7 @@ import ClientPortal, { ClientPortalSignIn } from '@/ClientPortal';
 import AvailableHomeCard from '@/AvailableHomeCard';
 import AvailableHomesCatalog from '@/AvailableHomesCatalog';
 import LocationMap from '@/LocationMap';
+import ProjectProgressExperience from '@/ProjectProgressExperience';
 import ProjectInvestmentPage from '@/ProjectInvestmentPage';
 import ProjectDetailsPackage, { type PublicProjectDetails } from '@/ProjectDetailsPackage';
 import { calculateConstructionProgress, type PublishedConstructionProgress } from '@/lib/construction';
@@ -202,7 +203,7 @@ function App() {
         {view === 'home' && <HomePage navigate={navigate} setGalleryIndex={setGalleryIndex} />}
         {view === 'residences' && <DatabaseResidencesPage navigate={navigate} setSelectedUnit={setSelectedUnit} />}
         {view === 'projects' && <DatabaseProjectsPage navigate={navigate} />}
-        {view === 'project' && projectId ? <ProjectDetailPage projectId={projectId} navigate={navigate} setSelectedUnit={setSelectedUnit} /> : view === 'project' ? <NotFoundPage navigate={navigate} /> : null}
+        {view === 'project' && projectId ? <ProjectProgressPage projectId={projectId} navigate={navigate} setSelectedUnit={setSelectedUnit} /> : view === 'project' ? <NotFoundPage navigate={navigate} /> : null}
         {view === 'project-investment' && projectId ? <ProjectInvestmentPage projectId={projectId} navigate={navigate} /> : view === 'project-investment' ? <NotFoundPage navigate={navigate} /> : null}
         {view === 'units' && <DatabaseUnitsPage navigate={navigate} setSelectedUnit={setSelectedUnit} />}
         {view === 'construction' && <ConstructionPage navigate={navigate} />}
@@ -470,6 +471,44 @@ function navigateToPublicProject(id: string) {
 function navigateToProjectInvestment(id: string) {
   window.history.pushState({}, '', `/project/${encodeURIComponent(id)}/invest`);
   window.dispatchEvent(new PopStateEvent('popstate'));
+}
+
+function ProjectProgressPage({ projectId, navigate, setSelectedUnit }: { projectId: string; navigate: (view: View) => void; setSelectedUnit: (unit: Unit) => void }) {
+  const [project, setProject] = useState<Project | null>(null);
+  const [units, setUnits] = useState<ProjectUnit[]>([]);
+  const [updates, setUpdates] = useState<ConstructionUpdate[]>([]);
+  const [construction, setConstruction] = useState<PublishedConstructionProgress | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError('');
+    const [projectResult, unitResult, updateResult, constructionResult] = await Promise.all([
+      supabase.from('projects').select('*').eq('id', projectId).eq('is_published', true).maybeSingle(),
+      supabase.from('project_units').select('*').eq('project_id', projectId).eq('is_published', true).order('unit_number'),
+      supabase.from('construction_updates').select('*').eq('project_id', projectId).eq('is_published', true).order('posted_at', { ascending: false }),
+      supabase.from('published_construction_progress').select('*').eq('project_id', projectId).maybeSingle(),
+    ]);
+    if (projectResult.error || unitResult.error || updateResult.error || constructionResult.error) setError('Project details are temporarily unavailable.');
+    setProject((projectResult.data ?? null) as Project | null);
+    setUnits((unitResult.data ?? []) as ProjectUnit[]);
+    setUpdates((updateResult.data ?? []) as ConstructionUpdate[]);
+    setConstruction((constructionResult.data ?? null) as PublishedConstructionProgress | null);
+    setLoading(false);
+  }, [projectId]);
+  useEffect(() => {
+    void load();
+    const channel = supabase.channel(`public-project-experience-${projectId}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'published_construction_progress', filter: `project_id=eq.${projectId}` }, () => { void load(); })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'construction_updates', filter: `project_id=eq.${projectId}` }, () => { void load(); })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'project_units', filter: `project_id=eq.${projectId}` }, () => { void load(); })
+      .subscribe();
+    return () => { void supabase.removeChannel(channel); };
+  }, [load, projectId]);
+  if (loading) return <PageFrame eyebrow="Project profile" title={<>Preparing<br /><em>the details.</em></>} intro="Loading verified project information..."><p className="mt-14 text-sm text-slate-500">Please wait...</p></PageFrame>;
+  if (error) return <PageFrame eyebrow="Project profile" title={<>Details are<br /><em>temporarily paused.</em></>} intro="We could not retrieve this project right now."><PublicErrorState message={error} onRetry={() => void load()} navigate={navigate} /></PageFrame>;
+  if (!project) return <NotFoundPage navigate={navigate} />;
+  return <ProjectProgressExperience project={project} units={units} updates={updates} construction={construction} onSelectUnit={(unit) => setSelectedUnit(publicUnitToModalUnit(unit, [project]))} onBack={() => navigate('projects')} onContact={() => navigate('viewing')} />;
 }
 
 function ProjectDetailPage({ projectId, navigate, setSelectedUnit }: { projectId: string; navigate: (view: View) => void; setSelectedUnit: (unit: Unit) => void }) {

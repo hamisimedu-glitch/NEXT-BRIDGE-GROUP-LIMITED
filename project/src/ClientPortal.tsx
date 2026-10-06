@@ -11,6 +11,8 @@ import { formatMoneyInput, formatKes, parseMoney } from '@/lib/format';
 import DashboardInbox from '@/DashboardInbox';
 import { createVerifiedPdf, downloadPdf } from '@/lib/verified-pdf';
 import ProjectDetailsPackage, { type PublicProjectDetails } from '@/ProjectDetailsPackage';
+import ProjectProgressExperience from '@/ProjectProgressExperience';
+import type { PublishedConstructionProgress } from '@/lib/construction';
 
 type View = 'home' | 'projects' | 'units' | 'construction' | 'gallery' | 'about' | 'contact' | 'viewing' | 'faq' | 'portal' | 'admin';
 type PortalSection = 'overview' | 'progress' | 'payments' | 'investments' | 'availability' | 'resources' | 'profile';
@@ -175,6 +177,7 @@ function ClientPortal({ user, onSignOut, navigate }: { user: AdminUser; onSignOu
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [projects, setProjects] = useState<Project[]>([]);
   const [updates, setUpdates] = useState<ConstructionUpdate[]>([]);
+  const [publishedProgress, setPublishedProgress] = useState<PublishedConstructionProgress[]>([]);
   const [units, setUnits] = useState<ProjectUnit[]>([]);
   const [investments, setInvestments] = useState<Investment[]>([]);
   const [realtor, setRealtor] = useState<Realtor | null>(null);
@@ -200,7 +203,7 @@ function ClientPortal({ user, onSignOut, navigate }: { user: AdminUser; onSignOu
 
   const load = useCallback(async () => {
     setPortalError('');
-    const [projectResult, updateResult, unitResult, investmentResult, realtorResult, profileResult, reservationResult] = await Promise.all([
+    const [projectResult, updateResult, unitResult, investmentResult, realtorResult, profileResult, reservationResult, progressResult] = await Promise.all([
       supabase.from('projects').select('*').eq('is_published', true).order('created_at', { ascending: false }),
       supabase.from('construction_updates').select('*').order('posted_at', { ascending: false }).limit(8),
       supabase.from('project_units').select('*').eq('is_published', true).order('unit_number'),
@@ -208,6 +211,7 @@ function ClientPortal({ user, onSignOut, navigate }: { user: AdminUser; onSignOu
       supabase.from('realtors').select('*').eq('user_id', user.id).maybeSingle(),
       supabase.from('profiles').select('id, full_name, phone, preferred_location, investment_budget, notes, identity_document_type, identity_document_number, residential_address').eq('id', user.id).maybeSingle(),
       supabase.rpc('get_my_unit_reservations'),
+      supabase.from('published_construction_progress').select('*').order('published_at', { ascending: false }),
     ]);
 
     const [stageResult, documentResult, projectDocumentResult, paymentResult, ticketResult, notificationResult, instructionsResult] = await Promise.all([
@@ -220,12 +224,13 @@ function ClientPortal({ user, onSignOut, navigate }: { user: AdminUser; onSignOu
       supabase.from('purchase_payment_instructions').select('bank_name,bank_branch,account_name,account_number,swift_code,payment_instructions,is_published').eq('singleton', true).eq('is_published', true).maybeSingle(),
     ]);
 
-    if ([projectResult, updateResult, unitResult, investmentResult, realtorResult, profileResult, reservationResult, stageResult, documentResult, projectDocumentResult, paymentResult, ticketResult, notificationResult, instructionsResult].some((result) => result.error)) {
+    if ([projectResult, updateResult, unitResult, investmentResult, realtorResult, profileResult, reservationResult, progressResult, stageResult, documentResult, projectDocumentResult, paymentResult, ticketResult, notificationResult, instructionsResult].some((result) => result.error)) {
       setPortalError('Some workspace data could not be loaded. You can still browse the available sections and retry.');
     }
 
     setProjects((projectResult.data ?? []) as Project[]);
     setUpdates((updateResult.data ?? []) as ConstructionUpdate[]);
+    setPublishedProgress((progressResult.data ?? []) as PublishedConstructionProgress[]);
     setUnits((unitResult.data ?? []) as ProjectUnit[]);
     setInvestments((investmentResult.data ?? []) as Investment[]);
     setRealtor((realtorResult.data ?? null) as Realtor | null);
@@ -258,6 +263,14 @@ function ClientPortal({ user, onSignOut, navigate }: { user: AdminUser; onSignOu
   useEffect(() => {
     const channel = supabase.channel(`client-unit-inventory-${user.id}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'project_units' }, () => { void load(); })
+      .subscribe();
+    return () => { void supabase.removeChannel(channel); };
+  }, [load, user.id]);
+
+  useEffect(() => {
+    const channel = supabase.channel(`client-project-progress-${user.id}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'published_construction_progress' }, () => { void load(); })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'construction_updates' }, () => { void load(); })
       .subscribe();
     return () => { void supabase.removeChannel(channel); };
   }, [load, user.id]);
@@ -315,7 +328,7 @@ function ClientPortal({ user, onSignOut, navigate }: { user: AdminUser; onSignOu
   const active = sidebarItems.find((item) => item.id === section) ?? sidebarItems[0];
   const mobileNavItems: { id: PortalSection; label: string; icon: typeof Home }[] = [{ id: 'overview', label: 'Home', icon: Home }, { id: 'progress', label: 'Project', icon: Building2 }, { id: 'payments', label: 'Payments', icon: Receipt }, { id: 'resources', label: 'Docs', icon: FileText }, { id: 'availability', label: 'More', icon: Menu }];
 
-  const content = section === 'overview' ? <OverviewContent user={user} profile={profile} projects={projects} updates={updates} units={units} reservations={unitReservations} investments={investments} stages={stages} payments={payments} notifications={notifications} documents={documents} setSection={selectSection} /> : section === 'progress' ? <ProgressContent updates={updates} /> : section === 'payments' ? <ClientPaymentsView user={user} payments={payments} purchaseReceipt={purchaseReceipt} paymentInstructions={purchasePaymentInstructions} onDismissPurchase={() => setPurchaseReceipt(null)} /> : section === 'investments' ? <InvestmentContent projects={projects} investments={investments} showInvestment={showInvestment} setShowInvestment={setShowInvestment} projectId={projectId} setProjectId={setProjectId} amount={amount} setAmount={setAmount} plan={plan} setPlan={setPlan} submitInvestment={submitInvestment} realtor={realtor} setRealtor={setRealtor} user={user} /> : section === 'availability' ? <AvailabilityContent units={units} projects={projects} pendingUnitId={pendingPurchaseUnitId} search={homeSearch} onSearchChange={setHomeSearch} onPurchaseComplete={async (receipt) => { localStorage.removeItem('nbg_pending_purchase'); setPendingPurchaseUnitId(''); setPurchaseReceipt(receipt); setSection('payments'); await load(); }} /> : section === 'resources' ? <ResourcesContent navigate={navigate} documents={documents} projectDocuments={projectDocuments} projects={projects} tickets={tickets} setTickets={setTickets} user={user} /> : <ProfileContent user={user} recovery={recovery} profile={profile} onSaveProfile={saveProfile} onSignOut={onSignOut} />;
+  const content = section === 'overview' ? <OverviewContent user={user} profile={profile} projects={projects} updates={updates} units={units} reservations={unitReservations} investments={investments} stages={stages} payments={payments} notifications={notifications} documents={documents} setSection={selectSection} /> : section === 'progress' ? <ClientProjectProgress projects={projects} units={units} updates={updates} progressRows={publishedProgress} stages={stages} reservations={unitReservations} onBack={() => selectSection('overview')} onContact={() => selectSection('resources')} onSelectUnit={(unit) => { localStorage.setItem('nbg_pending_purchase', unit.id); setPendingPurchaseUnitId(unit.id); setHomeSearch(''); selectSection('availability'); }} /> : section === 'payments' ? <ClientPaymentsView user={user} payments={payments} purchaseReceipt={purchaseReceipt} paymentInstructions={purchasePaymentInstructions} onDismissPurchase={() => setPurchaseReceipt(null)} /> : section === 'investments' ? <InvestmentContent projects={projects} investments={investments} showInvestment={showInvestment} setShowInvestment={setShowInvestment} projectId={projectId} setProjectId={setProjectId} amount={amount} setAmount={setAmount} plan={plan} setPlan={setPlan} submitInvestment={submitInvestment} realtor={realtor} setRealtor={setRealtor} user={user} /> : section === 'availability' ? <AvailabilityContent units={units} projects={projects} pendingUnitId={pendingPurchaseUnitId} search={homeSearch} onSearchChange={setHomeSearch} onPurchaseComplete={async (receipt) => { localStorage.removeItem('nbg_pending_purchase'); setPendingPurchaseUnitId(''); setPurchaseReceipt(receipt); setSection('payments'); await load(); }} /> : section === 'resources' ? <ResourcesContent navigate={navigate} documents={documents} projectDocuments={projectDocuments} projects={projects} tickets={tickets} setTickets={setTickets} user={user} /> : <ProfileContent user={user} recovery={recovery} profile={profile} onSaveProfile={saveProfile} onSignOut={onSignOut} />;
 
   return <div className="portal-shell"><aside className={`portal-sidebar ${sidebarOpen ? 'portal-sidebar-open' : ''}`}><div className="portal-brand"><span className="brand-mark brand-mark-inverse"><img src="/NBG_LOGO-removebg-preview.png" alt="Next Bridge Group" /></span><div><p className="text-[10px] font-bold tracking-[.2em]">NBG CLIENT</p><p className="text-[8px] tracking-[.16em] text-white/45">PRIVATE WORKSPACE</p></div><button onClick={() => setSidebarOpen(false)} className="portal-close md:hidden" aria-label="Close portal menu"><X size={18} /></button></div><nav className="portal-nav">{['Workspace', 'Plan', 'Connect'].map((group) => <div key={group} className="portal-nav-group"><p>{group}</p>{sidebarItems.filter((item) => item.group === group).map(({ id, label, icon: Icon }) => <button key={id} onClick={() => selectSection(id)} className={section === id ? 'portal-nav-active' : ''}><Icon size={16} /><span>{label}</span>{section === id && <ArrowRight size={13} className="ml-auto" />}</button>)}</div>)}</nav><button onClick={onSignOut} className="portal-signout">Sign out</button></aside><div className="client-mobile-header md:hidden"><button type="button" onClick={() => setSidebarOpen(true)} aria-label="Open portal menu"><Menu size={19} /></button><div className="client-mobile-brand"><img src="/NBG_LOGO-removebg-preview.png" alt="" /><span>NBG</span></div><DashboardInbox user={user} mode="client" /></div><div className="portal-main"><header className={`portal-topbar ${section === 'availability' ? 'portal-topbar-homes' : ''}`}>{section === 'availability' ? <label className="homes-search homes-header-search"><Search size={15} /><input aria-label="Search homes, locations, or projects" value={homeSearch} onChange={(event) => setHomeSearch(event.target.value)} placeholder="Search for a home, location or project..." /></label> : <div><p className="eyebrow text-[#8de7e2]">{active.group}</p><h1>{active.label}</h1></div>}<div className="flex items-center gap-3"><DashboardInbox user={user} mode="client" /><div className="hidden items-center gap-3 sm:flex"><span className="portal-user-dot" /> <span className="text-xs text-slate-500">{user.full_name || user.email.split('@')[0]}</span><button onClick={() => navigate('contact')} className="btn-primary !px-4 !py-3">Speak with the team</button></div></div></header><main className={`portal-content ${section === 'availability' ? 'portal-content-homes' : ''}`}>{portalError && <div className="mb-6 flex items-start justify-between gap-4 border border-[#e4b8ad] bg-[#fff7f4] p-4 text-sm text-[#7a4e2e]"><span className="flex items-center gap-2"><AlertCircle size={17} />{portalError}</span><button onClick={() => void load()} className="font-semibold underline">Retry</button></div>}{recovery && <PasswordSetup onDone={() => window.history.replaceState({}, '', '/portal')} />}{loading ? <div className="portal-loading"><span /> Loading your private workspace...</div> : <div className="portal-reveal">{content}</div>}</main></div><nav className="client-mobile-nav md:hidden" aria-label="Client portal navigation">{mobileNavItems.map(({ id, label, icon: Icon }) => <button key={id} type="button" onClick={() => selectSection(id)} aria-current={section === id ? 'page' : undefined} className={section === id ? 'is-active' : ''}><Icon size={18} /><span>{label}</span></button>)}</nav></div>;
 }
@@ -383,7 +396,15 @@ const RESERVATION_STAGES = ['ENQUIRY', 'VIEWING', 'RESERVATION', 'DEPOSIT', 'AGR
 function ReservationTimeline({ stages }: { stages: ReservationStage[] }) { const completed = new Set(stages.map((stage) => stage.stage)); return <section className="portal-panel"><div className="flex items-center justify-between"><div><p className="eyebrow text-[#087f88]">Your reservation journey</p><h3 className="mt-2 font-serif text-3xl text-[#123b4b]">A clear path to handover.</h3></div><CircleCheck className="text-[#087f88]" /></div><div className="mt-7 grid gap-3 sm:grid-cols-3">{RESERVATION_STAGES.map((stage, index) => <div key={stage} className={`border p-4 ${completed.has(stage) ? 'border-[#8dd6cd] bg-[#eefbf9]' : 'border-[#e3e0d8] bg-[#fffdf8]'}`}><div className="flex items-center justify-between"><span className="text-xs text-[#087f88]">0{index + 1}</span>{completed.has(stage) ? <Check size={15} className="text-[#2e6b3e" /> : <Clock3 size={15} className="text-slate-300" />}</div><p className="mt-5 text-[10px] font-semibold uppercase tracking-[.12em] text-[#315a62]">{stage.replace('_', ' ')}</p></div>)}</div></section>; }
 
 function PortalStat({ label, value, detail }: { label: string; value: number; detail: string }) { const [expanded, setExpanded] = useState(false); return <button type="button" onClick={() => setExpanded((current) => !current)} className="portal-stat portal-stat-button"><div className="flex items-start justify-between gap-3"><p className="eyebrow text-[#087f88]">{label}</p><ArrowRight size={16} className={`portal-stat-arrow ${expanded ? 'rotate-90' : ''}`} /></div><p className="portal-stat-value">{value.toLocaleString()}</p><p className="mt-3 text-xs text-slate-500">{expanded ? `Open ${label.toLowerCase()} in the navigation for the full view.` : detail}</p></button>; }
-function ProgressContent({ updates }: { updates: ConstructionUpdate[] }) { return <section><div className="portal-section-heading"><div><p className="eyebrow text-[#087f88]">Verified feed</p><h2>Progress you can<br /><em>see and trust.</em></h2></div><span className="portal-live-badge">Live updates</span></div><div className="portal-timeline">{updates.map((update) => <article key={update.id}>{update.image_url ? <img src={update.image_url} alt={update.title} className="mb-4 h-40 w-full object-cover" /> : null}<span className="portal-timeline-dot">{update.progress_pct}%</span><div><p className="eyebrow text-slate-500">{new Date(update.posted_at).toLocaleDateString()}</p><h3>{update.title}</h3>{update.body && <p>{update.body}</p>}</div></article>)}{updates.length === 0 && <p className="text-sm text-slate-500">The NBG team has not published a construction update yet.</p>}</div></section>; }
+function ClientProjectProgress({ projects, units, updates, progressRows, stages, reservations, onBack, onContact, onSelectUnit }: { projects: Project[]; units: ProjectUnit[]; updates: ConstructionUpdate[]; progressRows: PublishedConstructionProgress[]; stages: ReservationStage[]; reservations: ClientUnitReservation[]; onBack: () => void; onContact: () => void; onSelectUnit: (unit: ProjectUnit) => void }) {
+  const projectId = reservations[0]?.project_id || [...stages].reverse().find((stage) => stage.project_id)?.project_id || null;
+  const project = projects.find((item) => item.id === projectId);
+  if (!project) return <section className="client-project-empty"><p className="eyebrow text-[#087f88]">Your construction project</p><h2>No linked project yet</h2><p>Your project progress will appear here after an NBG team member links a home or reservation to your account.</p><button type="button" onClick={onBack} className="client-text-link">Back to overview <ArrowRight size={13} /></button></section>;
+  const projectUnits = units.filter((unit) => unit.project_id === project.id);
+  const projectUpdates = updates.filter((update) => update.project_id === project.id);
+  const construction = progressRows.find((row) => row.project_id === project.id) ?? null;
+  return <ProjectProgressExperience project={project} units={projectUnits} updates={projectUpdates} construction={construction} onSelectUnit={onSelectUnit} onBack={onBack} onContact={onContact} clientMode />;
+}
 function AvailabilityContent({ units, projects, pendingUnitId, search, onSearchChange, onPurchaseComplete }: { units: ProjectUnit[]; projects: Project[]; pendingUnitId: string; search: string; onSearchChange: (value: string) => void; onPurchaseComplete: (receipt: PurchaseRequestReceipt) => Promise<void> }) {
   const [selectedUnit, setSelectedUnit] = useState<ProjectUnit | null>(null);
   useEffect(() => {
