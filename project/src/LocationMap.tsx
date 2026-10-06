@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { MapPin } from 'lucide-react';
 import type { Project } from '@/lib/types';
 
-type MapProject = Pick<Project, 'id' | 'name' | 'location' | 'locality' | 'county' | 'country' | 'latitude' | 'longitude' | 'map_zoom'> & { availableUnits?: number };
+type MapProject = Pick<Project, 'id' | 'name' | 'location' | 'locality' | 'county' | 'country' | 'latitude' | 'longitude' | 'map_zoom' | 'map_url'> & { availableUnits?: number };
 
 function mapUrl(project: MapProject) {
   const latitude = project.latitude ?? -4.0435;
@@ -21,6 +21,8 @@ export default function LocationMap({ projects, title = 'Available homes, on the
   const mapped = projects.filter((project) => project.latitude != null && project.longitude != null);
   const [selectedId, setSelectedId] = useState((mapped[0] ?? projects[0])?.id ?? '');
   const selected = projects.find((project) => project.id === selectedId) ?? mapped[0] ?? projects[0];
+  const hasCoordinates = selected?.latitude != null && selected.longitude != null;
+  const externalMapUrl = selected?.map_url || (selected ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent([selected.name, selected.locality, selected.location, selected.county, selected.country].filter(Boolean).join(', '))}` : '');
 
   return (
     <section className="mt-10 border border-[#a9d9d8] bg-[#eefbf9] p-5 md:p-7">
@@ -35,20 +37,22 @@ export default function LocationMap({ projects, title = 'Available homes, on the
       {selected ? (
         <div className="mt-6 grid gap-5 lg:grid-cols-[1.5fr_.5fr]">
           <div className="min-h-[330px] overflow-hidden border border-[#a9d9d8] bg-[#d9f6f3]">
-            {selected.latitude != null && selected.longitude != null ? (
-              <iframe title={`${selected.name} location map`} src={mapUrl(selected)} className="h-[330px] w-full border-0" loading="lazy" />
-            ) : (
-              <div className="flex h-[330px] items-center justify-center p-8 text-center text-sm text-slate-500">Map coordinates are pending for this project.</div>
-            )}
+            <iframe title={`${selected.name} location map`} src={mapUrl(selected)} className="h-[330px] w-full border-0" loading="lazy" />
           </div>
-          <div className="space-y-2">
-            {projects.map((project) => (
-              <button key={project.id} type="button" onClick={() => setSelectedId(project.id)} className={`block w-full border-b border-[#a9d9d8] py-3 text-left first:pt-0 ${selected.id === project.id ? 'text-[#087f88]' : ''}`}>
-                <p className="text-sm font-semibold text-[#123b4b]">{project.name}</p>
-                <p className="mt-1 text-xs text-slate-500">{project.locality || project.location || 'Location pending'}{project.county ? ` · ${project.county}` : ''}</p>
-                {project.availableUnits != null && <p className="mt-2 text-[10px] font-semibold uppercase tracking-[.12em] text-[#087f88]">{project.availableUnits} available home{project.availableUnits === 1 ? '' : 's'}</p>}
-              </button>
-            ))}
+          <div className="flex flex-col justify-between gap-4">
+            <div className="space-y-2">
+              {projects.map((project) => (
+                <button key={project.id} type="button" onClick={() => setSelectedId(project.id)} className={`block w-full border-b border-[#a9d9d8] py-3 text-left first:pt-0 ${selected.id === project.id ? 'text-[#087f88]' : ''}`}>
+                  <p className="text-sm font-semibold text-[#123b4b]">{project.name}</p>
+                  <p className="mt-1 text-xs text-slate-500">{project.locality || project.location || 'Location pending'}{project.county ? ` · ${project.county}` : ''}</p>
+                  {project.availableUnits != null && <p className="mt-2 text-[10px] font-semibold uppercase tracking-[.12em] text-[#087f88]">{project.availableUnits} available home{project.availableUnits === 1 ? '' : 's'}</p>}
+                </button>
+              ))}
+            </div>
+            <div>
+              <p className="text-xs leading-5 text-slate-500">{hasCoordinates ? 'Map pin uses the published project coordinates.' : 'Showing the approximate Nyali, Mombasa area until exact project coordinates are published.'}</p>
+              {externalMapUrl && <a href={externalMapUrl} target="_blank" rel="noreferrer" className="link-arrow mt-3 text-[#087f88]">Open in Maps <MapPin size={14} /></a>}
+            </div>
           </div>
         </div>
       ) : (

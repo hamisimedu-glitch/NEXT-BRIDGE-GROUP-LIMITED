@@ -31,13 +31,14 @@ import type { ConstructionUpdate, Investment, Project, ProjectUnit } from '@/lib
 import AdminDashboard, { AdminSignIn } from '@/AdminDashboard';
 import ClientPortal, { ClientPortalSignIn } from '@/ClientPortal';
 import AvailableHomeCard from '@/AvailableHomeCard';
+import AvailableHomesCatalog from '@/AvailableHomesCatalog';
 import LocationMap from '@/LocationMap';
 import ProjectInvestmentPage from '@/ProjectInvestmentPage';
 import ProjectDetailsPackage, { type PublicProjectDetails } from '@/ProjectDetailsPackage';
 import { calculateConstructionProgress, type PublishedConstructionProgress } from '@/lib/construction';
 
 type UnitStatus = 'AVAILABLE' | 'RESERVED' | 'SOLD';
-type View = 'home' | 'projects' | 'project' | 'project-investment' | 'units' | 'construction' | 'gallery' | 'about' | 'contact' | 'viewing' | 'faq' | 'investor' | 'privacy' | 'terms' | 'verify' | 'portal' | 'admin' | 'not-found';
+type View = 'home' | 'residences' | 'projects' | 'project' | 'project-investment' | 'units' | 'construction' | 'gallery' | 'about' | 'contact' | 'viewing' | 'faq' | 'investor' | 'privacy' | 'terms' | 'verify' | 'portal' | 'admin' | 'not-found';
 
 type Unit = {
   id: string;
@@ -82,7 +83,8 @@ const gallery = [
 ];
 
 const navItems: { label: string; view: View }[] = [
-  { label: 'Residences', view: 'projects' },
+  { label: 'Residences', view: 'residences' },
+  { label: 'Projects', view: 'projects' },
   { label: 'Location', view: 'about' },
   { label: 'Gallery', view: 'gallery' },
   { label: 'Contact', view: 'contact' },
@@ -98,7 +100,7 @@ function viewFromPath(pathname: string): View {
   if (pathname.startsWith('/verify/')) return 'verify';
   const route = pathname.replace(/^\//, '') as View;
   if (pathname === '/' || pathname === '') return 'home';
-  return ['projects', 'project', 'project-investment', 'units', 'construction', 'gallery', 'about', 'contact', 'viewing', 'faq', 'investor', 'privacy', 'terms', 'verify', 'portal', 'admin'].includes(route) ? route : 'not-found';
+  return ['residences', 'projects', 'project', 'project-investment', 'units', 'construction', 'gallery', 'about', 'contact', 'viewing', 'faq', 'investor', 'privacy', 'terms', 'verify', 'portal', 'admin'].includes(route) ? route : 'not-found';
 }
 
 function projectIdFromPath(pathname: string): string | null {
@@ -198,8 +200,9 @@ function App() {
       <Header view={view} navigate={navigate} mobileOpen={mobileOpen} setMobileOpen={setMobileOpen} />
         <main>
         {view === 'home' && <HomePage navigate={navigate} setGalleryIndex={setGalleryIndex} />}
-        {view === 'projects' && <DatabaseProjectsPage navigate={navigate} setSelectedUnit={setSelectedUnit} />}
-        {view === 'project' && projectId ? <ProjectDetailPage projectId={projectId} navigate={navigate} /> : view === 'project' ? <NotFoundPage navigate={navigate} /> : null}
+        {view === 'residences' && <DatabaseResidencesPage navigate={navigate} setSelectedUnit={setSelectedUnit} />}
+        {view === 'projects' && <DatabaseProjectsPage navigate={navigate} />}
+        {view === 'project' && projectId ? <ProjectDetailPage projectId={projectId} navigate={navigate} setSelectedUnit={setSelectedUnit} /> : view === 'project' ? <NotFoundPage navigate={navigate} /> : null}
         {view === 'project-investment' && projectId ? <ProjectInvestmentPage projectId={projectId} navigate={navigate} /> : view === 'project-investment' ? <NotFoundPage navigate={navigate} /> : null}
         {view === 'units' && <DatabaseUnitsPage navigate={navigate} setSelectedUnit={setSelectedUnit} />}
         {view === 'construction' && <ConstructionPage navigate={navigate} />}
@@ -302,7 +305,7 @@ function HomePage({ navigate, setGalleryIndex }: { navigate: (view: View) => voi
             <p className="mt-5 max-w-[430px] text-base leading-[1.7] text-white/80 md:text-[1.06rem]">Modern residences, premium finishes, and breathtaking ocean views — all in one exclusive address.</p>
 
             <div className="mt-8 flex w-full max-w-[500px] flex-col gap-4 sm:flex-row">
-              <button onClick={() => navigate('projects')} className="hero-button-primary flex-1">Explore residences <ArrowRight size={16} /></button>
+              <button onClick={() => navigate('residences')} className="hero-button-primary flex-1">Explore residences <ArrowRight size={16} /></button>
               <button onClick={() => navigate('viewing')} className="hero-button-secondary flex-1">Book a private viewing</button>
             </div>
 
@@ -391,7 +394,28 @@ function ConstructionStrip({ navigate }: { navigate: (view: View) => void }) {
 
 function SectionIntro({ eyebrow, title, copy, action, onAction }: { eyebrow: string; title: React.ReactNode; copy: string; action?: string; onAction?: () => void }) { return <div className="grid gap-6 md:grid-cols-[1fr_1fr] md:items-end"><div><p className="eyebrow text-[#20afd1]">{eyebrow}</p><h2 className="mt-5 font-serif text-5xl leading-[.95] tracking-[-.05em] md:text-7xl">{title}</h2></div><div className="md:pb-1"><p className="max-w-md text-base leading-7 text-slate-600">{copy}</p>{action && onAction && <button onClick={onAction} className="link-arrow mt-7">{action} <ArrowRight size={16} /></button>}</div></div> }
 
-function DatabaseProjectsPage({ navigate, setSelectedUnit }: { navigate: (view: View) => void; setSelectedUnit: (unit: Unit) => void }) {
+function publicUnitToModalUnit(unit: ProjectUnit, projects: Project[]): Unit {
+  const project = projects.find((item) => item.id === unit.project_id);
+  return {
+    id: unit.id,
+    project_id: unit.project_id,
+    number: unit.unit_number,
+    type: unit.type || 'Residence',
+    bedrooms: unit.bedrooms || 0,
+    size: unit.size || 'Size on request',
+    floor: unit.floor || '—',
+    parking: unit.parking || '—',
+    view: unit.view || '—',
+    price: unit.price || undefined,
+    status: unit.status as UnitStatus,
+    image_url: unit.image_url,
+    project_name: project?.name,
+    location: project?.locality || project?.location,
+    availability_note: unit.availability_note,
+  };
+}
+
+function DatabaseResidencesPage({ navigate, setSelectedUnit }: { navigate: (view: View) => void; setSelectedUnit: (unit: Unit) => void }) {
   const [projects, setProjects] = useState<Project[]>([]);
   const [units, setUnits] = useState<ProjectUnit[]>([]);
   const [loading, setLoading] = useState(true);
@@ -408,16 +432,33 @@ function DatabaseProjectsPage({ navigate, setSelectedUnit }: { navigate: (view: 
     setUnits((unitResult.data ?? []) as ProjectUnit[]);
     setLoading(false);
   }, []);
+  useEffect(() => {
+    void load();
+    const channel = supabase.channel('public-residences-inventory')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'project_units' }, () => { void load(); })
+      .subscribe();
+    return () => { void supabase.removeChannel(channel); };
+  }, [load]);
+  return <PageFrame eyebrow="Residences" title={<>Places to put down<br /><em>your roots.</em></>} intro="Browse published homes across the NBG portfolio." hideIntro>
+    {error ? <div className="mt-14"><PublicErrorState message={error} onRetry={() => void load()} navigate={navigate} /></div> : loading ? <p className="mt-14 text-sm text-slate-500">Loading published homes...</p> : <div><AvailableHomesCatalog units={units} projects={projects} showDesktopSearch onSelectUnit={(unit) => setSelectedUnit(publicUnitToModalUnit(unit, projects))} /></div>}
+  </PageFrame>;
+}
+
+function DatabaseProjectsPage({ navigate }: { navigate: (view: View) => void }) {
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError('');
+    const { data, error: queryError } = await supabase.from('projects').select('*').eq('is_published', true).order('created_at', { ascending: false });
+    if (queryError) setError('Published projects are temporarily unavailable.');
+    setProjects((data ?? []) as Project[]);
+    setLoading(false);
+  }, []);
   useEffect(() => { void load(); }, [load]);
-  return <PageFrame eyebrow="The collection" title={<>Places to put down<br /><em>your roots.</em></>} intro="Explore published homes and developments across the NBG portfolio.">
-    <section className="mt-14" aria-labelledby="public-homes-heading">
-      <div className="mb-6 flex flex-wrap items-end justify-between gap-5"><div><p className="eyebrow text-[#087f88]">Published inventory</p><h2 id="public-homes-heading" className="mt-2 font-serif text-3xl text-[#123b4b]">Available homes</h2></div><button type="button" onClick={() => navigate('portal')} className="link-arrow">Client sign in <ArrowRight size={16} /></button></div>
-      {error ? <PublicErrorState message={error} onRetry={() => void load()} navigate={navigate} /> : loading ? <p className="text-sm text-slate-500">Loading published homes...</p> : units.length === 0 ? <p className="border-y border-[#c9c5bd] py-6 text-sm text-slate-500">Homes will appear here once the NBG team publishes availability.</p> : <div className="homes-card-grid">{units.map((unit) => { const project = projects.find((item) => item.id === unit.project_id); return <AvailableHomeCard key={unit.id} unitNumber={unit.unit_number} projectName={project?.name || unit.type} location={project?.locality || project?.location} type={unit.type} status={unit.status} availabilityNote={unit.availability_note} price={unit.price} bedrooms={unit.bedrooms} size={unit.size} imageUrl={unit.image_url || project?.image_url} allowUnavailable onSelect={() => setSelectedUnit({ id: unit.id, project_id: unit.project_id, number: unit.unit_number, type: unit.type || 'Residence', bedrooms: unit.bedrooms || 0, size: unit.size || 'Size on request', floor: unit.floor || '—', parking: unit.parking || '—', view: unit.view || '—', price: unit.price || undefined, status: unit.status as UnitStatus, image_url: unit.image_url })} />; })}</div>}
-    </section>
-    <section className="mt-20" aria-labelledby="project-collection-heading">
-      <div className="mb-7"><p className="eyebrow text-[#087f88]">Developments</p><h2 id="project-collection-heading" className="mt-2 font-serif text-3xl text-[#123b4b]">The collection</h2></div>
-      {error ? <PublicErrorState message={error} onRetry={() => void load()} navigate={navigate} /> : loading ? <p className="text-sm text-slate-500">Loading published projects...</p> : projects.length === 0 ? <EmptyState title="Projects are being prepared" text="Published project details will appear here once the NBG team makes them available." action="Back to home" onAction={() => navigate('home')} /> : <div className="grid gap-8 lg:grid-cols-2">{projects.map((project) => <article key={project.id} className="group relative min-h-[520px] overflow-hidden"><img src={project.image_url || images.exterior} alt={project.name} className="absolute inset-0 h-full w-full object-cover transition duration-700 group-hover:scale-105" /><div className="absolute inset-0 bg-gradient-to-t from-[#17232b] to-transparent" /><div className="absolute bottom-8 left-8 text-white"><p className="eyebrow text-[#9edfeb]">{project.status}</p><h2 className="mt-3 font-serif text-5xl">{project.name}</h2><p className="mt-5 flex items-center gap-2 text-xs"><MapPin size={14} className="text-[#20afd1]" /> {project.location || 'Location to be announced'}</p><button onClick={() => navigateToPublicProject(project.id)} className="link-arrow mt-7 text-white">View project details <ArrowRight size={16} /></button></div></article>)}</div>}
-    </section>
+  return <PageFrame eyebrow="Developments" title={<>Projects built<br /><em>for the long view.</em></>} intro="Explore NBG developments and view the homes available in each project.">
+    {error ? <div className="mt-14"><PublicErrorState message={error} onRetry={() => void load()} navigate={navigate} /></div> : loading ? <p className="mt-14 text-sm text-slate-500">Loading published projects...</p> : projects.length === 0 ? <div className="mt-14"><EmptyState title="Projects are being prepared" text="Published project details will appear here once the NBG team makes them available." action="Back to home" onAction={() => navigate('home')} /></div> : <div className="mt-14 grid gap-8 lg:grid-cols-2">{projects.map((project) => <button key={project.id} type="button" onClick={() => navigateToPublicProject(project.id)} aria-label={`View ${project.name} and its available homes`} className="group relative block min-h-[520px] w-full overflow-hidden text-left"><img src={project.image_url || images.exterior} alt="" className="absolute inset-0 h-full w-full object-cover transition duration-700 group-hover:scale-105" /><span className="absolute inset-0 bg-gradient-to-t from-[#17232b] to-transparent" /><span className="absolute bottom-8 left-8 text-white"><span className="eyebrow text-[#9edfeb]">{project.status}</span><span className="mt-3 block font-serif text-5xl">{project.name}</span><span className="mt-5 flex items-center gap-2 text-xs"><MapPin size={14} className="text-[#20afd1]" /> {project.locality || project.location || 'Location to be announced'}</span><span className="link-arrow mt-7 flex items-center gap-2 text-white">View available homes <ArrowRight size={16} /></span></span></button>)}</div>}
   </PageFrame>;
 }
 
@@ -431,7 +472,7 @@ function navigateToProjectInvestment(id: string) {
   window.dispatchEvent(new PopStateEvent('popstate'));
 }
 
-function ProjectDetailPage({ projectId, navigate }: { projectId: string; navigate: (view: View) => void }) {
+function ProjectDetailPage({ projectId, navigate, setSelectedUnit }: { projectId: string; navigate: (view: View) => void; setSelectedUnit: (unit: Unit) => void }) {
   const [project, setProject] = useState<Project | null>(null);
   const [units, setUnits] = useState<ProjectUnit[]>([]);
   const [updates, setUpdates] = useState<ConstructionUpdate[]>([]);
@@ -468,7 +509,8 @@ function ProjectDetailPage({ projectId, navigate }: { projectId: string; navigat
   const priceRange = project.price_min || project.price_max ? `${project.price_min ? `KSh ${project.price_min.toLocaleString()}` : 'Price'} - ${project.price_max ? `KSh ${project.price_max.toLocaleString()}` : 'on request'}` : 'Pricing shared by the NBG team';
   return <PageFrame eyebrow={`${project.status} · ${project.location || 'Kenya'}`} title={<>{project.name}<br /><em>in full view.</em></>} intro={project.description || 'A considered collection of homes, designed for coastal living and long-term value.'}>
     <div className="mt-14 grid gap-10 lg:grid-cols-[1.25fr_.75fr]"><div className="relative min-h-[520px] overflow-hidden"><img src={project.image_url || images.exterior} alt={project.name} className="absolute inset-0 h-full w-full object-cover" /><div className="absolute inset-0 bg-gradient-to-t from-[#17232b]/75 via-transparent to-transparent" /><div className="absolute bottom-7 left-7 text-white"><p className="eyebrow text-[#9edfeb]">From {priceRange}</p><p className="mt-3 text-sm">Expected completion: {project.expected_completion || 'To be announced'}</p></div></div><div className="border-t border-[#c9c5bd] pt-6"><p className="eyebrow text-[#087f88]">The project brief</p><div className="mt-7 grid grid-cols-2 gap-y-7 border-y border-[#c9c5bd] py-7"><div><p className="eyebrow text-slate-500">Availability</p><p className="mt-2 text-2xl text-[#123b4b]">{units.filter((unit) => unit.status === 'AVAILABLE').length} homes</p></div><div><p className="eyebrow text-slate-500">Progress</p><p className="mt-2 text-2xl text-[#087f88]">{progress}%</p></div><div><p className="eyebrow text-slate-500">Location</p><p className="mt-2 text-sm">{project.location || 'Coastal Kenya'}</p></div><div><p className="eyebrow text-slate-500">Price range</p><p className="mt-2 text-sm">{priceRange}</p></div></div><div className="mt-8 flex flex-wrap gap-3">{project.brochure_url && <a href={project.brochure_url} download className="btn-primary">Brochure <Download size={16} /></a>}{project.floor_plan_url && <a href={project.floor_plan_url} target="_blank" rel="noreferrer" className="btn-secondary">Floor plans <ExternalLink size={16} /></a>}<button onClick={() => navigate('viewing')} className="btn-secondary">Book a viewing <CalendarDays size={16} /></button></div></div></div>
-    <div className="mt-16 grid gap-12 lg:grid-cols-[1fr_1fr]"><section><p className="eyebrow text-[#087f88]">Amenities</p><h2 className="mt-4 font-serif text-5xl text-[#123b4b]">Made for<br /><em>daily life.</em></h2><div className="mt-8 grid grid-cols-2 gap-3">{(project.amenities?.length ? project.amenities : ['24/7 security', 'Residents lounge', 'Swimming pool', 'Fitness studio', 'Secure parking', 'Landscaped grounds']).map((amenity) => <div key={amenity} className="border border-[#a9d9d8] bg-[#eefbf9] p-4 text-sm text-[#315a62]">{amenity}</div>)}</div></section><section><p className="eyebrow text-[#087f88]">Published availability</p><div className="mt-4 space-y-3">{units.length === 0 ? <p className="text-sm text-slate-500">Availability will be published as homes are released.</p> : units.map((unit) => <div key={unit.id} className="flex items-center justify-between border-b border-[#c9c5bd] py-4"><div><p className="text-sm font-semibold text-[#123b4b]">{unit.unit_number} · {unit.type || 'Residence'}</p><p className="mt-1 text-xs text-slate-500">{unit.size || 'Size on request'} · {unit.view || 'View on request'}</p></div><span className="text-[10px] uppercase tracking-[.12em] text-[#087f88]">{unit.status}</span></div>)}</div></section></div>
+    <section className="mt-16"><p className="eyebrow text-[#087f88]">Amenities</p><h2 className="mt-4 font-serif text-5xl text-[#123b4b]">Made for<br /><em>daily life.</em></h2><div className="mt-8 grid grid-cols-2 gap-3 md:grid-cols-3">{(project.amenities?.length ? project.amenities : ['24/7 security', 'Residents lounge', 'Swimming pool', 'Fitness studio', 'Secure parking', 'Landscaped grounds']).map((amenity) => <div key={amenity} className="border border-[#a9d9d8] bg-[#eefbf9] p-4 text-sm text-[#315a62]">{amenity}</div>)}</div></section>
+    <section className="mt-16" aria-label="Published homes in this project"><p className="eyebrow text-[#087f88]">Available homes in this project</p><div className="mt-4"><AvailableHomesCatalog units={units} projects={[project]} onSelectUnit={(unit) => setSelectedUnit(publicUnitToModalUnit(unit, [project]))} /></div></section>
     <section className="mt-16 border-t border-[#c9c5bd] pt-8"><div className="flex flex-wrap items-end justify-between gap-5"><div><p className="eyebrow text-[#087f88]">Construction progress</p><h2 className="mt-3 font-serif text-4xl text-[#123b4b]">Built in the open.</h2><p className="mt-2 text-sm text-slate-500">{construction ? `${construction.total_floors} floors · Updated ${new Date(construction.published_at).toLocaleString()}` : 'No verified progress has been published yet.'}</p></div><span className="font-serif text-5xl text-[#087f88]">{progress === null ? '—' : `${progress}%`}</span></div>{construction ? <><div className="mt-6 h-2 bg-[#d9f6f3]"><div className="h-full bg-[#19c6c9] transition-all" style={{ width: `${progress ?? 0}%` }} /></div><p className="mt-5 text-sm leading-6 text-slate-600">Current phase: {construction.data.currentPhase || 'To be confirmed'}. {construction.data.progressNote}</p><p className="mt-2 text-xs text-slate-500">Timeline: {construction.data.timeline || project.expected_completion || 'To be confirmed'}</p><div className="mt-7 grid gap-8 lg:grid-cols-2"><div><h3 className="eyebrow text-[#087f88]">Floor-by-floor progress</h3><div className="mt-3 grid grid-cols-2 gap-x-5">{construction.data.floors.map((floor) => <p key={floor.number} className={`border-b border-[#e6e2da] py-2 text-xs ${floor.status === 'COMPLETED' ? 'text-[#2e6b3e]' : floor.status === 'IN_PROGRESS' ? 'text-[#2e5f7a]' : 'text-slate-400'}`}>{floor.status === 'COMPLETED' ? '✓' : floor.status === 'IN_PROGRESS' ? '→' : '○'} {floor.label}</p>)}</div></div><div><h3 className="eyebrow text-[#087f88]">Construction milestones</h3><div className="mt-3 space-y-2">{construction.data.milestones.map((milestone) => <div key={milestone.id} className="flex justify-between gap-4 border-b border-[#e6e2da] py-2 text-xs"><span>{milestone.title}</span><span className={milestone.status === 'COMPLETED' ? 'text-[#2e6b3e]' : milestone.status === 'IN_PROGRESS' ? 'text-[#2e5f7a]' : 'text-slate-400'}>{milestone.status.replace('_', ' ')}</span></div>)}</div></div></div><div className="mt-7 grid gap-3 sm:grid-cols-2">{construction.data.media.map((media) => media.type === 'video' ? <video key={media.url} src={media.url} controls className="aspect-video w-full bg-black object-cover" /> : <img key={media.url} src={media.url} alt={media.caption || project.name} className="aspect-video w-full object-cover" />)}</div></> : updates[0] ? <p className="mt-5 text-sm text-slate-600">{updates[0].title}: {updates[0].body}</p> : <p className="mt-5 text-sm text-slate-500">Construction milestones will appear here after the project team publishes verified progress.</p>}<button onClick={() => navigateToProjectInvestment(project.id)} className="btn-primary mt-8">Invest in This Project <TrendingUp size={16} /></button></section>
     <InvestorCallout navigate={navigate} />
   </PageFrame>;
@@ -783,7 +825,7 @@ function LegacyClientPortal({ user, onSignOut, navigate }: { user: AdminUser; on
 
 function FaqPage({ navigate }: { navigate: (view: View) => void }) { const faqs = ['How do I register my interest?', 'Can I purchase from outside Kenya?', 'Where can I see construction progress?', 'How will pricing be shared?', 'Can I book a private viewing?']; const [open, setOpen] = useState<number | null>(null); return <PageFrame eyebrow="Questions, answered" title={<>Clarity for<br /><em>the journey ahead.</em></>} intro="Verified answers will be managed by the NBG team here. For a question not covered, our consultants are happy to help."><div className="mt-14 max-w-4xl border-t border-[#c9c5bd]">{faqs.map((faq, index) => <div key={faq} className="border-b border-[#c9c5bd]"><button onClick={() => setOpen(open === index ? null : index)} className="flex w-full items-center justify-between py-7 text-left text-lg"><span>{faq}</span><ChevronDown size={18} className={`transition ${open === index ? 'rotate-180 text-[#20afd1]' : ''}`} /></button>{open === index && <p className="max-w-2xl pb-7 text-sm leading-6 text-slate-600">This answer will be published once the verified project information is added by the NBG team. You can contact us directly for the latest details.</p>}</div>)}</div><button onClick={() => navigate('contact')} className="link-arrow mt-10">Ask a different question <ArrowRight size={16} /></button></PageFrame> }
 
-function PageFrame({ eyebrow, title, intro, children }: { eyebrow: string; title: React.ReactNode; intro: string; children: React.ReactNode }) { return <section className="page-top section-pad"><div className="mx-auto max-w-[1440px]"><div className="max-w-4xl"><p className="eyebrow text-[#20afd1]">{eyebrow}</p><h1 className="mt-5 font-serif text-6xl leading-[.9] tracking-[-.06em] md:text-8xl">{title}</h1><p className="mt-8 max-w-xl text-base leading-7 text-slate-600">{intro}</p></div>{children}</div></section> }
+function PageFrame({ eyebrow, title, intro, children, hideIntro = false }: { eyebrow: string; title: React.ReactNode; intro: string; children: React.ReactNode; hideIntro?: boolean }) { return <section className={`page-top section-pad ${hideIntro ? 'page-top-compact' : ''}`}><div className="mx-auto max-w-[1440px]">{!hideIntro && <div className="max-w-4xl"><p className="eyebrow text-[#20afd1]">{eyebrow}</p><h1 className="mt-5 font-serif text-6xl leading-[.9] tracking-[-.06em] md:text-8xl">{title}</h1><p className="mt-8 max-w-xl text-base leading-7 text-slate-600">{intro}</p></div>}{children}</div></section> }
 
 function Field({ label, name, type = 'text', required = false, placeholder, textarea = false, className = '' }: { label: string; name: string; type?: string; required?: boolean; placeholder?: string; textarea?: boolean; className?: string }) { return <label className={`block ${className}`}><span className="eyebrow mb-2 block text-slate-500">{label}{required ? ' *' : ''}</span>{textarea ? <textarea name={name} required={required} placeholder={placeholder} rows={4} className="field resize-none" /> : <input name={name} type={type} required={required} placeholder={placeholder} className="field" />}</label> }
 

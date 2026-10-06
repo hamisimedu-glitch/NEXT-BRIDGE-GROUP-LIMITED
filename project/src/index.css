@@ -25,6 +25,7 @@ button { cursor: pointer; }
 .eyebrow { font-size: 10px; line-height: 1.2; letter-spacing: .2em; text-transform: uppercase; }
 .section-pad { padding: 112px 20px; }
 .page-top { padding-top: 180px; min-height: 80vh; }
+.page-top.page-top-compact { padding-top: 96px; min-height: auto; }
 @media (min-width: 768px) { .section-pad { padding: 144px 40px; } }
 .hero-content { text-shadow: 0 2px 14px rgba(23,35,43,.5); }
 .hero-reference { background-position: center; background-size: cover; }
@@ -145,21 +146,22 @@ button { cursor: pointer; }
 .homes-hero p:not(.eyebrow) { margin-top: 7px; color: #426b75; font-size: 11px; line-height: 1.5; }
 .homes-toolbar { display: grid; gap: 14px; margin: 14px 0 16px; }
 .homes-search { display: flex; min-width: 0; height: 38px; align-items: center; gap: 10px; border: 1px solid #c9e4e3; border-radius: 22px; background: rgba(255,255,255,.78); padding: 0 14px; color: #087f88; }
-.homes-search input { width: 100%; min-width: 0; border: 0; outline: 0; background: transparent; color: #123b4b; font-size: 10px; }
+.homes-public-search { display: flex; width: min(100%, 420px); }
+.homes-search input { width: 100%; min-width: 0; border: 0; outline: 0; background: transparent; color: #123b4b; font-size: 13px; }
 .homes-search input::placeholder { color: #6f9097; }
 .homes-filter-row, .homes-filters, .homes-view-tools { display: flex; align-items: center; gap: 8px; }
 .homes-filter-row { justify-content: space-between; }
 .homes-filters { min-width: 0; flex-wrap: wrap; }
-.homes-all-projects { display: inline-flex; min-height: 34px; align-items: center; gap: 7px; border-radius: 8px; background: #08a9b2; padding: 0 12px; color: white; font-size: 10px; font-weight: 600; white-space: nowrap; }
+.homes-all-projects { display: inline-flex; min-height: 34px; align-items: center; gap: 7px; border-radius: 8px; background: #08a9b2; padding: 0 12px; color: white; font-size: 12px; font-weight: 600; white-space: nowrap; }
 .homes-filters label, .homes-sort { position: relative; display: flex; min-height: 34px; align-items: center; gap: 8px; border-radius: 8px; background: rgba(255,255,255,.82); padding: 0 10px; color: #547781; }
-.homes-filters select, .homes-sort select { max-width: 150px; appearance: none; border: 0; outline: 0; background: transparent; color: #355e6a; font-size: 9px; }
+.homes-filters select, .homes-sort select { max-width: 150px; appearance: none; border: 0; outline: 0; background: transparent; color: #355e6a; font-size: 12px; }
 .homes-filters label > svg, .homes-sort > svg { flex: 0 0 auto; color: #148e98; pointer-events: none; }
 .homes-view-tools { flex: 0 0 auto; }
 .homes-layout-toggle { display: flex; overflow: hidden; border: 1px solid #dcebea; border-radius: 7px; background: white; }
 .homes-layout-toggle button { display: grid; width: 28px; height: 28px; place-items: center; color: #4c7781; }
 .homes-layout-toggle button[aria-pressed="true"] { background: #e5f6f4; color: #08a1a9; }
 .homes-sort { gap: 5px; }
-.homes-sort span { font-size: 9px; white-space: nowrap; }
+.homes-sort span { font-size: 11px; white-space: nowrap; }
 .homes-sort select { max-width: 92px; }
 .homes-card-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
 .homes-card { min-width: 0; overflow: hidden; border: 1px solid rgba(211,232,231,.72); border-radius: 8px; background: rgba(255,255,255,.88); box-shadow: 0 8px 22px rgba(25,91,98,.055); }

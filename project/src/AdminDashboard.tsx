@@ -397,7 +397,7 @@ export default function AdminDashboard({ user, onSignOut }: { user: AdminUser; o
           {tab === 'leads' && <LeadsTab user={user} />}
           {tab === 'sales' && <SalesTab goTo={go} />}
           {tab === 'payments' && <BuyerPaymentsTab goTo={go} />}
-          {tab === 'units' && <UnitsTab />}
+          {tab === 'units' && <UnitsTab canReserve={isAdmin} />}
           {tab === 'applications' && <ApplicationsTab />}
           {tab === 'investments' && <InvestmentsTab canManageFinancials={isAdmin} />}
           {tab === 'realtors' && <RealtorsTab />}
@@ -1180,19 +1180,14 @@ function BuyerPaymentsTab({ goTo }: { goTo: (tab: AdminTab) => void }) {
 
 function SalesTab({ goTo }: { goTo: (tab: AdminTab) => void }) {
   const [sales, setSales] = useState<Sale[]>([]);
-  const [availableUnits, setAvailableUnits] = useState<ProjectUnit[]>([]);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [showForm, setShowForm] = useState(false);
   const [selectedSale, setSelectedSale] = useState<Sale | null>(null);
 
   const load = useCallback(async () => {
-    const [{ data }, { data: units }] = await Promise.all([
-      supabase.from('sales').select('*').order('created_at', { ascending: false }),
-      supabase.from('project_units').select('*').eq('status', 'AVAILABLE').order('unit_number'),
-    ]);
+    const { data } = await supabase.from('sales').select('*').order('created_at', { ascending: false });
     setSales((data ?? []) as Sale[]);
-    setAvailableUnits((units ?? []) as ProjectUnit[]);
     setLoading(false);
   }, []);
   useEffect(() => { load(); }, [load]);
@@ -1200,11 +1195,6 @@ function SalesTab({ goTo }: { goTo: (tab: AdminTab) => void }) {
   const filtered = useMemo(() => sales.filter((s) => statusFilter === 'ALL' || s.status === statusFilter), [sales, statusFilter]);
   const revenue = useMemo(() => sales.filter((s) => s.status === 'COMPLETED').reduce((a, s) => a + (s.sale_price ?? 0), 0), [sales]);
   const pipeline = useMemo(() => sales.filter((s) => ['RESERVED', 'DEPOSIT_PAID'].includes(s.status)).reduce((a, s) => a + (s.sale_price ?? 0), 0), [sales]);
-
-  const updateStatus = async (id: string, status: string) => {
-    setSales((p) => p.map((s) => s.id === id ? { ...s, status } : s));
-    await supabase.from('sales').update({ status }).eq('id', id);
-  };
 
   if (loading) return <Spinner />;
 
@@ -1238,9 +1228,7 @@ function SalesTab({ goTo }: { goTo: (tab: AdminTab) => void }) {
                   <p className="text-xs text-slate-400">{sale.buyer_email ?? sale.buyer_phone ?? ''}</p>
                 </td>
                 <td className="px-4 py-3 font-medium">{fmtKes(sale.sale_price)}</td>
-                <td className="px-4 py-3">
-                  <StatusSelect value={sale.status} options={SALE_STATUSES} colors={SALE_STATUS_COLORS} onChange={(v) => updateStatus(sale.id, v)} />
-                </td>
+                <td className="px-4 py-3"><span className={`inline-flex px-2.5 py-1 text-[10px] font-semibold uppercase ${SALE_STATUS_COLORS[sale.status] || 'bg-[#e6e2da] text-slate-600'}`}>{sale.status.replace('_', ' ')}</span></td>
                 <td className="px-4 py-3 text-xs text-slate-500">{sale.installment_frequency === 'ONE_TIME' ? 'One-time payment' : sale.installment_count ? `${sale.installment_count} ${sale.installment_frequency.toLowerCase()}` : 'No plan'}</td>
                 <td className="px-4 py-3 text-xs text-slate-400">{sale.sale_date ? new Date(sale.sale_date).toLocaleDateString() : '—'}</td>
                 <td className="px-4 py-3 text-xs text-slate-400 max-w-[200px] truncate">{sale.notes ?? '—'}</td>
@@ -1254,7 +1242,7 @@ function SalesTab({ goTo }: { goTo: (tab: AdminTab) => void }) {
 
       {showForm && (
         <Modal title="Record Sale" onClose={() => setShowForm(false)}>
-          <SaleForm availableUnits={availableUnits} onDone={(s) => { setSales((p) => [s, ...p]); setShowForm(false); void load(); }} />
+          <SaleForm onDone={(s) => { setSales((p) => [s, ...p]); setShowForm(false); void load(); }} />
         </Modal>
       )}
       {selectedSale && <Modal title={`Payments · Unit ${selectedSale.unit_number}`} wide onClose={() => setSelectedSale(null)}><InstallmentPanel sale={selectedSale} goTo={goTo} /></Modal>}
@@ -1262,8 +1250,8 @@ function SalesTab({ goTo }: { goTo: (tab: AdminTab) => void }) {
   );
 }
 
-function SaleForm({ availableUnits, onDone }: { availableUnits: ProjectUnit[]; onDone: (s: Sale) => void }) {
-  const [f, setF] = useState({ unit_id: availableUnits[0]?.id ?? '', unit_number: availableUnits[0]?.unit_number ?? 'AUTO', buyer_user_id: '', buyer_name: '', buyer_phone: '', buyer_email: '', sale_price: availableUnits[0]?.price?.replace(/[^0-9.]/g, '') ?? '', status: 'RESERVED', sale_date: '', notes: '', deposit_amount: '', installment_count: '0', installment_frequency: 'MONTHLY' });
+function SaleForm({ onDone }: { onDone: (s: Sale) => void }) {
+  const [f, setF] = useState({ buyer_user_id: '', buyer_name: '', buyer_phone: '', buyer_email: '', sale_price: '', sale_date: '', notes: '', deposit_amount: '', installment_count: '0', installment_frequency: 'MONTHLY' });
   const [buyerMatches, setBuyerMatches] = useState<BuyerProfileMatch[]>([]);
   const [err, setErr] = useState('');
   const [saving, setSaving] = useState(false);
@@ -1281,12 +1269,13 @@ function SaleForm({ availableUnits, onDone }: { availableUnits: ProjectUnit[]; o
 
   const submit = async (e: FormEvent) => {
     e.preventDefault(); setSaving(true); setErr('');
+    if (!f.buyer_user_id) { setErr('Select a registered client account before recording a sale.'); setSaving(false); return; }
     const { data, error } = await supabase.from('sales').insert({
-      unit_id: f.unit_id || null, buyer_user_id: f.buyer_user_id || null,
-      unit_number: f.unit_number || 'AUTO', buyer_name: f.buyer_name,
+      unit_id: null, buyer_user_id: f.buyer_user_id,
+      unit_number: 'MANUAL', buyer_name: f.buyer_name,
       buyer_phone: f.buyer_phone || null, buyer_email: f.buyer_email || null,
       sale_price: f.sale_price ? parseMoney(f.sale_price) : null,
-      status: f.status, sale_date: f.sale_date || null, notes: f.notes || null,
+      status: 'RESERVED', sale_date: f.sale_date || null, notes: f.notes || null,
       deposit_amount: f.deposit_amount ? parseMoney(f.deposit_amount) : 0,
       installment_count: parseInt(f.installment_count) || 0, installment_frequency: f.installment_frequency,
     }).select().single();
@@ -1313,8 +1302,8 @@ function SaleForm({ availableUnits, onDone }: { availableUnits: ProjectUnit[]; o
   return (
     <form onSubmit={submit} className="grid gap-4">
       <div className="grid grid-cols-2 gap-4">
-        <label className="block"><span className="eyebrow mb-1.5 block text-slate-400">Inventory unit</span><select value={f.unit_id} onChange={(event) => { const unit = availableUnits.find((item) => item.id === event.target.value); setF({ ...f, unit_id: unit?.id ?? '', unit_number: unit?.unit_number ?? 'AUTO', sale_price: unit?.price?.replace(/[^0-9.]/g, '') ?? '' }); }} className="admin-input w-full"><option value="">Unlisted / manual sale</option>{availableUnits.map((unit) => <option key={unit.id} value={unit.id}>{unit.unit_number} · {unit.type || 'Residence'} · {unit.price || 'Price not set'}</option>)}</select></label>
-        <div className="relative"><label className="block"><span className="eyebrow mb-1.5 block text-slate-400">Buyer Name *</span><input value={f.buyer_name} onChange={(event) => setF({ ...f, buyer_user_id: '', buyer_name: event.target.value })} required className="admin-input w-full" autoComplete="off" placeholder="Search registered clients" /></label>{buyerMatches.length > 0 && <div className="absolute z-20 mt-1 max-h-52 w-full overflow-y-auto border border-[#c9c5bd] bg-white shadow-lg">{buyerMatches.map((buyer) => <button type="button" key={buyer.user_id} onClick={() => { setF({ ...f, buyer_user_id: buyer.user_id, buyer_name: buyer.full_name || buyer.email || '', buyer_phone: buyer.phone || '', buyer_email: buyer.email || '' }); setBuyerMatches([]); }} className="block w-full border-b border-[#e6e2da] px-3 py-2 text-left hover:bg-[#eefbf9]"><span className="block text-sm font-semibold">{buyer.full_name || 'NBG client'}</span><span className="text-xs text-slate-500">{buyer.email || 'No email'}{buyer.phone ? ` · ${buyer.phone}` : ''}</span></button>)}</div>}{f.buyer_user_id && <p className="mt-1 text-[10px] text-[#087f88]">Registered client account linked.</p>}</div>
+        <div className="border border-[#d9d5cc] bg-[#f8f7f3] p-3 text-xs leading-5 text-slate-500">This form records an unlisted sale for a registered client. To reserve a published inventory unit, use the unit’s Reserve action in the Units tab so availability and expiry are enforced.</div>
+        <div className="relative"><label className="block"><span className="eyebrow mb-1.5 block text-slate-400">Registered buyer *</span><input value={f.buyer_user_id ? f.buyer_name : f.buyer_name} onChange={(event) => setF({ ...f, buyer_user_id: '', buyer_name: event.target.value })} required className="admin-input w-full" autoComplete="off" placeholder="Search registered clients" /></label>{buyerMatches.length > 0 && <div className="absolute z-20 mt-1 max-h-52 w-full overflow-y-auto border border-[#c9c5bd] bg-white shadow-lg">{buyerMatches.map((buyer) => <button type="button" key={buyer.user_id} onClick={() => { setF({ ...f, buyer_user_id: buyer.user_id, buyer_name: buyer.full_name || buyer.email || '', buyer_phone: buyer.phone || '', buyer_email: buyer.email || '' }); setBuyerMatches([]); }} className="block w-full border-b border-[#e6e2da] px-3 py-2 text-left hover:bg-[#eefbf9]"><span className="block text-sm font-semibold">{buyer.full_name || 'NBG client'}</span><span className="text-xs text-slate-500">{buyer.email || 'No email'}{buyer.phone ? ` · ${buyer.phone}` : ''}</span></button>)}</div>}{f.buyer_user_id && <p className="mt-1 text-[10px] text-[#087f88]">Registered client account linked.</p>}</div>
       </div>
       <div className="grid grid-cols-2 gap-4">
         <AF label="Buyer Phone" value={f.buyer_phone} onChange={(v) => setF({ ...f, buyer_phone: v })} />
@@ -1326,17 +1315,11 @@ function SaleForm({ availableUnits, onDone }: { availableUnits: ProjectUnit[]; o
       </div>
       <div className="border-t border-[#c9c5bd] pt-4"><p className="eyebrow text-[#20afd1]">Buyer payment plan</p><div className="mt-3 grid grid-cols-3 gap-3"><label className="block"><span className="eyebrow mb-1.5 block text-slate-400">Deposit (KSh)</span><CurrencyInput value={f.deposit_amount} onChange={(v) => setF({ ...f, deposit_amount: v })} className="admin-input w-full" /></label><AF label="Installments" type="number" value={f.installment_count} onChange={(v) => setF({ ...f, installment_count: v })} /><label className="block"><span className="eyebrow mb-1.5 block text-slate-400">Frequency</span><select value={f.installment_frequency} onChange={(e) => setF({ ...f, installment_frequency: e.target.value })} className="admin-input w-full"><option>MONTHLY</option><option>QUARTERLY</option><option>ANNUALLY</option></select></label></div><p className="mt-2 text-[10px] text-slate-500">The remaining balance is divided evenly and scheduled automatically after saving.</p></div>
       <label className="block">
-        <span className="eyebrow mb-1.5 block text-slate-400">Status</span>
-        <select value={f.status} onChange={(e) => setF({ ...f, status: e.target.value })} className="admin-input w-full">
-          {SALE_STATUSES.map((s) => <option key={s} value={s}>{s.replace('_', ' ')}</option>)}
-        </select>
-      </label>
-      <label className="block">
         <span className="eyebrow mb-1.5 block text-slate-400">Notes</span>
         <textarea value={f.notes} onChange={(e) => setF({ ...f, notes: e.target.value })} rows={2} className="admin-input w-full resize-none" />
       </label>
       {err && <p className="text-sm text-[#a55445]">{err}</p>}
-      <button disabled={saving} className="btn-primary disabled:opacity-60">{saving ? 'Saving…' : 'Save Sale'} <ArrowRight size={15} /></button>
+      <button disabled={saving || !f.buyer_user_id} className="btn-primary disabled:opacity-60">{saving ? 'Saving…' : 'Save Sale'} <ArrowRight size={15} /></button>
     </form>
   );
 }
@@ -1524,30 +1507,37 @@ function PaymentForm({ saleId, installment, amountDue, oneTime, onDone }: { sale
 
 // ─── Units ───────────────────────────────────────────────
 
-function UnitsTab() {
+function UnitsTab({ canReserve }: { canReserve: boolean }) {
   const [units, setUnits] = useState<ProjectUnit[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
+  const [reservations, setReservations] = useState<{ unit_id: string; buyer_name: string; reservation_expires_at: string | null; reservation_source: string; reservation_reason: string | null }[]>([]);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<ProjectUnit | null>(null);
+  const [reservationUnit, setReservationUnit] = useState<ProjectUnit | null>(null);
 
   const load = useCallback(async () => {
-    const [ur, pr] = await Promise.all([
+    const [ur, pr, sr] = await Promise.all([
       supabase.from('project_units').select('*').order('unit_number'),
       supabase.from('projects').select('id,name'),
+      supabase.from('sales').select('unit_id,buyer_name,reservation_expires_at,reservation_source,reservation_reason').eq('status', 'RESERVED').not('unit_id', 'is', null).order('created_at', { ascending: false }),
     ]);
     setUnits((ur.data ?? []) as ProjectUnit[]);
     setProjects((pr.data ?? []) as Project[]);
+    setReservations((sr.data ?? []) as { unit_id: string; buyer_name: string; reservation_expires_at: string | null; reservation_source: string; reservation_reason: string | null }[]);
     setLoading(false);
   }, []);
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    void load();
+    const channel = supabase.channel('admin-unit-reservation-status')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'project_units' }, () => { void load(); })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'sales' }, () => { void load(); })
+      .subscribe();
+    return () => { void supabase.removeChannel(channel); };
+  }, [load]);
 
   const filtered = useMemo(() => units.filter((u) => statusFilter === 'ALL' || u.status === statusFilter), [units, statusFilter]);
-  const updateStatus = async (id: string, status: string) => {
-    setUnits((p) => p.map((u) => u.id === id ? { ...u, status } : u));
-    await supabase.from('project_units').update({ status }).eq('id', id);
-  };
 
   const togglePublished = async (unit: ProjectUnit) => {
     const is_published = !unit.is_published;
@@ -1557,8 +1547,12 @@ function UnitsTab() {
 
   const remove = async (id: string) => {
     if (!window.confirm('Delete this unit?')) return;
+    const { error } = await supabase.from('project_units').delete().eq('id', id);
+    if (error) {
+      window.dispatchEvent(new CustomEvent('nbg-admin-toast', { detail: { type: 'error', message: error.message || 'Unit could not be deleted.' } }));
+      return;
+    }
     setUnits((p) => p.filter((u) => u.id !== id));
-    await supabase.from('project_units').delete().eq('id', id);
   };
 
   if (loading) return <Spinner />;
@@ -1582,7 +1576,7 @@ function UnitsTab() {
       <div className="overflow-x-auto rounded-lg border border-[#c9c5bd] bg-white shadow-sm">
         <table className="w-full text-left text-sm">
           <thead className="border-b border-[#c9c5bd] bg-[#f0ede6] text-[10px] uppercase tracking-[.12em] text-slate-400">
-            <tr>{['Unit', 'Type', 'Beds', 'Floor', 'Size', 'Price', 'View', 'Status', 'Visibility', ''].map((h) => <th key={h} className="px-4 py-3 font-semibold">{h}</th>)}</tr>
+            <tr>{['Unit', 'Type', 'Beds', 'Floor', 'Size', 'Price', 'View', 'Status', 'Reservation', 'Visibility', ''].map((h) => <th key={h} className="px-4 py-3 font-semibold">{h}</th>)}</tr>
           </thead>
           <tbody>
             {filtered.map((u) => (
@@ -1594,14 +1588,13 @@ function UnitsTab() {
                 <td className="px-4 py-3 text-xs text-slate-500">{u.size ?? '—'}</td>
                 <td className="px-4 py-3 text-xs text-slate-500">{u.price ?? '—'}</td>
                 <td className="px-4 py-3 text-xs text-slate-500">{u.view ?? '—'}</td>
-                <td className="px-4 py-3">
-                  <StatusSelect value={u.status} options={UNIT_STATUSES} colors={{ AVAILABLE: 'bg-[#dceeea] text-[#3a6f69]', RESERVED: 'bg-[#f2e7c9] text-[#856b2e]', SOLD: 'bg-[#f5d4d4] text-[#7a2e2e]' }} onChange={(v) => updateStatus(u.id, v)} />
-                </td>
+                <td className="px-4 py-3"><span className={`inline-flex px-2.5 py-1 text-[10px] font-semibold uppercase ${u.status === 'AVAILABLE' ? 'bg-[#dceeea] text-[#3a6f69]' : u.status === 'RESERVED' ? 'bg-[#f2e7c9] text-[#856b2e]' : 'bg-[#f5d4d4] text-[#7a2e2e]'}`}>{u.status}</span></td>
+                <td className="px-4 py-3 text-xs text-slate-500">{(() => { const reservation = reservations.find((item) => item.unit_id === u.id && item.reservation_expires_at && new Date(item.reservation_expires_at).getTime() > Date.now()); return reservation ? <span><span>{reservation.buyer_name}{reservation.reservation_source === 'ADMIN' ? ' · Override' : ''}</span><span className="mt-1 block text-[10px]">Until {new Date(reservation.reservation_expires_at!).toLocaleString()}</span>{reservation.reservation_reason && <span className="mt-1 block max-w-[180px] truncate text-[10px]" title={reservation.reservation_reason}>Reason: {reservation.reservation_reason}</span>}</span> : canReserve && (u.status === 'AVAILABLE' || reservations.some((item) => item.unit_id === u.id && item.reservation_expires_at && new Date(item.reservation_expires_at).getTime() <= Date.now())) ? <button type="button" onClick={() => setReservationUnit(u)} className="inline-flex items-center gap-1.5 font-semibold text-[#087f88] hover:underline"><CalendarDays size={13} /> Reserve</button> : '—'; })()}</td>
                 <td className="px-4 py-3"><button onClick={() => togglePublished(u)} className={`flex items-center gap-1 text-[10px] uppercase tracking-[.1em] ${u.is_published ? 'text-[#2e6b3e]' : 'text-slate-400'}`}>{u.is_published ? <Eye size={13} /> : <EyeOff size={13} />}{u.is_published ? 'Live' : 'Hidden'}</button></td>
                 <td className="px-4 py-3"><div className="flex items-center gap-3"><button onClick={() => setEditing(u)} className="text-slate-300 hover:text-[#20afd1]" aria-label={`Edit unit ${u.unit_number}`}><Pencil size={15} /></button><button onClick={() => remove(u.id)} className="text-slate-300 hover:text-[#a55445]" aria-label={`Delete unit ${u.unit_number}`}><Trash2 size={15} /></button></div></td>
               </tr>
             ))}
-            {filtered.length === 0 && <EmptyRow cols={10} text="No units in inventory yet." />}
+            {filtered.length === 0 && <EmptyRow cols={11} text="No units in inventory yet." />}
           </tbody>
         </table>
       </div>
@@ -1612,12 +1605,13 @@ function UnitsTab() {
         </Modal>
       )}
       {editing && <Modal title={`Edit ${editing.unit_number}`} onClose={() => setEditing(null)}><UnitForm projects={projects} initial={editing} onDone={(u) => { setUnits((p) => p.map((item) => item.id === u.id ? u : item)); setEditing(null); }} /></Modal>}
+      {reservationUnit && <Modal title={`Reserve ${reservationUnit.unit_number}`} onClose={() => setReservationUnit(null)}><AdminUnitReservationForm unit={reservationUnit} onDone={() => { setReservationUnit(null); void load(); }} /></Modal>}
     </div>
   );
 }
 
 function UnitForm({ projects, initial, onDone }: { projects: Project[]; initial?: ProjectUnit; onDone: (u: ProjectUnit) => void }) {
-  const [f, setF] = useState({ unit_number: initial?.unit_number ?? '', project_id: initial?.project_id ?? '', type: initial?.type ?? '', bedrooms: initial?.bedrooms?.toString() ?? '', size: initial?.size ?? '', floor: initial?.floor ?? '', parking: initial?.parking ?? '', view: initial?.view ?? '', price: initial?.price ?? '', status: initial?.status ?? 'AVAILABLE', is_published: initial?.is_published ?? false });
+  const [f, setF] = useState({ unit_number: initial?.unit_number ?? '', project_id: initial?.project_id ?? '', type: initial?.type ?? '', bedrooms: initial?.bedrooms?.toString() ?? '', size: initial?.size ?? '', floor: initial?.floor ?? '', parking: initial?.parking ?? '', view: initial?.view ?? '', price: initial?.price ?? '', is_published: initial?.is_published ?? false });
   const [image, setImage] = useState<File | null>(null);
   const [err, setErr] = useState('');
   const [saving, setSaving] = useState(false);
@@ -1630,7 +1624,7 @@ function UnitForm({ projects, initial, onDone }: { projects: Project[]; initial?
       unit_number: f.unit_number || 'AUTO', project_id: f.project_id || null, type: f.type || null,
       bedrooms: f.bedrooms ? parseInt(f.bedrooms) : null, size: f.size || null,
       floor: f.floor || null, parking: f.parking || null, view: f.view || null,
-      price: f.price || null, status: f.status, image_url, is_published: f.is_published,
+      price: f.price || null, image_url, is_published: f.is_published,
     };
     const response = initial
       ? await supabase.from('project_units').update(values).eq('id', initial.id).select().single()
@@ -1667,19 +1661,69 @@ function UnitForm({ projects, initial, onDone }: { projects: Project[]; initial?
         <label className="block"><span className="eyebrow mb-1.5 block text-slate-400">Parking</span><select value={f.parking} onChange={(e) => setF({ ...f, parking: e.target.value })} className="admin-input w-full"><option value="">— Select parking —</option>{PARKING_OPTIONS.map((item) => <option key={item}>{item}</option>)}</select></label>
         <label className="block"><span className="eyebrow mb-1.5 block text-slate-400">View</span><select value={f.view} onChange={(e) => setF({ ...f, view: e.target.value })} className="admin-input w-full"><option value="">— Select view —</option>{VIEW_OPTIONS.map((item) => <option key={item}>{item}</option>)}</select></label>
       </div>
-      <div className="grid grid-cols-2 gap-4">
-        <AF label="Price (KSh)" value={f.price} onChange={(v) => setF({ ...f, price: v })} currency />
-        <label className="block">
-          <span className="eyebrow mb-1.5 block text-slate-400">Status</span>
-          <select value={f.status} onChange={(e) => setF({ ...f, status: e.target.value })} className="admin-input w-full">
-            {UNIT_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
-          </select>
-        </label>
-      </div>
+      <AF label="Price (KSh)" value={f.price} onChange={(v) => setF({ ...f, price: v })} currency />
       {err && <p className="text-sm text-[#a55445]">{err}</p>}
       <button disabled={saving} className="btn-primary disabled:opacity-60">{saving ? 'Saving…' : initial ? 'Save Unit Changes' : 'Add Unit'} <ArrowRight size={15} /></button>
     </form>
   );
+}
+
+function AdminUnitReservationForm({ unit, onDone }: { unit: ProjectUnit; onDone: () => void }) {
+  const [buyerQuery, setBuyerQuery] = useState('');
+  const [buyer, setBuyer] = useState<BuyerProfileMatch | null>(null);
+  const [buyerMatches, setBuyerMatches] = useState<BuyerProfileMatch[]>([]);
+  const [hours, setHours] = useState('48');
+  const [reason, setReason] = useState('');
+  const [initialPayment, setInitialPayment] = useState('');
+  const [installments, setInstallments] = useState('12');
+  const [frequency, setFrequency] = useState('MONTHLY');
+  const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
+  const unitPrice = Number((unit.price ?? '').replace(/[^0-9.]/g, '')) || 0;
+
+  useEffect(() => {
+    const query = buyerQuery.trim();
+    if (query.length < 2 || buyer) { setBuyerMatches([]); return; }
+    let active = true;
+    const timer = window.setTimeout(async () => {
+      const { data } = await supabase.rpc('search_client_profiles', { p_query: query });
+      if (active) setBuyerMatches((data ?? []) as BuyerProfileMatch[]);
+    }, 250);
+    return () => { active = false; window.clearTimeout(timer); };
+  }, [buyerQuery, buyer]);
+
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setError('');
+    if (!buyer) { setError('Choose a registered client account.'); return; }
+    if (!unitPrice) { setError('A confirmed price is required before reserving this unit.'); return; }
+    const amount = parseMoney(initialPayment);
+    if (!amount || amount > unitPrice || (amount < unitPrice && Number(installments) < 1)) { setError('Enter a valid initial payment and installment plan.'); return; }
+    setSaving(true);
+    const { data, error: reservationError } = await supabase.rpc('reserve_unit_for_client', {
+      p_unit_id: unit.id,
+      p_buyer_user_id: buyer.user_id,
+      p_reservation_hours: Number(hours),
+      p_reason: reason.trim(),
+      p_initial_payment: amount,
+      p_installment_count: amount === unitPrice ? 0 : Number(installments),
+      p_frequency: frequency,
+    });
+    setSaving(false);
+    if (reservationError || !data?.length) { setError(reservationError?.message || 'The unit could not be reserved. Refresh inventory and retry.'); return; }
+    window.dispatchEvent(new CustomEvent('nbg-admin-toast', { detail: { type: 'success', message: `Unit ${unit.unit_number} reserved for ${buyer.full_name || buyer.email} until ${new Date(data[0].expires_at).toLocaleString()}.` } }));
+    onDone();
+  };
+
+  return <form onSubmit={submit} className="grid gap-4">
+    <p className="text-sm leading-6 text-slate-500">An override reservation requires a registered client, recorded justification, and payment schedule. Maximum duration is 168 hours.</p>
+    <div className="relative"><label className="block"><span className="eyebrow mb-1.5 block text-slate-500">Registered buyer account *</span><input value={buyer ? buyer.full_name || buyer.email || '' : buyerQuery} onChange={(event) => { setBuyer(null); setBuyerQuery(event.target.value); }} required className="admin-input w-full" autoComplete="off" placeholder="Search name, email, or phone" /></label>{buyerMatches.length > 0 && <div className="absolute z-20 mt-1 max-h-48 w-full overflow-y-auto border border-[#c9c5bd] bg-white shadow-lg">{buyerMatches.map((match) => <button key={match.user_id} type="button" onClick={() => { setBuyer(match); setBuyerQuery(''); setBuyerMatches([]); }} className="block w-full border-b border-[#e6e2da] px-3 py-2 text-left hover:bg-[#eefbf9]"><span className="block text-sm font-semibold">{match.full_name || 'NBG client'}</span><span className="text-xs text-slate-500">{match.email || 'No email'}{match.phone ? ` · ${match.phone}` : ''}</span></button>)}</div>}{buyer && <p className="mt-1 text-xs text-[#087f88]">Client account selected: {buyer.email}</p>}</div>
+    <div className="grid gap-3 sm:grid-cols-2"><label className="block"><span className="eyebrow mb-1.5 block text-slate-500">Reservation duration (hours)</span><input type="number" min="1" max="168" required value={hours} onChange={(event) => setHours(event.target.value)} className="admin-input w-full" /></label><label className="block"><span className="eyebrow mb-1.5 block text-slate-500">Initial payment (KSh)</span><CurrencyInput value={initialPayment} onChange={setInitialPayment} className="admin-input w-full" /></label></div>
+    <div className="grid gap-3 sm:grid-cols-2"><label className="block"><span className="eyebrow mb-1.5 block text-slate-500">Installments after initial payment</span><input type="number" min="0" max="120" value={installments} onChange={(event) => setInstallments(event.target.value)} className="admin-input w-full" /></label><label className="block"><span className="eyebrow mb-1.5 block text-slate-500">Frequency</span><select value={frequency} onChange={(event) => setFrequency(event.target.value)} className="admin-input w-full"><option value="MONTHLY">Monthly</option><option value="QUARTERLY">Quarterly</option><option value="ANNUALLY">Annually</option></select></label></div>
+    <label className="block"><span className="eyebrow mb-1.5 block text-slate-500">Reason for override *</span><textarea minLength={12} maxLength={500} required value={reason} onChange={(event) => setReason(event.target.value)} rows={3} className="admin-input w-full resize-y" placeholder="Record the business reason for this reservation" /></label>
+    {error && <p role="alert" className="text-sm text-[#a55445]">{error}</p>}
+    <button type="submit" disabled={saving || !buyer || !unitPrice} className="btn-primary justify-center disabled:opacity-60">{saving ? 'Reserving…' : 'Confirm reservation'} <CalendarDays size={15} /></button>
+  </form>;
 }
 
 // ─── Investments ─────────────────────────────────────────
