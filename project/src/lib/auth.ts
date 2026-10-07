@@ -16,13 +16,10 @@ function normalizeRole(role: string | null | undefined): string {
   return String(role ?? 'client').trim().toLowerCase();
 }
 
-const DEFAULT_VERCEL_SITE_URL = 'https://next-bridge-group-limited-qfk17ns6k-hamisedu-7859.vercel.app';
-
 function portalRedirectUrl(query = ''): string {
-  const configuredOrigin = import.meta.env.VITE_PUBLIC_SITE_URL?.trim().replace(/\/+$/, '');
-  const isVercelHost = window.location.hostname.endsWith('.vercel.app');
-  const redirectOrigin = configuredOrigin || (isVercelHost ? DEFAULT_VERCEL_SITE_URL : window.location.origin);
-  return `${redirectOrigin}/portal${query}`;
+  const redirectUrl = new URL('/portal', window.location.origin);
+  redirectUrl.search = query.startsWith('?') ? query : query ? `?${query}` : '';
+  return redirectUrl.toString();
 }
 
 export async function fetchProfile(userId: string): Promise<AdminUser | null> {
