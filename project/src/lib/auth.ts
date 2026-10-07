@@ -16,10 +16,26 @@ function normalizeRole(role: string | null | undefined): string {
   return String(role ?? 'client').trim().toLowerCase();
 }
 
-function portalRedirectUrl(query = ''): string {
-  const redirectUrl = new URL('/portal', window.location.origin);
+function appBaseUrl(): string {
+  const configuredUrl = import.meta.env.VITE_APP_URL?.trim();
+  if (configuredUrl) return configuredUrl.replace(/\/$/, '');
+
+  if (typeof window !== 'undefined' && window.location?.origin) {
+    return window.location.origin;
+  }
+
+  return 'http://localhost:5173';
+}
+
+function appUrl(path: string, query = ''): string {
+  const baseUrl = appBaseUrl();
+  const redirectUrl = new URL(path.startsWith('/') ? path : `/${path}`, baseUrl);
   redirectUrl.search = query.startsWith('?') ? query : query ? `?${query}` : '';
   return redirectUrl.toString();
+}
+
+function portalRedirectUrl(query = ''): string {
+  return appUrl('/portal', query);
 }
 
 export async function fetchProfile(userId: string): Promise<AdminUser | null> {
@@ -82,7 +98,7 @@ export async function updatePassword(password: string) {
 }
 
 export async function resetPassword(email: string) {
-  return supabase.auth.resetPasswordForEmail(email, { redirectTo: `${window.location.origin}/admin` });
+  return supabase.auth.resetPasswordForEmail(email, { redirectTo: appUrl('/admin') });
 }
 
 export async function signOut() {
