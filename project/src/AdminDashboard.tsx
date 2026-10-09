@@ -1,6 +1,6 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
-import { AlertCircle, ArrowRight, Award, BarChart3, Building2, CalendarDays, Calculator, Check, ChevronRight, ClipboardList, Construction, CreditCard, Download, DollarSign, Eye, EyeOff, FileDown, FileText, Info, LayoutDashboard, LogOut, Mail, MapPin, Menu, MessageCircle, Pencil, Phone, Plus, Search, Send, TrendingUp, Trash2, Upload, Users, X } from 'lucide-react';
-import { jsPDF } from 'jspdf';
+import { AlertCircle, ArrowRight, Award, BarChart3, Building2, CalendarDays, Calculator, Check, ChevronRight, ClipboardList, Clock3, Construction, CreditCard, Download, DollarSign, Eye, EyeOff, FileDown, FileText, Info, LayoutDashboard, LogOut, Mail, MapPin, Menu, MessageCircle, Pencil, Phone, Plus, RefreshCw, Search, Send, SlidersHorizontal, TrendingUp, Trash2, Upload, Users, X } from 'lucide-react';
+import { GState, jsPDF } from 'jspdf';
 import QRCode from 'qrcode';
 import { supabase } from '@/lib/supabase';
 import { resetPassword, signIn, signUp, type AdminUser } from '@/lib/auth';
@@ -16,6 +16,23 @@ import { createVerifiedPdf, downloadPdf } from '@/lib/verified-pdf';
 
 type AdminTab = 'overview' | 'leads' | 'sales' | 'payments' | 'units' | 'applications' | 'realtors' | 'commissions' | 'investments' | 'projects' | 'construction' | 'updates' | 'documents' | 'calculator' | 'vault' | 'audit';
 type BuyerProfileMatch = { user_id: string; full_name: string | null; phone: string | null; email: string | null };
+type ApplicationStatus = 'PENDING' | 'IN_REVIEW' | 'APPROVED' | 'ON_HOLD' | 'WITHDRAWN';
+type ApplicationRow = {
+  key: string;
+  id: string;
+  reference: string;
+  kind: 'realtor' | 'investment';
+  name: string;
+  email: string | null;
+  phone: string | null;
+  interest: string;
+  detail: string;
+  region: string;
+  status: ApplicationStatus;
+  rawStatus: string;
+  createdAt: string;
+  notes: string | null;
+};
 const LEAD_PRIORITIES = ['LOW', 'NORMAL', 'HIGH', 'URGENT'] as const;
 const LEAD_ACTIONS = ['Call lead', 'Send project details', 'Schedule viewing', 'Send quotation', 'Follow up', 'No action'];
 const UNIT_TYPES = ['1 Bedroom', '2 Bedroom', '3 Bedroom', '3 Bedroom + DSQ', '4 Bedroom', 'Penthouse', 'Commercial'];
@@ -173,42 +190,333 @@ async function generateBrandedPdf(kind: string, title: string, recipient: string
     }
   }
   const drawHeader = () => {
-    pdf.addImage(logo, 'PNG', left, 12, 18, 18);
-    pdf.setTextColor(13, 64, 85); pdf.setFontSize(16); pdf.text('NEXT BRIDGE GROUP LIMITED', 40, 19);
-    pdf.setTextColor(90, 86, 77); pdf.setFontSize(7); pdf.text('BUILDING HOMES · CREATING LEGACIES', 40, 26);
-    pdf.setDrawColor(25, 198, 201); pdf.setLineWidth(.6); pdf.line(left, 36, right, 36);
+    pdf.addImage(logo, 'PNG', left, 10, 16, 16);
+    pdf.setTextColor(31, 58, 52); pdf.setFont('times', 'bold'); pdf.setFontSize(12); pdf.text('NEXT BRIDGE GROUP LIMITED', 36, 16);
+    pdf.setTextColor(93, 102, 99); pdf.setFont('helvetica', 'normal'); pdf.setFontSize(6.5); pdf.text('BUILDING HOMES · CREATING LEGACIES', 36, 22);
+    pdf.setDrawColor(31, 58, 52); pdf.setLineWidth(.55); pdf.line(left, 34, right, 34);
+    pdf.setDrawColor(176, 141, 87); pdf.setLineWidth(.2); pdf.line(left, 35.5, right, 35.5);
   };
   const drawWatermark = () => {
-    pdf.setTextColor(239, 241, 240);
-    pdf.setFont('helvetica', 'bold');
-    pdf.setFontSize(30);
-    pdf.text('NBG VERIFIED COPY', 105, 157, { align: 'center', angle: 45 });
+    pdf.setGState(new GState({ opacity: 0.055 }));
+    pdf.addImage(logo, 'PNG', 67, 105, 76, 76);
+    pdf.setGState(new GState({ opacity: 1 }));
+    pdf.setTextColor(31, 58, 52);
+    pdf.setFont('times', 'bold');
+    pdf.setFontSize(20);
+    pdf.text('VERIFIED COPY', 105, 166, { align: 'center', angle: 42 });
     pdf.setFont('helvetica', 'normal');
   };
   const drawFooter = () => {
     const page = pdf.getCurrentPageInfo().pageNumber;
-    pdf.setDrawColor(220, 224, 222); pdf.setLineWidth(.3); pdf.line(left, footerTop, right, footerTop);
-    pdf.setTextColor(110, 116, 114); pdf.setFontSize(7); pdf.text(`NBG confidential · ${documentRef}`, left, footerTop + 7); pdf.text(`Page ${page}`, right, footerTop + 7, { align: 'right' });
-    pdf.setFontSize(6); pdf.text(`Verify online: /verify/${verificationCode}`, left, footerTop + 13); pdf.text('Scan to verify this document with NBG.', left, footerTop + 17);
-    pdf.addImage(verificationQr, 'PNG', right - 16, footerTop + 8, 16, 16);
+    pdf.setDrawColor(31, 58, 52); pdf.setLineWidth(.45); pdf.line(left, footerTop, right, footerTop);
+    pdf.setDrawColor(176, 141, 87); pdf.setLineWidth(.2); pdf.line(left, footerTop + 1.5, right, footerTop + 1.5);
+    pdf.addImage(logo, 'PNG', left, footerTop + 4, 11, 11);
+    pdf.setTextColor(93, 102, 99); pdf.setFont('helvetica', 'normal'); pdf.setFontSize(6.5);
+    pdf.text(`NBG confidential · ${documentRef} · Page ${page}`, left + 15, footerTop + 8);
+    pdf.text(`Verify online: /verify/${verificationCode}`, left + 15, footerTop + 13);
+    pdf.addImage(verificationQr, 'PNG', right - 15, footerTop + 3, 15, 15);
   };
   const ensureSpace = (y: number, height: number) => { if (y + height > footerTop - 6) { drawFooter(); pdf.addPage(); drawHeader(); drawWatermark(); return 48; } return y; };
   drawHeader();
   drawWatermark();
-  pdf.setTextColor(18, 59, 75); pdf.setFontSize(22); const titleLines = pdf.splitTextToSize(title, contentWidth); pdf.text(titleLines, left, 52);
+  pdf.setTextColor(31, 58, 52); pdf.setFont('times', 'bold'); pdf.setFontSize(22); const titleLines = pdf.splitTextToSize(title, contentWidth); pdf.text(titleLines, left, 52);
   let y = 52 + titleLines.length * 8;
-  pdf.setTextColor(90, 86, 77); pdf.setFontSize(8); pdf.text(`Document number: ${documentRef}`, left, y); pdf.text(`Issued: ${new Date().toLocaleString()}`, left + 82, y); y += 6;
+  pdf.setTextColor(93, 102, 99); pdf.setFont('helvetica', 'normal'); pdf.setFontSize(7); pdf.text(`DOCUMENT NUMBER  ${documentRef}`, left, y); pdf.text(`ISSUED  ${new Date().toLocaleDateString('en-KE')}`, right, y, { align: 'right' }); y += 7;
   pdf.text(`Prepared for: ${recipient || 'NBG client'}`, left, y); if (amount) pdf.text(`Amount: KSh ${Number(amount).toLocaleString()}`, left + 82, y); y += 12;
-  const body = productionDocumentBody(kind, readableDetails, amount);
-  const blocks = body.split(/\n\n+/);
-  blocks.forEach((block) => {
-    const lines = block.split('\n');
-    const heading = lines.shift()?.trim() || '';
-    const copy = lines.join('\n').trim();
-    y = ensureSpace(y, 14); pdf.setTextColor(8, 127, 136); pdf.setFontSize(8); pdf.setFont('helvetica', 'bold'); pdf.text(heading, left, y); y += 5;
-    if (copy) { pdf.setFont('helvetica', 'normal'); pdf.setTextColor(45, 55, 60); pdf.setFontSize(8.5); const copyLines = pdf.splitTextToSize(copy, contentWidth); copyLines.forEach((line: string) => { y = ensureSpace(y, 5); pdf.text(line, left, y); y += 4.2; }); y += 4; }
-  });
   const sourceData = documentSnapshot?.document_data && typeof documentSnapshot.document_data === 'object' ? documentSnapshot.document_data as Record<string, unknown> : {};
+  const getValue = (key: string, fallback = 'Not specified') => String(sourceData[key] ?? fallback);
+  const currency = getValue('currency', 'KES');
+  const money = (value: unknown) => `${currency} ${Number(value || 0).toLocaleString('en-KE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const drawMetadata = (entries: [string, string][]) => {
+    const columns = Math.min(3, Math.max(1, entries.length));
+    const rowCount = Math.ceil(entries.length / columns);
+    const rowHeight = 17;
+    y = ensureSpace(y, rowCount * rowHeight + 7);
+    pdf.setFillColor(244, 241, 234); pdf.setDrawColor(216, 212, 202); pdf.setLineWidth(.2);
+    pdf.rect(left, y, contentWidth, rowCount * rowHeight + 5, 'FD');
+    entries.forEach(([label, value], index) => {
+      const column = index % columns;
+      const row = Math.floor(index / columns);
+      const x = left + 4 + column * (contentWidth / columns);
+      const top = y + 5 + row * rowHeight;
+      pdf.setFont('helvetica', 'bold'); pdf.setFontSize(5.8); pdf.setTextColor(93, 102, 99);
+      pdf.text(label.toUpperCase(), x, top);
+      pdf.setFont('helvetica', 'normal'); pdf.setFontSize(7); pdf.setTextColor(28, 35, 33);
+      pdf.text(pdf.splitTextToSize(value || 'Not specified', contentWidth / columns - 8).slice(0, 2), x, top + 8);
+    });
+    y += rowCount * rowHeight + 10;
+  };
+  const drawSectionHeading = (heading: string) => {
+    y = ensureSpace(y, 13);
+    pdf.setFont('times', 'bold'); pdf.setFontSize(12); pdf.setTextColor(31, 58, 52);
+    pdf.text(heading, left, y);
+    pdf.setDrawColor(176, 141, 87); pdf.setLineWidth(.25); pdf.line(left, y + 2, right, y + 2);
+    y += 8;
+  };
+  const renderLedger = (heading: string, itemValue: unknown, itemLabel: string) => {
+    const items = Array.isArray(itemValue) ? itemValue.map((item) => typeof item === 'object' && item !== null ? item as Record<string, unknown> : { description: String(item) }) : [];
+    drawSectionHeading(heading);
+    const drawTableHead = () => {
+      pdf.setFillColor(31, 58, 52); pdf.rect(left, y, contentWidth, 8, 'F');
+      pdf.setFont('helvetica', 'bold'); pdf.setFontSize(6.5); pdf.setTextColor(255, 255, 255);
+      pdf.text(itemLabel.toUpperCase(), left + 3, y + 5.2);
+      pdf.text('QTY', left + 119, y + 5.2, { align: 'right' });
+      pdf.text('UNIT RATE', left + 148, y + 5.2, { align: 'right' });
+      pdf.text('AMOUNT', right - 3, y + 5.2, { align: 'right' });
+      y += 8;
+    };
+    drawTableHead();
+    items.forEach((item, index) => {
+      const description = String(item.description ?? item.name ?? item.item ?? `${itemLabel} ${index + 1}`);
+      const subline = String(item.details ?? item.code ?? item.notes ?? '');
+      const lines = pdf.splitTextToSize([description, subline].filter(Boolean).join('\n'), 103);
+      const rowHeight = Math.max(10, lines.length * 3.8 + 4);
+      if (y + rowHeight > footerTop - 20) { drawFooter(); pdf.addPage(); drawHeader(); drawWatermark(); y = 46; drawTableHead(); }
+      if (index % 2 === 0) { pdf.setFillColor(248, 247, 243); pdf.rect(left, y, contentWidth, rowHeight, 'F'); }
+      pdf.setDrawColor(216, 212, 202); pdf.setLineWidth(.2); pdf.line(left, y + rowHeight, right, y + rowHeight);
+      pdf.setFont('helvetica', 'bold'); pdf.setFontSize(7.2); pdf.setTextColor(28, 35, 33); pdf.text(lines[0] || '', left + 3, y + 5);
+      if (lines.length > 1) { pdf.setFont('helvetica', 'normal'); pdf.setFontSize(6.3); pdf.setTextColor(93, 102, 99); pdf.text(lines.slice(1), left + 3, y + 9); }
+      pdf.setFont('helvetica', 'normal'); pdf.setFontSize(7); pdf.setTextColor(28, 35, 33);
+      pdf.text(String(item.quantity ?? item.qty ?? 1), left + 119, y + 5.5, { align: 'right' });
+      pdf.text(money(item.unit_price ?? item.rate ?? 0), left + 148, y + 5.5, { align: 'right' });
+      pdf.text(money(item.amount ?? item.total ?? Number(item.quantity ?? item.qty ?? 1) * Number(item.unit_price ?? item.rate ?? 0)), right - 3, y + 5.5, { align: 'right' });
+      y += rowHeight;
+    });
+    if (!items.length) {
+      pdf.setFont('helvetica', 'normal'); pdf.setFontSize(7.5); pdf.setTextColor(93, 102, 99);
+      pdf.text(`No ${itemLabel.toLowerCase()} were supplied.`, left + 3, y + 6);
+      y += 12;
+    }
+  };
+  const drawTotals = (rows: [string, number][], totalLabel: string) => {
+    const summaryHeight = rows.length * 6 + 10;
+    if (y + summaryHeight > footerTop - 18) { drawFooter(); pdf.addPage(); drawHeader(); drawWatermark(); y = 48; }
+    const summaryWidth = 83;
+    const summaryX = right - summaryWidth;
+    rows.forEach(([label, value]) => {
+      pdf.setFont('helvetica', 'normal'); pdf.setFontSize(7); pdf.setTextColor(93, 102, 99);
+      pdf.text(label, summaryX, y + 4);
+      pdf.setTextColor(28, 35, 33); pdf.text(money(value), right - 3, y + 4, { align: 'right' });
+      y += 6;
+    });
+    pdf.setFillColor(31, 58, 52); pdf.rect(summaryX - 2, y, summaryWidth + 2, 10, 'F');
+    pdf.setFont('times', 'bold'); pdf.setFontSize(10); pdf.setTextColor(255, 255, 255);
+    pdf.text(totalLabel, summaryX + 2, y + 6.7);
+    pdf.text(money(rows[rows.length - 1]?.[1] ?? 0), right - 3, y + 6.7, { align: 'right' });
+    y += 15;
+  };
+  const structuredTypes = ['QUOTATION', 'CLIENT_INVOICE', 'RECEIPT', 'PURCHASE_ORDER', 'SUPPLIER_INVOICE', 'DELIVERY_NOTE', 'PAYMENT_VOUCHER', 'BROCHURE', 'FLOOR_PLAN'];
+  if (!structuredTypes.includes(kind)) {
+    const body = productionDocumentBody(kind, readableDetails, amount);
+    const blocks = body.split(/\n\n+/);
+    blocks.forEach((block) => {
+      const lines = block.split('\n');
+      const heading = lines.shift()?.trim() || '';
+      const copy = lines.join('\n').trim();
+      y = ensureSpace(y, 14); pdf.setTextColor(31, 58, 52); pdf.setFontSize(8); pdf.setFont('helvetica', 'bold'); pdf.text(heading, left, y); y += 5;
+      if (copy) { pdf.setFont('helvetica', 'normal'); pdf.setTextColor(45, 55, 60); pdf.setFontSize(8.5); const copyLines = pdf.splitTextToSize(copy, contentWidth); copyLines.forEach((line: string) => { y = ensureSpace(y, 5); pdf.text(line, left, y); y += 4.2; }); y += 4; }
+    });
+  }
+  if (kind === 'QUOTATION') {
+    drawMetadata([
+      ['Prepared for', getValue('client_name', recipient)],
+      ['Site location', getValue('site_location')],
+      ['Quotation date', new Date().toLocaleDateString('en-KE')],
+      ['Valid until', getValue('valid_until')],
+      ['Document reference', documentRef],
+    ]);
+    renderLedger('SCOPE AND PRICING', sourceData.scope_items, 'Description');
+    const subtotal = Number(sourceData.subtotal || 0);
+    const discount = Number(sourceData.discount || 0);
+    const tax = Number(sourceData.tax_amount || 0);
+    const total = Number(sourceData.grand_total || subtotal - discount + tax || amount || 0);
+    drawTotals([['Subtotal', subtotal], ['Discount', -discount], ['Tax', tax], ['Quotation total', total]], 'TOTAL QUOTED');
+    [['PAYMENT TERMS', 'payment_terms'], ['EXCLUSIONS AND ASSUMPTIONS', 'exclusions_assumptions'], ['VARIATION PROCEDURE', 'variation_procedure']].forEach(([heading, key]) => {
+      if (!sourceData[key]) return;
+      drawSectionHeading(heading);
+      const lines = pdf.splitTextToSize(String(sourceData[key]), contentWidth);
+      lines.forEach((line: string) => { y = ensureSpace(y, 5); pdf.setFont('helvetica', 'normal'); pdf.setFontSize(7.5); pdf.setTextColor(45, 55, 60); pdf.text(line, left, y); y += 4.2; });
+      y += 3;
+    });
+  }
+
+  if (kind === 'PURCHASE_ORDER') {
+    drawMetadata([
+      ['Vendor', getValue('supplier_name', recipient)],
+      ['Vendor tax number', getValue('supplier_tax_number')],
+      ['Ship to', getValue('delivery_location')],
+      ['Order date', new Date().toLocaleDateString('en-KE')],
+      ['Required delivery', getValue('required_delivery_date')],
+      ['Approval authority', getValue('approval_authority')],
+    ]);
+    renderLedger('ORDERED ITEMS', sourceData.ordered_items, 'Item');
+    const subtotal = Number(sourceData.subtotal || 0);
+    const delivery = Number(sourceData.delivery_charges || 0);
+    const tax = Number(sourceData.tax_amount || 0);
+    const total = Number(sourceData.grand_total || subtotal + delivery + tax || amount || 0);
+    drawTotals([['Subtotal', subtotal], ['Delivery', delivery], ['Tax', tax], ['Order total', total]], 'ORDER TOTAL');
+    drawSectionHeading('AUTHORIZATION');
+    const approvalText = `Prepared by: ${getValue('prepared_by', 'NBG procurement')}     Approved by: ${getValue('approval_authority')}`;
+    pdf.setFont('helvetica', 'normal'); pdf.setFontSize(7.5); pdf.setTextColor(45, 55, 60); pdf.text(pdf.splitTextToSize(approvalText, contentWidth), left, y); y += 12;
+    if (sourceData.payment_terms) { drawSectionHeading('PAYMENT TERMS'); pdf.setFont('helvetica', 'normal'); pdf.setFontSize(7.5); pdf.text(pdf.splitTextToSize(String(sourceData.payment_terms), contentWidth), left, y); y += 10; }
+  }
+
+  if (kind === 'SUPPLIER_INVOICE') {
+    drawMetadata([
+      ['Supplier', getValue('supplier_name', recipient)],
+      ['Supplier invoice number', getValue('invoice_number')],
+      ['Invoice date', getValue('invoice_date')],
+      ['Due date', getValue('due_date')],
+      ['Purchase order', getValue('purchase_order_number')],
+      ['Delivery note', getValue('delivery_note_number')],
+    ]);
+    renderLedger('INVOICE ITEMS', sourceData.invoice_items, 'Description');
+    const subtotal = Number(sourceData.subtotal || 0);
+    const tax = Number(sourceData.tax_amount || 0);
+    const total = Number(sourceData.grand_total || subtotal + tax || amount || 0);
+    drawTotals([['Subtotal', subtotal], ['Tax', tax], ['Invoice total', total]], 'TOTAL CLAIMED');
+    if (sourceData.verification_result) {
+      drawSectionHeading('VERIFICATION RESULT');
+      pdf.setFont('helvetica', 'normal'); pdf.setFontSize(7.5); pdf.setTextColor(45, 55, 60);
+      pdf.text(pdf.splitTextToSize(String(sourceData.verification_result), contentWidth), left, y); y += 12;
+    }
+  }
+
+  if (kind === 'DELIVERY_NOTE') {
+    drawMetadata([
+      ['Supplier', getValue('supplier_name', recipient)],
+      ['Purchase order', getValue('po_number')],
+      ['Delivery date', getValue('delivery_date')],
+      ['Delivery site', getValue('site')],
+      ['Vehicle registration', getValue('vehicle_registration')],
+      ['Quality status', getValue('quality_status')],
+    ]);
+    const materials = Array.isArray(sourceData.materials) ? sourceData.materials : [];
+    drawSectionHeading('MATERIALS RECEIVED');
+    const drawMaterialsHeader = () => {
+      pdf.setFillColor(31, 58, 52); pdf.rect(left, y, contentWidth, 8, 'F');
+      pdf.setFont('helvetica', 'bold'); pdf.setFontSize(6.5); pdf.setTextColor(255, 255, 255);
+      pdf.text('DESCRIPTION / CODE', left + 3, y + 5.2); pdf.text('QUANTITY', right - 3, y + 5.2, { align: 'right' });
+      y += 8;
+    };
+    drawMaterialsHeader();
+    materials.forEach((entry, index) => {
+      const item = typeof entry === 'object' && entry !== null ? entry as Record<string, unknown> : { description: String(entry) };
+      const label = [item.description || item.name || `Material ${index + 1}`, item.code].filter(Boolean).join(' · ');
+      const height = 10;
+      if (y + height > footerTop - 20) { drawFooter(); pdf.addPage(); drawHeader(); drawWatermark(); y = 46; drawMaterialsHeader(); }
+      if (index % 2 === 0) { pdf.setFillColor(248, 247, 243); pdf.rect(left, y, contentWidth, height, 'F'); }
+      pdf.setFont('helvetica', 'normal'); pdf.setFontSize(7.2); pdf.setTextColor(28, 35, 33);
+      pdf.text(pdf.splitTextToSize(String(label), 130), left + 3, y + 6);
+      pdf.text(String(item.quantity ?? item.qty ?? '—'), right - 3, y + 6, { align: 'right' });
+      pdf.setDrawColor(216, 212, 202); pdf.line(left, y + height, right, y + height); y += height;
+    });
+    drawMetadata([['Quantity rejected', getValue('quantity_rejected', '0')], ['Received by', getValue('receiver_name')], ['Rejection reason', getValue('rejection_reason')]]);
+    drawSectionHeading('RECEIPT CONFIRMATION');
+    pdf.setFont('helvetica', 'normal'); pdf.setFontSize(7.5); pdf.setTextColor(45, 55, 60);
+    pdf.text('Materials and quantities listed above are subject to physical inspection and acceptance by the authorized receiver.', left, y); y += 14;
+    pdf.setDrawColor(28, 35, 33); pdf.line(left, y + 8, left + 72, y + 8); pdf.line(right - 72, y + 8, right, y + 8);
+    pdf.setTextColor(93, 102, 99); pdf.setFontSize(6.5); pdf.text('Supplier representative', left, y + 12); pdf.text('NBG receiver', right - 72, y + 12);
+  }
+
+  if (kind === 'PAYMENT_VOUCHER') {
+    drawMetadata([
+      ['Payee', getValue('payee_name', recipient)],
+      ['Payment status', getValue('payment_status')],
+      ['Account code', getValue('account_code')],
+      ['Cost centre', getValue('cost_centre')],
+      ['Currency', currency],
+      ['Supporting document', getValue('supporting_document')],
+    ]);
+    drawSectionHeading('PAYMENT PURPOSE');
+    pdf.setFont('helvetica', 'normal'); pdf.setFontSize(8); pdf.setTextColor(28, 35, 33);
+    pdf.text(pdf.splitTextToSize(getValue('payment_reason'), contentWidth), left, y); y += 16;
+    const voucherAmount = Number(sourceData.amount || amount || 0);
+    drawTotals([['Withholding tax', Number(sourceData.withholding_tax || 0)], ['Payment amount', voucherAmount]], 'AUTHORIZED AMOUNT');
+    drawMetadata([['Authorized by', getValue('authorized_by')], ['Payment status', getValue('payment_status')]]);
+    pdf.setDrawColor(28, 35, 33); pdf.line(left, y + 8, left + 72, y + 8); pdf.line(right - 72, y + 8, right, y + 8);
+    pdf.setTextColor(93, 102, 99); pdf.setFontSize(6.5); pdf.text('Prepared by', left, y + 12); pdf.text('Approved by', right - 72, y + 12);
+  }
+
+  if (kind === 'RECEIPT') {
+    drawMetadata([
+      ['Received from', getValue('customer_name', recipient)],
+      ['Receipt number', documentRef],
+      ['Date received', getValue('payment_date', new Date().toLocaleDateString('en-KE'))],
+      ['Payment method', getValue('payment_method')],
+      ['Transaction reference', getValue('transaction_reference')],
+      ['Allocation', getValue('payment_allocation')],
+    ]);
+    drawSectionHeading('PAYMENT RECEIVED');
+    pdf.setFillColor(244, 241, 234); pdf.setDrawColor(216, 212, 202); pdf.rect(left, y, contentWidth, 14, 'FD');
+    pdf.setFont('helvetica', 'normal'); pdf.setFontSize(8); pdf.setTextColor(93, 102, 99); pdf.text(getValue('description', 'Verified payment'), left + 4, y + 8.5);
+    pdf.setFont('times', 'bold'); pdf.setFontSize(15); pdf.setTextColor(31, 58, 52); pdf.text(money(sourceData.amount_received || amount), right - 4, y + 9, { align: 'right' });
+    y += 21;
+    pdf.setDrawColor(31, 58, 52); pdf.setLineWidth(.8); pdf.rect(right - 40, y, 40, 14);
+    pdf.setFont('times', 'bold'); pdf.setFontSize(12); pdf.setTextColor(31, 58, 52); pdf.text('PAID', right - 20, y + 9, { align: 'center' });
+    y += 20;
+    drawSectionHeading('RECEIPT CONFIRMATION');
+    pdf.setFont('helvetica', 'normal'); pdf.setFontSize(7.5); pdf.setTextColor(45, 55, 60);
+    pdf.text('Received with thanks. This receipt is valid only with the corresponding cleared-funds confirmation and transaction reference.', left, y); y += 14;
+    pdf.setDrawColor(28, 35, 33); pdf.line(left, y + 8, left + 72, y + 8); pdf.line(right - 72, y + 8, right, y + 8);
+    pdf.setTextColor(93, 102, 99); pdf.setFontSize(6.5); pdf.text('Authorized signature', left, y + 12); pdf.text('Finance approval', right - 72, y + 12);
+  }
+
+  if (kind === 'BROCHURE') {
+    const heroTop = y;
+    y = ensureSpace(y, 63);
+    pdf.setFillColor(31, 58, 52); pdf.rect(left, y, contentWidth, 52, 'F');
+    pdf.setTextColor(209, 173, 115); pdf.setFont('helvetica', 'normal'); pdf.setFontSize(7.5);
+    pdf.text(`${getValue('project_status', 'NBG DEVELOPMENT')} · ${getValue('location_information', 'KENYA')}`, left + 6, y + 9);
+    pdf.setTextColor(255, 255, 255); pdf.setFont('times', 'bold'); pdf.setFontSize(19);
+    const headline = pdf.splitTextToSize(getValue('headline', getValue('project_name', title)), contentWidth - 12);
+    pdf.text(headline, left + 6, y + 22);
+    pdf.setFont('helvetica', 'normal'); pdf.setFontSize(7.5); pdf.setTextColor(238, 239, 232);
+    const descriptionLines = pdf.splitTextToSize(getValue('project_description', 'A considered NBG development.'), contentWidth - 12);
+    pdf.text(descriptionLines.slice(0, 2), left + 6, y + 37);
+    y += 58;
+    const features: [string, string][] = [
+      ['PROPERTY TYPES', Array.isArray(sourceData.property_types) ? sourceData.property_types.join(', ') : getValue('property_types')],
+      ['AMENITIES', Array.isArray(sourceData.amenities) ? sourceData.amenities.join(', ') : getValue('amenities')],
+      ['CONTACT', getValue('contact_details')],
+    ];
+    drawMetadata(features);
+    if (sourceData.price_min || sourceData.price_max) {
+      const priceLabel = `${currency} ${Number(sourceData.price_min || 0).toLocaleString('en-KE')}${sourceData.price_max ? ` – ${Number(sourceData.price_max).toLocaleString('en-KE')}` : '+'}`;
+      pdf.setFillColor(176, 141, 87); pdf.rect(left, y, 58, 10, 'F'); pdf.setFont('times', 'bold'); pdf.setFontSize(9); pdf.setTextColor(28, 35, 33); pdf.text(priceLabel, left + 4, y + 6.7); y += 16;
+    }
+    if (heroTop === y) y += 1;
+  }
+
+  if (kind === 'FLOOR_PLAN') {
+    drawMetadata([
+      ['Project', getValue('project_name', recipient)],
+      ['Unit', getValue('unit_number')],
+      ['Property type', getValue('property_type')],
+      ['Approved size', getValue('size')],
+      ['Drawing number', getValue('drawing_number')],
+      ['Revision / scale', `${getValue('revision_number')} · ${getValue('scale')}`],
+      ['Drawing date', getValue('drawing_date')],
+      ['Prepared by', getValue('prepared_by')],
+      ['Checked / approved by', [sourceData.checked_by, sourceData.approved_by].filter(Boolean).join(' / ') || 'Not recorded'],
+    ]);
+    drawSectionHeading('APPROVAL STATUS');
+    const isApproved = String(sourceData.draft_notice || '').toUpperCase() === 'APPROVED';
+    pdf.setFillColor(isApproved ? 232 : 248, isApproved ? 247 : 241, isApproved ? 238 : 234);
+    pdf.rect(left, y, contentWidth, 12, 'F');
+    pdf.setFont('times', 'bold'); pdf.setFontSize(10); pdf.setTextColor(31, 58, 52);
+    pdf.text(getValue('draft_notice', 'DRAFT / NOT FOR CONSTRUCTION'), left + 4, y + 7.5);
+    y += 19;
+    drawSectionHeading('APPROVED PLAN SOURCE');
+    const planUrl = String(sourceData.approved_plan_url || '');
+    const planNotice = planUrl
+      ? `Approved drawing source: ${planUrl}. This record preserves the supplied source and does not redraw or alter the approved geometry.`
+      : 'No approved plan file was attached to this document record. Add the approved architectural drawing before issuing a construction copy. Dimensions and room geometry are intentionally not fabricated.';
+    pdf.setFont('helvetica', 'normal'); pdf.setFontSize(8); pdf.setTextColor(45, 55, 60);
+    pdf.text(pdf.splitTextToSize(planNotice, contentWidth), left, y);
+    y += 20;
+  }
+
   if (kind === 'CLIENT_INVOICE') {
     const invoiceItems = Array.isArray(sourceData.invoice_items) ? sourceData.invoice_items.filter((item): item is Record<string, unknown> => typeof item === 'object' && item !== null) : [];
     const currency = String(sourceData.currency || 'KES');
@@ -217,7 +525,7 @@ async function generateBrandedPdf(kind: string, title: string, recipient: string
     const tax = Number(sourceData.tax_amount || 0);
     const total = Number(sourceData.grand_total || 0);
     y = ensureSpace(y, 51);
-    pdf.setFillColor(242, 247, 245); pdf.setDrawColor(201, 197, 189); pdf.roundedRect(left, y, contentWidth, 17, 2, 2, 'FD');
+    pdf.setFillColor(244, 241, 234); pdf.setDrawColor(216, 212, 202); pdf.rect(left, y, contentWidth, 17, 'FD');
     pdf.setTextColor(90, 86, 77); pdf.setFontSize(7); pdf.text('BILL TO', left + 4, y + 5);
     pdf.setTextColor(18, 59, 75); pdf.setFontSize(9); pdf.setFont('helvetica', 'bold'); pdf.text(String(sourceData.client_name || recipient), left + 4, y + 11);
     pdf.setFont('helvetica', 'normal'); pdf.setFontSize(7); pdf.text(`Project: ${String(sourceData.project_name || '—')}   Unit: ${String(sourceData.unit_number || '—')}`, left + 96, y + 8);
@@ -226,7 +534,7 @@ async function generateBrandedPdf(kind: string, title: string, recipient: string
 
     const tableTop = y;
     const drawInvoiceHeader = () => {
-      pdf.setFillColor(13, 64, 85); pdf.rect(left, y, contentWidth, 8, 'F');
+      pdf.setFillColor(31, 58, 52); pdf.rect(left, y, contentWidth, 8, 'F');
       pdf.setTextColor(255, 255, 255); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(7);
       pdf.text('DESCRIPTION', left + 3, y + 5.3); pdf.text('QTY', left + 113, y + 5.3, { align: 'right' }); pdf.text('UNIT RATE', left + 145, y + 5.3, { align: 'right' }); pdf.text('AMOUNT', right - 3, y + 5.3, { align: 'right' });
       y += 8; pdf.setFont('helvetica', 'normal');
@@ -248,8 +556,8 @@ async function generateBrandedPdf(kind: string, title: string, recipient: string
     const cardWidth = (contentWidth - 8) / 3;
     [["SUBTOTAL", subtotal], ["TAX", tax], ["TOTAL DUE", total]].forEach(([label, value], index) => {
       const x = left + index * (cardWidth + 4);
-      pdf.setFillColor(index === 2 ? 13 : 248, index === 2 ? 64 : 247, index === 2 ? 85 : 243); pdf.setDrawColor(201, 197, 189); pdf.roundedRect(x, y, cardWidth, 17, 1.5, 1.5, 'FD');
-      pdf.setTextColor(index === 2 ? 141 : 90, index === 2 ? 231 : 86, index === 2 ? 226 : 77); pdf.setFontSize(6.5); pdf.text(String(label), x + 3, y + 5);
+      pdf.setFillColor(index === 2 ? 31 : 244, index === 2 ? 58 : 241, index === 2 ? 52 : 234); pdf.setDrawColor(216, 212, 202); pdf.rect(x, y, cardWidth, 17, 'FD');
+      pdf.setTextColor(index === 2 ? 209 : 93, index === 2 ? 173 : 102, index === 2 ? 115 : 99); pdf.setFontSize(6.5); pdf.text(String(label), x + 3, y + 5);
       pdf.setTextColor(index === 2 ? 255 : 18, index === 2 ? 255 : 59, index === 2 ? 255 : 75); pdf.setFontSize(9); pdf.setFont('helvetica', 'bold'); pdf.text(money(value), x + 3, y + 12);
     });
     y += 23;
@@ -655,8 +963,39 @@ function FinancialVaultTab({ user, goTo }: { user: AdminUser; goTo?: (tab: Admin
 function ApplicationsTab() {
   const [realtorApps, setRealtorApps] = useState<Realtor[]>([]);
   const [investments, setInvestments] = useState<Investment[]>([]);
+  const [projects, setProjects] = useState<Pick<Project, 'id' | 'name' | 'location'>[]>([]);
   const [loading, setLoading] = useState(true);
   const [actionStatus, setActionStatus] = useState<Record<string, { title: string; message: string }>>({});
+  const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState('ALL');
+  const [typeFilter, setTypeFilter] = useState('ALL');
+  const [regionFilter, setRegionFilter] = useState('ALL');
+  const [dateRange, setDateRange] = useState('all');
+  const [sortOrder, setSortOrder] = useState<'newest' | 'oldest'>('newest');
+  const [filtersOpen, setFiltersOpen] = useState(true);
+  const [page, setPage] = useState(1);
+  const [selectedApplication, setSelectedApplication] = useState<ApplicationRow | null>(null);
+  const pageSize = 10;
+
+  const statusPresentation: Record<ApplicationStatus, { label: string; tone: string }> = {
+    PENDING: { label: 'Pending', tone: 'bg-amber-100 text-amber-800' },
+    IN_REVIEW: { label: 'In review', tone: 'bg-sky-100 text-sky-800' },
+    APPROVED: { label: 'Approved', tone: 'bg-emerald-100 text-emerald-800' },
+    ON_HOLD: { label: 'On hold', tone: 'bg-rose-100 text-rose-800' },
+    WITHDRAWN: { label: 'Withdrawn', tone: 'bg-violet-100 text-violet-800' },
+  };
+
+  const normalizeStatus = (kind: ApplicationRow['kind'], status: string): ApplicationStatus => {
+    if (kind === 'realtor') {
+      if (status === 'ACTIVE') return 'APPROVED';
+      if (status === 'SUSPENDED') return 'ON_HOLD';
+      return 'PENDING';
+    }
+    if (status === 'COMMITTED') return 'APPROVED';
+    if (status === 'SOFT_COMMIT') return 'IN_REVIEW';
+    if (status === 'WITHDRAWN') return 'WITHDRAWN';
+    return 'PENDING';
+  };
 
   const sendClientStatusNotification = async (userId: string | null, itemType: 'realtor' | 'investment', name: string, status: string) => {
     if (!userId) return;
@@ -687,16 +1026,26 @@ function ApplicationsTab() {
 
   const load = useCallback(async () => {
     setLoading(true);
-    const [realtorResult, investmentResult] = await Promise.all([
+    const [realtorResult, investmentResult, projectResult] = await Promise.all([
       supabase.from('realtors').select('*').order('created_at', { ascending: false }),
       supabase.from('investments').select('*').order('created_at', { ascending: false }),
+      supabase.from('projects').select('id,name,location').order('name'),
     ]);
     setRealtorApps((realtorResult.data ?? []) as Realtor[]);
     setInvestments((investmentResult.data ?? []) as Investment[]);
+    setProjects((projectResult.data ?? []) as Pick<Project, 'id' | 'name' | 'location'>[]);
     setLoading(false);
   }, []);
 
   useEffect(() => { void load(); }, [load]);
+
+  useEffect(() => {
+    const channel = supabase.channel('admin-applications-live')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'realtors' }, () => { void load(); })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'investments' }, () => { void load(); })
+      .subscribe();
+    return () => { void supabase.removeChannel(channel); };
+  }, [load]);
 
   const updateRealtorStatus = async (id: string, status: string) => {
     const target = realtorApps.find((app) => app.id === id);
@@ -724,77 +1073,210 @@ function ApplicationsTab() {
     await load();
   };
 
+  const applications: ApplicationRow[] = useMemo(() => {
+    const projectById = new Map(projects.map((project) => [project.id, project]));
+    return [
+      ...realtorApps.map((app) => ({
+        key: `realtor-${app.id}`,
+        id: app.id,
+        reference: app.id.slice(0, 6).toUpperCase(),
+        kind: 'realtor' as const,
+        name: app.name,
+        email: app.email,
+        phone: app.phone,
+        interest: 'Realtor partnership',
+        detail: app.commission_rate ? `${app.commission_rate}% commission` : 'Registration request',
+        region: 'Not specified',
+        status: normalizeStatus('realtor', app.status),
+        rawStatus: app.status,
+        createdAt: app.created_at,
+        notes: app.notes,
+      })),
+      ...investments.map((item) => {
+        const project = item.project_id ? projectById.get(item.project_id) : null;
+        const amount = item.amount_interested == null ? item.investment_range || 'Amount not provided' : fmtKes(item.amount_interested);
+        return {
+          key: `investment-${item.id}`,
+          id: item.id,
+          reference: item.reference_code || item.id.slice(0, 6).toUpperCase(),
+          kind: 'investment' as const,
+          name: item.investor_name,
+          email: item.investor_email,
+          phone: item.investor_phone,
+          interest: project?.name || item.investment_structure || item.investment_range || 'Investment interest',
+          detail: amount,
+          region: project?.location || 'Not specified',
+          status: normalizeStatus('investment', item.status),
+          rawStatus: item.status,
+          createdAt: item.created_at,
+          notes: item.investor_message || item.notes,
+        };
+      }),
+    ];
+  }, [investments, projects, realtorApps]);
+
+  const regions = [...new Set(applications.map((application) => application.region).filter((region) => region !== 'Not specified'))].sort();
+  const filteredApplications = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    const cutoff = dateRange === 'all' ? null : Date.now() - Number(dateRange) * 24 * 60 * 60 * 1000;
+    return applications.filter((application) => {
+      const matchesQuery = !query || [application.name, application.email, application.phone, application.interest, application.detail, application.region]
+        .some((value) => value?.toLowerCase().includes(query));
+      const matchesStatus = statusFilter === 'ALL' || application.status === statusFilter;
+      const matchesType = typeFilter === 'ALL' || application.kind === typeFilter;
+      const matchesRegion = regionFilter === 'ALL' || application.region === regionFilter;
+      const createdAt = new Date(application.createdAt).getTime();
+      const matchesDate = cutoff === null || (Number.isFinite(createdAt) && createdAt >= cutoff);
+      return matchesQuery && matchesStatus && matchesType && matchesRegion && matchesDate;
+    }).sort((left, right) => {
+      const difference = new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime();
+      return sortOrder === 'newest' ? -difference : difference;
+    });
+  }, [applications, dateRange, regionFilter, search, sortOrder, statusFilter, typeFilter]);
+
+  useEffect(() => { setPage(1); }, [dateRange, regionFilter, search, statusFilter, typeFilter]);
+
+  const pageCount = Math.max(1, Math.ceil(filteredApplications.length / pageSize));
+  const visibleApplications = filteredApplications.slice((page - 1) * pageSize, page * pageSize);
+  const totalApplications = applications.length;
+  const getStatusCount = (status: ApplicationStatus) => applications.filter((application) => application.status === status).length;
+  const percentage = (count: number) => totalApplications ? `${((count / totalApplications) * 100).toFixed(1)}%` : '0.0%';
+
+  const metricCards = [
+    { label: 'Total applications', value: totalApplications, note: 'Realtor + investor', icon: ClipboardList, iconTone: 'bg-sky-100 text-sky-700', cardTone: 'border-sky-100 bg-sky-50/70' },
+    { label: 'Approved', value: getStatusCount('APPROVED'), note: percentage(getStatusCount('APPROVED')), icon: Check, iconTone: 'bg-emerald-100 text-emerald-700', cardTone: 'border-emerald-100 bg-emerald-50/70' },
+    { label: 'Pending review', value: getStatusCount('PENDING'), note: percentage(getStatusCount('PENDING')), icon: Clock3, iconTone: 'bg-amber-100 text-amber-700', cardTone: 'border-amber-100 bg-amber-50/70' },
+    { label: 'In review', value: getStatusCount('IN_REVIEW'), note: percentage(getStatusCount('IN_REVIEW')), icon: Eye, iconTone: 'bg-blue-100 text-blue-700', cardTone: 'border-blue-100 bg-blue-50/70' },
+    { label: 'On hold', value: getStatusCount('ON_HOLD'), note: percentage(getStatusCount('ON_HOLD')), icon: AlertCircle, iconTone: 'bg-rose-100 text-rose-700', cardTone: 'border-rose-100 bg-rose-50/70' },
+    { label: 'Withdrawn', value: getStatusCount('WITHDRAWN'), note: percentage(getStatusCount('WITHDRAWN')), icon: X, iconTone: 'bg-violet-100 text-violet-700', cardTone: 'border-violet-100 bg-violet-50/70' },
+  ];
+
+  const handleExport = () => {
+    void downloadReportPdf(
+      `nbg-applications-${new Date().toISOString().slice(0, 10)}.pdf`,
+      ['Reference', 'Applicant', 'Type', 'Email', 'Phone', 'Interest', 'Region', 'Status', 'Submitted'],
+      filteredApplications.map((application) => [application.reference, application.name, application.kind, application.email, application.phone, application.interest, application.region, statusPresentation[application.status].label, application.createdAt]),
+      'Client Applications'
+    );
+  };
+
+  const applySelectedStatus = async (status: string) => {
+    if (!selectedApplication) return;
+    if (selectedApplication.kind === 'realtor') await updateRealtorStatus(selectedApplication.id, status);
+    else await updateInvestmentStatus(selectedApplication.id, status);
+    setSelectedApplication((current) => current ? {
+      ...current,
+      rawStatus: status,
+      status: normalizeStatus(current.kind, status),
+    } : current);
+  };
+
   if (loading) return <Spinner />;
 
   return (
-    <div className="space-y-6">
-      <section className="rounded-lg border border-[#c9c5bd] bg-white p-6 shadow-sm">
-        <div className="mb-5 flex items-center justify-between gap-3">
+    <div className="space-y-4">
+      <header className="flex flex-col justify-between gap-4 border-b border-[#dfe6ee] pb-4 sm:flex-row sm:items-center">
+        <div className="flex items-center gap-3">
+          <span className="flex h-11 w-11 items-center justify-center rounded-full bg-emerald-50 text-emerald-600"><Users size={21} /></span>
           <div>
-            <p className="eyebrow text-[#20afd1]">Applications</p>
-            <h2 className="mt-2 font-serif text-3xl">Client approvals</h2>
-          </div>
-          <span className="rounded-full bg-[#d4f0dc] px-3 py-1 text-[10px] font-semibold uppercase tracking-[.14em] text-[#2e6b3e]">
-            {realtorApps.filter((r) => r.status === 'PENDING').length + investments.filter((i) => i.status === 'INQUIRY').length} pending
-          </span>
-        </div>
-
-        <div className="grid gap-6 xl:grid-cols-2">
-          <div>
-            <h3 className="mb-4 text-sm font-semibold uppercase tracking-[.12em] text-slate-500">Realtor requests</h3>
-            <div className="space-y-3">
-              {realtorApps.length === 0 && <p className="text-sm text-slate-500">No realtor applications yet.</p>}
-              {realtorApps.map((app) => (
-                <div key={app.id} className="rounded-lg border border-[#ddd5cc] bg-[#faf7f2] p-4">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <p className="font-semibold text-[#123b4b]">{app.name}</p>
-                      <p className="text-xs text-slate-500">{app.email}</p>
-                    </div>
-                    <span className={`rounded-full px-2 py-1 text-[10px] font-medium uppercase tracking-[.14em] ${REALTOR_STATUS_COLORS[app.status] ?? 'bg-slate-100 text-slate-600'}`}>
-                      {app.status}
-                    </span>
-                  </div>
-                  <p className="mt-3 text-sm text-slate-600">Phone: {app.phone || 'Not provided'}</p>
-                  {actionStatus[app.id] && <div className="mt-3 rounded-md border border-[#d4f0dc] bg-[#eefbf9] p-3"><p className="text-[10px] font-semibold uppercase tracking-[.14em] text-[#2e6b3e]">{actionStatus[app.id].title}</p><p className="mt-1 text-xs text-slate-600">{actionStatus[app.id].message}</p></div>}
-                  <div className="mt-4 flex flex-wrap gap-2">
-                    <button onClick={() => updateRealtorStatus(app.id, 'ACTIVE')} className="rounded-md bg-[#1f8a72] px-3 py-2 text-[10px] font-semibold uppercase tracking-[.12em] text-white">Approve</button>
-                    <button onClick={() => updateRealtorStatus(app.id, 'PENDING')} className="rounded-md border border-[#c9c5bd] px-3 py-2 text-[10px] font-semibold uppercase tracking-[.12em] text-slate-600">Pending</button>
-                    <button onClick={() => updateRealtorStatus(app.id, 'SUSPENDED')} className="rounded-md border border-[#d7b1a6] px-3 py-2 text-[10px] font-semibold uppercase tracking-[.12em] text-[#8b4a3a]">Hold</button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div>
-            <h3 className="mb-4 text-sm font-semibold uppercase tracking-[.12em] text-slate-500">Investment inquiries</h3>
-            <div className="space-y-3">
-              {investments.length === 0 && <p className="text-sm text-slate-500">No investor inquiries yet.</p>}
-              {investments.map((item) => (
-                <div key={item.id} className="rounded-lg border border-[#ddd5cc] bg-[#faf7f2] p-4">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <p className="font-semibold text-[#123b4b]">{item.investor_name}</p>
-                      <p className="text-xs text-slate-500">{item.investor_email}</p>
-                    </div>
-                    <span className={`rounded-full px-2 py-1 text-[10px] font-medium uppercase tracking-[.14em] ${INVESTMENT_STATUS_COLORS[item.status] ?? 'bg-slate-100 text-slate-600'}`}>
-                      {item.status}
-                    </span>
-                  </div>
-                  <p className="mt-3 text-sm text-slate-600">{fmtKes(item.amount_interested)} · {item.notes || 'No notes yet'}</p>
-                  {actionStatus[item.id] && <div className="mt-3 rounded-md border border-[#d4f0dc] bg-[#eefbf9] p-3"><p className="text-[10px] font-semibold uppercase tracking-[.14em] text-[#2e6b3e]">{actionStatus[item.id].title}</p><p className="mt-1 text-xs text-slate-600">{actionStatus[item.id].message}</p></div>}
-                  <div className="mt-4 flex flex-wrap gap-2">
-                    <button onClick={() => updateInvestmentStatus(item.id, 'SOFT_COMMIT')} className="rounded-md bg-[#f2a65a] px-3 py-2 text-[10px] font-semibold uppercase tracking-[.12em] text-white">Soft commit</button>
-                    <button onClick={() => updateInvestmentStatus(item.id, 'COMMITTED')} className="rounded-md bg-[#1f8a72] px-3 py-2 text-[10px] font-semibold uppercase tracking-[.12em] text-white">Commit</button>
-                    <button onClick={() => updateInvestmentStatus(item.id, 'WITHDRAWN')} className="rounded-md border border-[#d7b1a6] px-3 py-2 text-[10px] font-semibold uppercase tracking-[.12em] text-[#8b4a3a]">Withdraw</button>
-                  </div>
-                </div>
-              ))}
-            </div>
+            <h2 className="text-xl font-semibold text-[#102744]">Client Applications</h2>
+            <p className="text-xs text-slate-500">Manage and track realtor requests and investor interest.</p>
           </div>
         </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <button type="button" onClick={handleExport} className="inline-flex h-9 items-center gap-2 rounded-md border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 shadow-sm hover:bg-slate-50"><Download size={14} />Export</button>
+          <button type="button" onClick={() => setFiltersOpen((open) => !open)} aria-expanded={filtersOpen} className={`inline-flex h-9 items-center gap-2 rounded-md border px-3 text-xs font-semibold shadow-sm ${filtersOpen ? 'border-sky-200 bg-sky-50 text-sky-800' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'}`}><SlidersHorizontal size={14} />Filters</button>
+          <button type="button" onClick={() => void load()} className="inline-flex h-9 items-center gap-2 rounded-md bg-emerald-500 px-3 text-xs font-semibold text-white shadow-sm hover:bg-emerald-600"><RefreshCw size={14} />Refresh</button>
+        </div>
+      </header>
+
+      <section aria-label="Application totals" className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-6">
+        {metricCards.map((metric) => {
+          const Icon = metric.icon;
+          return <div key={metric.label} className={`flex min-h-[76px] items-center gap-3 rounded-lg border px-3 py-2.5 ${metric.cardTone}`}>
+            <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full ${metric.iconTone}`}><Icon size={17} /></span>
+            <div className="min-w-0"><p className="truncate text-[10px] font-medium text-slate-600">{metric.label}</p><p className="text-lg font-bold leading-5 text-[#102744]">{metric.value.toLocaleString()}</p><p className="text-[9px] text-slate-500">{metric.note}</p></div>
+          </div>;
+        })}
       </section>
+
+      <section className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
+        <div className="flex flex-col gap-3 border-b border-slate-200 p-3 lg:flex-row lg:items-center lg:justify-between">
+          <label className="relative block w-full lg:max-w-xs">
+            <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search name, email, phone..." className="h-9 w-full rounded-md border border-slate-200 bg-white pl-9 pr-3 text-xs outline-none focus:border-sky-400 focus:ring-2 focus:ring-sky-100" />
+          </label>
+          {filtersOpen && <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:flex lg:flex-1 lg:justify-end">
+            <select aria-label="Filter by status" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} className="h-9 min-w-0 rounded-md border border-slate-200 bg-white px-2 text-[11px] text-slate-700 outline-none focus:border-sky-400">
+              <option value="ALL">All statuses</option>
+              {Object.entries(statusPresentation).map(([value, status]) => <option key={value} value={value}>{status.label}</option>)}
+            </select>
+            <select aria-label="Filter by application type" value={typeFilter} onChange={(event) => setTypeFilter(event.target.value)} className="h-9 min-w-0 rounded-md border border-slate-200 bg-white px-2 text-[11px] text-slate-700 outline-none focus:border-sky-400">
+              <option value="ALL">All applications</option><option value="realtor">Realtor</option><option value="investment">Investor</option>
+            </select>
+            <select aria-label="Filter by region" value={regionFilter} onChange={(event) => setRegionFilter(event.target.value)} className="h-9 min-w-0 rounded-md border border-slate-200 bg-white px-2 text-[11px] text-slate-700 outline-none focus:border-sky-400">
+              <option value="ALL">All regions</option>{regions.map((region) => <option key={region} value={region}>{region}</option>)}
+            </select>
+            <select aria-label="Filter by date submitted" value={dateRange} onChange={(event) => setDateRange(event.target.value)} className="h-9 min-w-0 rounded-md border border-slate-200 bg-white px-2 text-[11px] text-slate-700 outline-none focus:border-sky-400">
+              <option value="all">Any date</option><option value="7">Last 7 days</option><option value="30">Last 30 days</option><option value="90">Last 90 days</option>
+            </select>
+          </div>}
+          <label className="flex h-9 items-center gap-2 whitespace-nowrap rounded-md border border-slate-200 px-2 text-[11px] text-slate-600">
+            <span>Sort by:</span><select aria-label="Sort applications" value={sortOrder} onChange={(event) => setSortOrder(event.target.value as 'newest' | 'oldest')} className="bg-transparent font-semibold text-slate-700 outline-none"><option value="newest">Newest first</option><option value="oldest">Oldest first</option></select>
+          </label>
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[920px] text-left text-xs">
+            <thead className="bg-slate-50 text-[9px] font-semibold uppercase tracking-wide text-slate-500"><tr>
+              <th className="w-16 px-3 py-3">#</th><th className="px-3 py-3">Applicant</th><th className="px-3 py-3">Email &amp; phone</th><th className="px-3 py-3">Plan / interest</th><th className="px-3 py-3">Status</th><th className="px-3 py-3">Submitted</th><th className="w-24 px-3 py-3 text-right">Actions</th>
+            </tr></thead>
+            <tbody>
+              {visibleApplications.map((application, index) => {
+                const presentation = statusPresentation[application.status];
+                const initials = application.name.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join('').toUpperCase() || '?';
+                return <tr key={application.key} className="border-t border-slate-100 hover:bg-slate-50/70">
+                  <td className="px-3 py-3 font-mono text-[10px] text-slate-500">{application.reference}<span className="mt-1 block font-sans text-[9px] text-slate-400">{index + 1 + (page - 1) * pageSize}</span></td>
+                  <td className="px-3 py-3"><div className="flex items-center gap-2.5"><span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[10px] font-bold ${application.kind === 'realtor' ? 'bg-emerald-100 text-emerald-700' : 'bg-sky-100 text-sky-700'}`}>{initials}</span><div className="min-w-0"><p className="truncate font-semibold text-slate-800">{application.name}</p><span className="mt-0.5 inline-flex rounded bg-slate-100 px-1.5 py-0.5 text-[9px] text-slate-600">{application.kind === 'realtor' ? 'Realtor' : 'Investor'}</span></div></div></td>
+                  <td className="px-3 py-3"><p className="max-w-[190px] truncate text-slate-700">{application.email || 'Email not provided'}</p><p className="mt-1 text-[10px] text-slate-500">{application.phone || 'Phone not provided'}</p></td>
+                  <td className="px-3 py-3"><p className="max-w-[190px] truncate font-medium text-slate-700">{application.interest}</p><p className="mt-1 text-[10px] text-slate-500">{application.detail}{application.region !== 'Not specified' ? ` · ${application.region}` : ''}</p></td>
+                  <td className="px-3 py-3"><span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-1 text-[9px] font-semibold uppercase ${presentation.tone}`}><span className="h-1.5 w-1.5 rounded-full bg-current" />{presentation.label}</span></td>
+                  <td className="px-3 py-3"><p className="whitespace-nowrap text-slate-700">{new Date(application.createdAt).toLocaleDateString('en-KE', { day: '2-digit', month: 'short', year: 'numeric' })}</p><p className="mt-1 whitespace-nowrap text-[10px] text-slate-500">{new Date(application.createdAt).toLocaleTimeString('en-KE', { hour: '2-digit', minute: '2-digit' })}</p></td>
+                  <td className="px-3 py-3 text-right"><button type="button" onClick={() => setSelectedApplication(application)} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2.5 text-[10px] font-semibold text-slate-700 hover:border-sky-300 hover:text-sky-800"><Eye size={13} />View</button></td>
+                </tr>;
+              })}
+              {visibleApplications.length === 0 && <tr><td colSpan={7} className="px-4 py-14 text-center"><p className="font-medium text-slate-700">No applications match these filters.</p><p className="mt-1 text-xs text-slate-500">Try changing your search or filters.</p></td></tr>}
+            </tbody>
+          </table>
+        </div>
+
+        <footer className="flex flex-col gap-3 border-t border-slate-200 px-4 py-3 text-[10px] text-slate-500 sm:flex-row sm:items-center sm:justify-between">
+          <span>Showing {filteredApplications.length ? (page - 1) * pageSize + 1 : 0}–{Math.min(page * pageSize, filteredApplications.length)} of {filteredApplications.length} applications</span>
+          <div className="flex items-center gap-1">
+            <button type="button" onClick={() => setPage((current) => Math.max(1, current - 1))} disabled={page <= 1} className="h-7 rounded border border-slate-200 px-2 disabled:opacity-40">Previous</button>
+            <span className="px-2 text-slate-600">Page {page} of {pageCount}</span>
+            <button type="button" onClick={() => setPage((current) => Math.min(pageCount, current + 1))} disabled={page >= pageCount} className="h-7 rounded border border-slate-200 px-2 disabled:opacity-40">Next</button>
+          </div>
+        </footer>
+      </section>
+
+      {selectedApplication && <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/40 p-4" onMouseDown={(event) => { if (event.target === event.currentTarget) setSelectedApplication(null); }}>
+        <section role="dialog" aria-modal="true" aria-labelledby="application-dialog-title" className="max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-2xl">
+          <header className="flex items-start justify-between gap-4 border-b border-slate-200 p-5"><div><p className="text-[10px] font-semibold uppercase tracking-wider text-sky-700">{selectedApplication.kind === 'realtor' ? 'Realtor request' : 'Investor application'} · {selectedApplication.reference}</p><h3 id="application-dialog-title" className="mt-1 text-xl font-semibold text-[#102744]">{selectedApplication.name}</h3></div><button type="button" aria-label="Close application details" onClick={() => setSelectedApplication(null)} className="rounded p-1 text-slate-500 hover:bg-slate-100"><X size={18} /></button></header>
+          <div className="grid gap-x-8 gap-y-4 p-5 sm:grid-cols-2">
+            <div><p className="text-[9px] font-semibold uppercase text-slate-400">Email</p><p className="mt-1 break-all text-sm text-slate-700">{selectedApplication.email || 'Not provided'}</p></div>
+            <div><p className="text-[9px] font-semibold uppercase text-slate-400">Phone</p><p className="mt-1 text-sm text-slate-700">{selectedApplication.phone || 'Not provided'}</p></div>
+            <div><p className="text-[9px] font-semibold uppercase text-slate-400">Plan / interest</p><p className="mt-1 text-sm text-slate-700">{selectedApplication.interest}<span className="block text-xs text-slate-500">{selectedApplication.detail}</span></p></div>
+            <div><p className="text-[9px] font-semibold uppercase text-slate-400">Status and region</p><p className="mt-1 text-sm text-slate-700">{statusPresentation[selectedApplication.status].label} · {selectedApplication.region}</p></div>
+            <div className="sm:col-span-2"><p className="text-[9px] font-semibold uppercase text-slate-400">Submitted</p><p className="mt-1 text-sm text-slate-700">{new Date(selectedApplication.createdAt).toLocaleString('en-KE')}</p></div>
+            {selectedApplication.notes && <div className="sm:col-span-2"><p className="text-[9px] font-semibold uppercase text-slate-400">Notes</p><p className="mt-1 whitespace-pre-wrap text-sm leading-6 text-slate-700">{selectedApplication.notes}</p></div>}
+            {actionStatus[selectedApplication.id] && <div className="sm:col-span-2 rounded-md border border-emerald-100 bg-emerald-50 p-3"><p className="text-xs font-semibold text-emerald-800">{actionStatus[selectedApplication.id].title}</p><p className="mt-1 text-xs text-slate-600">{actionStatus[selectedApplication.id].message}</p></div>}
+          </div>
+          <footer className="flex flex-wrap justify-end gap-2 border-t border-slate-200 bg-slate-50 p-4">
+            {selectedApplication.kind === 'realtor' ? <><button type="button" onClick={() => void applySelectedStatus('PENDING')} className="rounded-md border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700">Mark pending</button><button type="button" onClick={() => void applySelectedStatus('SUSPENDED')} className="rounded-md border border-rose-200 bg-white px-3 py-2 text-xs font-semibold text-rose-700">Place on hold</button><button type="button" onClick={() => void applySelectedStatus('ACTIVE')} className="rounded-md bg-emerald-600 px-3 py-2 text-xs font-semibold text-white">Approve</button></> : <><button type="button" onClick={() => void applySelectedStatus('INQUIRY')} className="rounded-md border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700">Mark pending</button><button type="button" onClick={() => void applySelectedStatus('SOFT_COMMIT')} className="rounded-md border border-sky-200 bg-white px-3 py-2 text-xs font-semibold text-sky-700">In review</button><button type="button" onClick={() => void applySelectedStatus('WITHDRAWN')} className="rounded-md border border-rose-200 bg-white px-3 py-2 text-xs font-semibold text-rose-700">Withdraw</button><button type="button" onClick={() => void applySelectedStatus('COMMITTED')} className="rounded-md bg-emerald-600 px-3 py-2 text-xs font-semibold text-white">Commit</button></>}
+          </footer>
+        </section>
+      </div>}
     </div>
   );
 }
@@ -1157,12 +1639,19 @@ function BuyerPaymentsTab({ goTo }: { goTo: (tab: AdminTab) => void }) {
 
   const load = useCallback(async () => {
     const [{ data: saleRows }, { data: installmentRows }] = await Promise.all([
-      supabase.from('sales').select('*').gt('installment_count', 0).order('created_at', { ascending: false }),
+      supabase.from('sales').select('*').order('created_at', { ascending: false }),
       supabase.from('buyer_installments').select('*').order('due_date'),
     ]);
     setSales((saleRows ?? []) as Sale[]); setInstallments((installmentRows ?? []) as BuyerInstallment[]); setLoading(false);
   }, []);
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    void load();
+    const channel = supabase.channel('admin-buyer-payments-list')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'sales' }, () => { void load(); })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'buyer_installments' }, () => { void load(); })
+      .subscribe();
+    return () => { void supabase.removeChannel(channel); };
+  }, [load]);
 
   if (loading) return <Spinner />;
   const filtered = sales.filter((sale) => { const query = search.toLowerCase(); return !query || sale.buyer_name.toLowerCase().includes(query) || sale.unit_number.toLowerCase().includes(query); });
@@ -1171,7 +1660,7 @@ function BuyerPaymentsTab({ goTo }: { goTo: (tab: AdminTab) => void }) {
   return <div>
     <div className="mb-6 flex flex-wrap items-end justify-between gap-4"><div><p className="eyebrow text-[#20afd1]">Collections</p><h2 className="mt-2 font-serif text-4xl">Buyer payments</h2><p className="mt-3 max-w-xl text-sm leading-6 text-slate-500">Track every buyer repayment, outstanding balance, due date, and overdue installment from one place.</p></div><div className="flex flex-wrap gap-2"><button onClick={() => void downloadReportPdf(`nbg-payments-${new Date().toISOString().slice(0, 10)}.pdf`, ['Buyer', 'Unit', 'Sale price', 'Deposit', 'Status'], sales.map((sale) => [sale.buyer_name, sale.unit_number, sale.sale_price, sale.deposit_amount, sale.status]), 'Buyer Payments Report')} className="btn-secondary"><Download size={14} /> Export PDF</button><div className="relative"><Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" /><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search buyer or unit" className="admin-input pl-9" /></div></div></div>
     <div className="mb-6 grid gap-3 sm:grid-cols-3"><StatMini label="Collected" value={fmtKes(totals.paid)} color="text-[#2e6b3e]" /><StatMini label="Outstanding balance" value={fmtKes(totals.balance)} color="text-[#856b2e]" /><StatMini label="Overdue installments" value={String(totals.overdue)} color="text-[#a55445]" /></div>
-    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{filtered.map((sale) => { const rows = installments.filter((item) => item.sale_id === sale.id); const paid = (sale.deposit_amount ?? 0) + rows.reduce((sum, item) => sum + item.paid_amount, 0); const balance = Math.max((sale.sale_price ?? 0) - paid, 0); const percent = sale.sale_price ? Math.min((paid / sale.sale_price) * 100, 100) : 0; const next = rows.find((item) => item.status !== 'PAID'); const overdue = next && new Date(next.due_date) < new Date(new Date().toDateString()); return <button key={sale.id} onClick={() => setSelected(sale)} className="rounded-lg border border-[#c9c5bd] bg-white p-5 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-[#20afd1] hover:shadow-md"><div className="flex items-start justify-between"><div><p className="eyebrow text-[#20afd1]">Unit {sale.unit_number}</p><h3 className="mt-2 text-lg">{sale.buyer_name}</h3></div><CreditCard size={20} className="text-[#20afd1]" /></div><div className="mt-5 flex justify-between text-xs"><span className="text-slate-500">Paid <strong className="text-[#2e6b3e]">{fmtKes(paid)}</strong></span><span className="text-slate-500">Balance <strong className="text-[#856b2e]">{fmtKes(balance)}</strong></span></div><div className="mt-3 h-2 rounded-full bg-[#e6e2da]"><div className="h-full rounded-full bg-[#20afd1]" style={{ width: `${percent}%` }} /></div><div className="mt-4 flex items-center justify-between text-[10px] uppercase tracking-[.1em]">{next ? <span className={overdue ? 'font-semibold text-[#a55445]' : 'text-slate-500'}>{overdue ? 'Overdue' : 'Next due'} · {new Date(next.due_date).toLocaleDateString()}</span> : <span className="font-semibold text-[#2e6b3e]">Paid in full</span>}<span className="text-[#20afd1]">Open plan</span></div></button>})}{filtered.length === 0 && <div className="rounded-lg border border-dashed border-[#b8b4ab] p-12 text-center text-sm text-slate-400 md:col-span-2 xl:col-span-3">No buyer payment plans recorded yet. Create one from Record Sale.</div>}</div>
+    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{filtered.map((sale) => { const rows = installments.filter((item) => item.sale_id === sale.id); const paid = (sale.deposit_amount ?? 0) + rows.reduce((sum, item) => sum + item.paid_amount, 0); const balance = Math.max((sale.sale_price ?? 0) - paid, 0); const percent = sale.sale_price ? Math.min((paid / sale.sale_price) * 100, 100) : 0; const next = rows.find((item) => Number(item.paid_amount) < Number(item.amount)); const overdue = next && new Date(next.due_date) < new Date(new Date().toDateString()); return <button key={sale.id} onClick={() => setSelected(sale)} className="rounded-lg border border-[#c9c5bd] bg-white p-5 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-[#20afd1] hover:shadow-md"><div className="flex items-start justify-between"><div><p className="eyebrow text-[#20afd1]">Unit {sale.unit_number}</p><h3 className="mt-2 text-lg">{sale.buyer_name}</h3></div><CreditCard size={20} className="text-[#20afd1]" /></div><div className="mt-5 flex justify-between text-xs"><span className="text-slate-500">Paid <strong className="text-[#2e6b3e]">{fmtKes(paid)}</strong></span><span className="text-slate-500">Balance <strong className="text-[#856b2e]">{fmtKes(balance)}</strong></span></div><div className="mt-3 h-2 rounded-full bg-[#e6e2da]"><div className="h-full rounded-full bg-[#20afd1]" style={{ width: `${percent}%` }} /></div><div className="mt-4 flex items-center justify-between text-[10px] uppercase tracking-[.1em]">{balance <= 0 ? <span className="font-semibold text-[#2e6b3e]">Paid in full</span> : next ? <span className={overdue ? 'font-semibold text-[#a55445]' : 'text-slate-500'}>{overdue ? 'Overdue' : 'Next due'} · {new Date(next.due_date).toLocaleDateString()}</span> : <span className="font-semibold text-[#856b2e]">Balance due · no schedule</span>}<span className="text-[#20afd1]">Open plan</span></div></button>})}{filtered.length === 0 && <div className="rounded-lg border border-dashed border-[#b8b4ab] p-12 text-center text-sm text-slate-400 md:col-span-2 xl:col-span-3">No buyers found.</div>}</div>
     {selected && <Modal title={`Payments · Unit ${selected.unit_number}`} wide onClose={() => { setSelected(null); load(); }}><InstallmentPanel sale={selected} goTo={goTo} /></Modal>}
   </div>;
 }
@@ -2468,14 +2957,43 @@ function DocumentForm({ clients, onDone }: { clients: DocumentClient[]; onDone: 
   const projectUnits = units.filter((item) => item.project_id === projectId);
   const saleInstallments = installments.filter((item) => item.sale_id === saleId);
   const normalizeSaleMatch = (value: string | null | undefined) => (value || '').trim().toLocaleLowerCase().replace(/\s+/g, ' ');
+  const normalizePhoneMatch = (value: string | null | undefined) => (value || '').replace(/\D/g, '').replace(/^0/, '254');
+  const clientForSale = (saleRecord: Sale) => clients.find((candidate) => candidate.id === saleRecord.buyer_user_id)
+    || clients.find((candidate) => Boolean(candidate.email && saleRecord.buyer_email && normalizeSaleMatch(candidate.email) === normalizeSaleMatch(saleRecord.buyer_email)))
+    || clients.find((candidate) => Boolean(candidate.full_name && saleRecord.buyer_name && normalizeSaleMatch(candidate.full_name) === normalizeSaleMatch(saleRecord.buyer_name)))
+    || clients.find((candidate) => Boolean(candidate.phone && saleRecord.buyer_phone && normalizePhoneMatch(candidate.phone) === normalizePhoneMatch(saleRecord.buyer_phone)));
+  const saleMatchesClient = (saleRecord: Sale, candidate: DocumentClient | undefined) => {
+    if (!candidate) return false;
+    return saleRecord.buyer_user_id === candidate.id
+      || Boolean(candidate.email && saleRecord.buyer_email && normalizeSaleMatch(candidate.email) === normalizeSaleMatch(saleRecord.buyer_email))
+      || Boolean(candidate.full_name && saleRecord.buyer_name && normalizeSaleMatch(candidate.full_name) === normalizeSaleMatch(saleRecord.buyer_name))
+      || Boolean(candidate.phone && saleRecord.buyer_phone && normalizePhoneMatch(candidate.phone) === normalizePhoneMatch(saleRecord.buyer_phone));
+  };
   const projectOptions = projects.map((item) => ({ value: item.id, label: `${item.name} · ${item.locality || item.location || 'Location pending'}`, search: `${item.county || ''} ${item.property_category || ''}` }));
   const clientOptions = clients.map((item) => ({ value: item.id, label: item.full_name || item.email || item.id, search: `${item.email || ''} ${item.phone || ''}` }));
   const unitOptions = projectUnits.map((item) => ({ value: item.id, label: `Unit ${item.unit_number} · ${item.type || 'Residence'} · ${item.status}`, search: `${item.size || ''} ${item.view || ''}` }));
-  const saleOptions = sales.filter((item) => {
-    const unitMatches = !unitId || item.unit_id === unitId || (!item.unit_id && normalizeSaleMatch(item.unit_number) === normalizeSaleMatch(unit?.unit_number));
-    const clientMatches = !clientId || item.buyer_user_id === clientId || (!item.buyer_user_id && ((Boolean(client?.email) && normalizeSaleMatch(item.buyer_email) === normalizeSaleMatch(client?.email)) || (Boolean(client?.full_name) && normalizeSaleMatch(item.buyer_name) === normalizeSaleMatch(client?.full_name))));
-    return unitMatches && clientMatches;
-  }).map((item) => ({ value: item.id, label: `${item.buyer_name} · Unit ${item.unit_number} · ${fmtKes(item.sale_price)}`, search: `${item.buyer_email || ''} ${item.buyer_phone || ''}` }));
+  const unitSaleOptions = sales.filter((item) => {
+    const saleUnit = item.unit_id ? units.find((candidate) => candidate.id === item.unit_id) : null;
+    const sameUnitNumber = Boolean(unit && normalizeSaleMatch(item.unit_number) === normalizeSaleMatch(unit.unit_number));
+    const unitMatches = !unitId || item.unit_id === unitId || (sameUnitNumber && (!saleUnit || saleUnit.project_id === unit?.project_id));
+    const projectMatches = !projectId || !saleUnit || saleUnit.project_id === projectId;
+    return unitMatches && projectMatches;
+  });
+  const saleOptions = [...unitSaleOptions].sort((left, right) => {
+    const leftMatches = !clientId || saleMatchesClient(left, client);
+    const rightMatches = !clientId || saleMatchesClient(right, client);
+    return Number(rightMatches) - Number(leftMatches) || (right.created_at || '').localeCompare(left.created_at || '');
+  }).map((item) => {
+    const matchesClient = !clientId || saleMatchesClient(item, client);
+    return {
+      value: item.id,
+      label: `${matchesClient ? '' : `Buyer: ${item.buyer_name} · `}Unit ${item.unit_number} · ${item.status} · ${fmtKes(item.sale_price)}`,
+      buyerMatchesClient: matchesClient,
+      saleClientId: clientForSale(item)?.id || '',
+      search: `${item.buyer_name} ${item.buyer_email || ''} ${item.buyer_phone || ''}`,
+    };
+  });
+  const saleBuyerMismatchCount = saleOptions.filter((option) => !option.buyerMatchesClient).length;
   const paymentOptions = payments.filter((item) => { if (!clientId) return true; const relatedSale = sales.find((saleItem) => saleItem.id === item.sale_id); return relatedSale?.buyer_name === client?.full_name; }).map((item) => ({ value: item.id, label: `${item.method} · ${item.reference || 'No reference'} · KSh ${Number(item.amount).toLocaleString()}`, search: item.sale_id }));
   const invoiceSubtotal = invoiceItems.reduce((sum, item) => sum + Math.max(0, Number(item.quantity) || 0) * Math.max(0, Number(item.unit_price) || 0), 0);
   const invoiceTax = Math.max(0, Number(manual.tax_amount) || 0);
@@ -2531,6 +3049,7 @@ function DocumentForm({ clients, onDone }: { clients: DocumentClient[]; onDone: 
   const missingKycFields = client ? [!client.identity_document_type ? 'identity document type' : '', !client.identity_document_number ? 'ID / passport number' : '', !client.residential_address ? 'residential address' : ''].filter(Boolean) : [];
   const primaryError = () => {
     if (category === 'AGREEMENT' && (!project || !client || !unit || !sale)) return 'Select a project, client, property/unit, and matching sale before generating an Agreement for Sale.';
+    if (category === 'AGREEMENT' && sale && client && !saleMatchesClient(sale, client)) return `The selected sale belongs to ${sale.buyer_name}. Select that buyer profile before generating the agreement.`;
     if (category === 'AGREEMENT' && missingKycFields.length) return `The selected client is missing ${missingKycFields.join(', ')}. Request an update before generating the agreement.`;
     if (category === 'RECEIPT' && (!payment || !payment.reference)) return 'Select a recorded payment with a transaction reference. Receipts cannot be created from unverified or incomplete payments.';
     if (category === 'CLIENT_INVOICE' && (!client || !project)) return 'Select a client and an existing project before generating a client invoice.';
@@ -2614,7 +3133,7 @@ function DocumentForm({ clients, onDone }: { clients: DocumentClient[]; onDone: 
           {requiresClient && <DocumentSelect label="Client / recipient" value={clientId} onChange={(value) => { setClientId(value); setSaleId(''); setPaymentId(''); }} required={category === 'AGREEMENT' || category === 'CLIENT_INVOICE' || category === 'RECEIPT'}><option value="">Select a saved client...</option>{clientOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</DocumentSelect>}
           {requiresProject && <DocumentSelect label="Project / site" value={projectId} onChange={(value) => { setProjectId(value); setUnitId(''); setSaleId(''); }} required={['AGREEMENT', 'CLIENT_INVOICE', 'BROCHURE', 'FLOOR_PLAN'].includes(category)}><option value="">Select an existing project...</option>{projectOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</DocumentSelect>}
           {requiresUnit && <DocumentSelect label="Unit / property" value={unitId} onChange={(value) => { setUnitId(value); setSaleId(''); }} required={category === 'AGREEMENT' || category === 'FLOOR_PLAN'}><option value="">{projectId ? 'Select a unit...' : 'Choose a project first'}</option>{unitOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</DocumentSelect>}
-          {(category === 'AGREEMENT' || category === 'CLIENT_INVOICE') && <div><DocumentSelect label="Sale / agreement" value={saleId} onChange={(value) => setSaleId(value)}><option value="">{category === 'AGREEMENT' ? 'Select matching sale...' : 'Optional: link a sale...'}</option>{saleOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}{saleOptions.length === 0 && <option value="" disabled>{saleLoadError ? 'Sales could not be loaded' : clientId && unitId ? 'No sale matches this client and unit' : clientId ? 'No sale matches this client' : 'Choose a client to find a sale'}</option>}</DocumentSelect>{saleLoadError ? <p role="alert" className="mt-2 text-xs text-[#a55445]">Sales could not be loaded: {saleLoadError}</p> : saleOptions.length === 0 && clientId && (!requiresUnit || unitId) ? <p className="mt-2 text-xs text-slate-500">Check the client name, email, and unit on the saved sale record.</p> : null}</div>}
+          {(category === 'AGREEMENT' || category === 'CLIENT_INVOICE') && <div><DocumentSelect label="Sale / agreement" value={saleId} onChange={(value) => { const option = saleOptions.find((item) => item.value === value); if (option && !option.saleClientId) { setSaleId(''); setError(`Sale for Unit ${sales.find((item) => item.id === value)?.unit_number || ''} belongs to ${sales.find((item) => item.id === value)?.buyer_name || 'a buyer'} without a matching saved client profile. Add or correct the client profile before generating this document.`); return; } setSaleId(value); if (option?.saleClientId && option.saleClientId !== clientId) { setClientId(option.saleClientId); setError('Client selection updated to match the selected sale buyer.'); } else setError(''); }}><option value="">{category === 'AGREEMENT' ? 'Select sale for this unit...' : 'Optional: link a sale...'}</option>{saleOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}{saleOptions.length === 0 && <option value="" disabled>{saleLoadError ? 'Sales could not be loaded' : unitId ? 'No sale is linked to this unit' : projectId ? 'No sales found for this project' : 'Choose a project and unit to find a sale'}</option>}</DocumentSelect>{saleLoadError ? <p role="alert" className="mt-2 text-xs text-[#a55445]">Sales could not be loaded: {saleLoadError}</p> : saleBuyerMismatchCount > 0 ? <p className="mt-2 border border-[#e7d3a8] bg-[#fff8e6] p-2 text-xs leading-5 text-[#765d2b]">This unit has a sale under a different buyer profile. Selecting that sale will switch the client to the recorded buyer.</p> : saleOptions.length === 0 && unitId && unit?.status === 'SOLD' ? <p className="mt-2 border border-[#e4b8ad] bg-[#fff7f4] p-2 text-xs leading-5 text-[#a55445]">This unit is marked sold but has no linked sale record. Create or repair its sale in the Sales section before generating an agreement.</p> : saleOptions.length === 0 && unitId ? <p className="mt-2 text-xs text-slate-500">No sale is linked to this unit yet. Sales for other units are not shown.</p> : null}</div>}
           {category === 'RECEIPT' && <DocumentSelect label="Verified payment" value={paymentId} onChange={setPaymentId} required><option value="">Select a recorded payment...</option>{paymentOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</DocumentSelect>}
         </section>
         <section className="grid content-start gap-3">

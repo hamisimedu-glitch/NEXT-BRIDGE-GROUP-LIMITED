@@ -1,5 +1,5 @@
-import { FormEvent, useCallback, useEffect, useState } from 'react';
-import { AlertCircle, ArrowRight, BarChart3, Bell, Building2, Calculator, CalendarDays, Check, ChevronDown, ChevronLeft, ChevronRight, CircleCheck, Clock3, Eye, EyeOff, FileText, FileDown, Grid2X2, Home, List, LockKeyhole, Mail, MapPin, Menu, MessageCircle, Phone, Receipt, Search, Send, Settings, ShieldCheck, UserRound, X } from 'lucide-react';
+import { FormEvent, useCallback, useEffect, useState, type CSSProperties } from 'react';
+import { AlertCircle, ArrowRight, BarChart3, Bell, Building2, Calculator, CalendarDays, Check, ChevronDown, ChevronLeft, ChevronRight, CircleCheck, Clock3, CreditCard, Eye, EyeOff, FileText, FileDown, Grid2X2, Home, List, LockKeyhole, Mail, MapPin, Menu, MessageCircle, Phone, Receipt, Search, Send, Settings, ShieldCheck, UserRound, X } from 'lucide-react';
 import { sendMagicLink, sendPasswordReset, signInWithGoogle, signInWithPassword, signUp, updatePassword, type AdminUser } from '@/lib/auth';
 import AvailableHomeCard from '@/AvailableHomeCard';
 import AvailableHomesCatalog from '@/AvailableHomesCatalog';
@@ -20,12 +20,13 @@ type PortalSection = 'overview' | 'progress' | 'payments' | 'investments' | 'ava
 type ReservationStage = { id: string; user_id: string; project_id: string | null; unit_id: string | null; stage: string; completed_at: string | null; notes: string | null; created_at: string };
 type ClientDocument = { id: string; title: string; category: string; file_url: string; created_at: string; project_id: string | null; unit_id: string | null; is_global?: boolean; document_ref?: string | null; verification_code?: string | null; content_hash?: string | null; content_summary?: string | null; source_type?: string };
 type ProjectInvestmentDocument = { id: string; project_id: string; title: string; category: string; storage_path: string; created_at: string; is_public: boolean; document_ref?: string; verification_code?: string; content_hash?: string | null };
-type ClientPayment = { id: string; user_id: string; unit_id: string | null; project_id: string | null; buyer_installment_id: string | null; payment_reference?: string | null; description: string; due_date: string; amount: number; paid_amount: number; status: string; receipt_url: string | null; transaction_refs?: string[]; created_at: string };
+type ClientPayment = { id: string; user_id: string; unit_id: string | null; project_id: string | null; project_name?: string | null; buyer_installment_id: string | null; payment_reference?: string | null; description: string; due_date: string; amount: number; paid_amount: number; status: string; receipt_url: string | null; transaction_refs?: string[]; created_at: string };
 type PurchasePaymentInstructions = { bank_name: string; bank_branch: string; account_name: string; account_number: string; swift_code: string; payment_instructions: string; is_published: boolean };
 type SupportTicket = { id: string; subject: string; message: string; status: string; staff_reply: string | null; created_at: string; updated_at: string };
 type ClientNotification = { id: string; title: string; body: string; kind: string; read_at: string | null; created_at: string };
 type PurchaseRequestReceipt = { sale_id: string; unit: ProjectUnit; payment_mode: 'INSTALLMENTS' | 'FULL'; total_amount: number; initial_amount: number; installment_count: number; frequency: string; payment_reference: string; reservation_expires_at?: string | null };
 type ClientUnitReservation = { sale_id: string; unit_id: string; project_id: string | null; unit_number: string; expires_at: string; reservation_source: string };
+type ClientPurchaseStatus = { sale_id: string; unit_id: string; project_id: string | null; unit_number: string; sale_price: number; paid_amount: number; status: string; reservation_expires_at: string | null; purchase_locked: boolean };
 type ClientProfile = { id: string; full_name: string; phone: string; preferred_location: string; investment_budget: string; notes: string; identity_document_type: string; identity_document_number: string; residential_address: string };
 
 function kenyaCalendarDate() {
@@ -256,6 +257,12 @@ function ClientPortal({ user, onSignOut, navigate }: { user: AdminUser; onSignOu
         table: 'client_payment_schedule',
         filter: `user_id=eq.${user.id}`,
       }, () => { void load(); })
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'sales',
+        filter: `buyer_user_id=eq.${user.id}`,
+      }, () => { void load(); })
       .subscribe();
     return () => { void supabase.removeChannel(channel); };
   }, [load, user.id]);
@@ -288,6 +295,18 @@ function ClientPortal({ user, onSignOut, navigate }: { user: AdminUser; onSignOu
   }, [pendingPurchaseUnitId, units, loading]);
 
   const selectSection = (next: PortalSection) => { setSection(next); setSidebarOpen(false); };
+
+  useEffect(() => {
+    const handlePortalNavigation = (event: Event) => {
+      const nextSection = (event as CustomEvent<PortalSection>).detail;
+      if (['overview', 'progress', 'payments', 'investments', 'availability', 'resources', 'profile'].includes(nextSection)) {
+        setSection(nextSection);
+        setSidebarOpen(false);
+      }
+    };
+    window.addEventListener('nbg-client-portal-navigate', handlePortalNavigation);
+    return () => window.removeEventListener('nbg-client-portal-navigate', handlePortalNavigation);
+  }, []);
 
   const submitInvestment = async (event: FormEvent) => {
     event.preventDefault();
@@ -432,6 +451,13 @@ function PurchaseRequestModal({ unit, onClose, onDone }: { unit: ProjectUnit; on
     }
     setSaving(true);
     setError('');
+    const { data: purchaseStatus, error: statusError } = await supabase.rpc('get_my_current_unit_purchase');
+    const currentPurchase = (purchaseStatus as ClientPurchaseStatus[] | null)?.[0];
+    if (statusError || currentPurchase?.purchase_locked) {
+      setSaving(false);
+      setError(statusError ? 'We could not verify your current payment status. Please refresh your payment schedule and try again.' : `Complete the payment for Unit ${currentPurchase?.unit_number || 'your current unit'} before requesting another unit.`);
+      return;
+    }
     const { data: saleId, error: requestError } = await supabase.rpc('create_client_purchase_request_with_mode', {
       p_unit_id: unit.id,
       p_deposit: depositAmount,
@@ -486,7 +512,173 @@ function PurchasePaymentConfirmation({ receipt, instructions, user, onDismiss }:
 }
 
 function ClientPaymentsView({ user, payments, purchaseReceipt, paymentInstructions, onDismissPurchase }: { user: AdminUser; payments: ClientPayment[]; purchaseReceipt: PurchaseRequestReceipt | null; paymentInstructions: PurchasePaymentInstructions | null; onDismissPurchase: () => void }) {
-  return <>{purchaseReceipt && (paymentInstructions ? <PurchasePaymentConfirmation receipt={purchaseReceipt} instructions={paymentInstructions} user={user} onDismiss={onDismissPurchase} /> : <section role="alert" className="mb-8 border border-[#e4b8ad] bg-[#fff7f4] p-5"><p className="eyebrow text-[#a55445]">Payment details need confirmation</p><h2 className="mt-2 font-serif text-2xl text-[#123b4b]">Unit {purchaseReceipt.unit.unit_number} · request pending</h2><p className="mt-2 text-sm leading-6 text-slate-600">Your request is recorded, but NBG bank instructions are currently unavailable. Do not transfer funds using old or unverified details. Contact the NBG team and quote <strong className="font-mono">{purchaseReceipt.payment_reference}</strong>.</p><button type="button" onClick={onDismissPurchase} className="btn-secondary mt-4 !px-3 !py-2">Close</button></section>)}<PaymentsContent payments={payments} /></>;
+  return <>{purchaseReceipt && (paymentInstructions ? <PurchasePaymentConfirmation receipt={purchaseReceipt} instructions={paymentInstructions} user={user} onDismiss={onDismissPurchase} /> : <section role="alert" className="mb-8 border border-[#e4b8ad] bg-[#fff7f4] p-5"><p className="eyebrow text-[#a55445]">Payment details need confirmation</p><h2 className="mt-2 font-serif text-2xl text-[#123b4b]">Unit {purchaseReceipt.unit.unit_number} · request pending</h2><p className="mt-2 text-sm leading-6 text-slate-600">Your request is recorded, but NBG bank instructions are currently unavailable. Do not transfer funds using old or unverified details. Contact the NBG team and quote <strong className="font-mono">{purchaseReceipt.payment_reference}</strong>.</p><button type="button" onClick={onDismissPurchase} className="btn-secondary mt-4 !px-3 !py-2">Close</button></section>)}<PaymentsDashboard user={user} payments={payments} paymentInstructions={paymentInstructions} /></>;
+}
+
+function PaymentsDashboard({ user, payments, paymentInstructions }: { user: AdminUser; payments: ClientPayment[]; paymentInstructions: PurchasePaymentInstructions | null }) {
+  const [purchaseStatus, setPurchaseStatus] = useState<ClientPurchaseStatus | null>(null);
+  const [purchaseStatusLoading, setPurchaseStatusLoading] = useState(true);
+  const [purchaseStatusError, setPurchaseStatusError] = useState(false);
+  const [units, setUnits] = useState<ProjectUnit[]>([]);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [paymentTab, setPaymentTab] = useState<'ALL' | 'SCHEDULED' | 'PAID' | 'PENDING' | 'OVERDUE'>('ALL');
+  const [projectFilter, setProjectFilter] = useState('ALL');
+  const [selectedPayment, setSelectedPayment] = useState<ClientPayment | null>(null);
+  const [exportError, setExportError] = useState('');
+
+  useEffect(() => {
+    let active = true;
+    const loadPaymentContext = async () => {
+      setPurchaseStatusLoading(true);
+      const [purchaseResult, unitsResult, projectsResult] = await Promise.all([
+        supabase.rpc('get_my_current_unit_purchase'),
+        supabase.from('project_units').select('*').eq('is_published', true),
+        supabase.from('projects').select('*').eq('is_published', true),
+      ]);
+      if (!active) return;
+      setPurchaseStatusError(Boolean(purchaseResult.error));
+      setPurchaseStatus(((purchaseResult.data as ClientPurchaseStatus[] | null)?.[0] ?? null));
+      setUnits((unitsResult.data ?? []) as ProjectUnit[]);
+      setProjects((projectsResult.data ?? []) as Project[]);
+      setPurchaseStatusLoading(false);
+    };
+    void loadPaymentContext();
+    return () => { active = false; };
+  }, [payments, user.id]);
+
+  const paymentUnitNumber = (payment: ClientPayment | null) => payment?.description.match(/\bUnit\s+([^·\s]+)/i)?.[1] ?? null;
+  const fallbackCurrentPayment = payments.find((payment) => Number(payment.amount) > Number(payment.paid_amount) && payment.status !== 'PAID') ?? payments[0] ?? null;
+  const currentUnitId = purchaseStatus?.unit_id || fallbackCurrentPayment?.unit_id || null;
+  const currentUnit = units.find((unit) => unit.id === currentUnitId) ?? null;
+  const currentProjectId = purchaseStatus?.project_id || currentUnit?.project_id || payments.find((payment) => payment.unit_id === currentUnitId)?.project_id || null;
+  const currentProject = projects.find((project) => project.id === currentProjectId) ?? null;
+  const currentUnitLabel = purchaseStatus?.unit_number || currentUnit?.unit_number || paymentUnitNumber(fallbackCurrentPayment) || 'not linked';
+  const currentUnitPayments = currentUnitId
+    ? payments.filter((payment) => payment.unit_id === currentUnitId)
+    : currentUnitLabel !== 'not linked'
+      ? payments.filter((payment) => paymentUnitNumber(payment) === currentUnitLabel)
+      : [];
+  const scheduledTotal = Number(purchaseStatus?.sale_price ?? 0) || currentUnitPayments.reduce((sum, payment) => sum + Number(payment.amount), 0) || parseMoney(currentUnit?.price ?? '');
+  const paidTotal = Number(purchaseStatus?.paid_amount ?? 0) || currentUnitPayments.reduce((sum, payment) => sum + Number(payment.paid_amount), 0);
+  const balanceDue = Math.max(0, scheduledTotal - paidTotal);
+  const paymentProgress = scheduledTotal ? Math.min(100, Math.round(paidTotal / scheduledTotal * 100)) : 0;
+  const purchaseLocked = purchaseStatusLoading || purchaseStatusError || Boolean(purchaseStatus?.purchase_locked);
+  const nextPayment = currentUnitPayments.find((payment) => Number(payment.amount) > Number(payment.paid_amount)) ?? null;
+  const projectNameFor = (payment: ClientPayment) => projects.find((project) => project.id === payment.project_id)?.name || payment.project_name || '';
+  const projectOptions = payments.reduce<{ value: string; label: string }[]>((options, payment) => {
+    const label = projectNameFor(payment);
+    const value = payment.project_id || label;
+    if (label && value && !options.some((option) => option.value === value)) options.push({ value, label });
+    return options;
+  }, []).sort((left, right) => left.label.localeCompare(right.label));
+  const today = kenyaCalendarDate();
+  const isPaid = (payment: ClientPayment) => payment.status === 'PAID' || Number(payment.paid_amount) >= Number(payment.amount);
+  const isOverdue = (payment: ClientPayment) => !isPaid(payment) && (payment.status === 'OVERDUE' || payment.due_date < today);
+  const matchesTab = (payment: ClientPayment) => {
+    if (paymentTab === 'ALL') return true;
+    if (paymentTab === 'PAID') return isPaid(payment);
+    if (paymentTab === 'OVERDUE') return isOverdue(payment);
+    if (paymentTab === 'SCHEDULED') return !isPaid(payment) && !isOverdue(payment) && payment.due_date > today;
+    return !isPaid(payment) && !isOverdue(payment) && payment.due_date <= today;
+  };
+  const visiblePayments = [...payments]
+    .filter((payment) => (projectFilter === 'ALL' || (payment.project_id || projectNameFor(payment)) === projectFilter) && matchesTab(payment))
+    .sort((left, right) => left.due_date.localeCompare(right.due_date));
+  const tabCounts = {
+    ALL: payments.length,
+    SCHEDULED: payments.filter((payment) => !isPaid(payment) && !isOverdue(payment) && payment.due_date > today).length,
+    PAID: payments.filter(isPaid).length,
+    PENDING: payments.filter((payment) => !isPaid(payment) && !isOverdue(payment) && payment.due_date <= today).length,
+    OVERDUE: payments.filter(isOverdue).length,
+  };
+  const lockUnavailable = purchaseStatusError;
+  const unitImage = currentUnit?.image_url || currentProject?.image_url || '/NBG HERO.png';
+  const statusLabel = purchaseStatus?.status === 'COMPLETED' || (scheduledTotal > 0 && balanceDue <= 0) ? 'Paid in full' : purchaseStatus?.status === 'RESERVED' ? 'Reserved' : 'Active';
+  const amountDueFor = (payment: ClientPayment) => Math.max(0, Number(payment.amount) - Number(payment.paid_amount));
+
+  const downloadStatement = async () => {
+    setExportError('');
+    try {
+      const statementPayments = [...payments].sort((left, right) => left.due_date.localeCompare(right.due_date));
+      const statementScheduled = statementPayments.reduce((sum, payment) => sum + Number(payment.amount), 0);
+      const statementPaid = statementPayments.reduce((sum, payment) => sum + Number(payment.paid_amount), 0);
+      const statementProjects = [...new Set(statementPayments.map(projectNameFor).filter(Boolean))];
+      const statementUnits = [...new Set(statementPayments.map(paymentUnitNumber).filter((unit): unit is string => Boolean(unit)))];
+      const dueDates = statementPayments.map((payment) => payment.due_date).filter(Boolean).sort();
+      const formatStatementDate = (value: string | undefined) => value ? new Date(`${value.slice(0, 10)}T00:00:00`).toLocaleDateString('en-KE', { day: '2-digit', month: 'short', year: 'numeric' }) : 'Not scheduled';
+      const rows = statementPayments.map((payment) => ({
+        Description: payment.description,
+        Due: payment.due_date,
+        Amount: Number(payment.amount),
+        Paid: Number(payment.paid_amount),
+        Balance: Math.max(0, Number(payment.amount) - Number(payment.paid_amount)),
+        Status: payment.status,
+        Reference: payment.transaction_refs?.join(' / ') || payment.payment_reference || '',
+      }));
+      const snapshot = statementPayments.map((payment) => ({ id: payment.id, unit_id: payment.unit_id, payment_reference: payment.payment_reference ?? null, description: payment.description, due_date: payment.due_date, amount: Number(payment.amount), paid_amount: Number(payment.paid_amount), status: payment.status, transaction_refs: payment.transaction_refs ?? [] }));
+      const { blob } = await createVerifiedPdf('NBG Client Account Statement', 'CLIENT_PAYMENT_STATEMENT', rows, snapshot, undefined, {
+        accountHolder: user.full_name || user.email.split('@')[0],
+        accountEmail: user.email,
+        project: statementProjects.length === 1 ? statementProjects[0] : statementProjects.length ? 'Multiple projects' : 'Not assigned',
+        unit: statementUnits.length === 1 ? `Unit ${statementUnits[0]}` : statementUnits.length ? 'Multiple units' : currentUnitLabel === 'not linked' ? 'Not assigned' : `Unit ${currentUnitLabel}`,
+        statementDate: new Date().toLocaleDateString('en-KE', { day: '2-digit', month: 'long', year: 'numeric' }),
+        periodStart: formatStatementDate(dueDates[0]),
+        periodEnd: formatStatementDate(dueDates[dueDates.length - 1]),
+        scheduledTotal: statementScheduled,
+        paidTotal: statementPaid,
+        balance: Math.max(0, statementScheduled - statementPaid),
+      });
+      downloadPdf(blob, `nbg-client-account-statement-${new Date().toISOString().slice(0, 10)}.pdf`);
+    } catch (error) {
+      setExportError(error instanceof Error ? error.message : 'The statement could not be generated.');
+    }
+  };
+
+  const navigateTo = (section: PortalSection) => window.dispatchEvent(new CustomEvent('nbg-client-portal-navigate', { detail: section }));
+  const openCurrentStatus = () => document.getElementById('client-current-unit')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  const dueLabel = nextPayment ? new Date(`${nextPayment.due_date}T00:00:00`).toLocaleDateString('en-KE', { day: '2-digit', month: 'short', year: 'numeric' }) : 'No payment due';
+
+  return <section className="client-payment-dashboard">
+    <header className="client-payment-dashboard-header">
+      <div className="client-payment-heading"><span className="client-payment-heading-icon"><Receipt size={22} /></span><div><h2>Payments</h2><p>Track your payments, view transaction history and download receipts for your NBG real-estate investment.</p></div></div>
+      <div className={`client-payment-lock-banner ${purchaseLocked ? 'is-locked' : 'is-unlocked'}`} role="status"><span className="client-payment-lock-icon">{purchaseLocked ? <LockKeyhole size={19} /> : <ShieldCheck size={20} />}</span><div><strong>{lockUnavailable ? 'Purchase status unavailable' : purchaseLocked ? 'Payment Locked' : 'Purchase Unlocked'}</strong><p>{lockUnavailable ? 'We could not verify your payment status. New unit requests stay disabled until it is confirmed.' : purchaseLocked ? `Complete the payment for Unit ${currentUnitLabel} before requesting another unit.` : 'Your current unit is fully paid. You may now request another home.'}</p></div><button type="button" onClick={purchaseLocked ? openCurrentStatus : () => navigateTo('availability')}>{purchaseLocked ? 'View Current Status' : 'Available Homes'} <ArrowRight size={14} /></button></div>
+    </header>
+
+    {exportError && <p role="alert" className="border border-[#e4b8ad] bg-[#fff7f4] p-3 text-sm text-[#a55445]">Statement export failed: {exportError}</p>}
+
+    <section className="client-payment-summary-grid" aria-label="Current unit payment totals">
+      <article className="client-payment-stat-card"><span className="client-payment-stat-icon is-green"><Receipt size={18} /></span><div><p>Total payable</p><strong>KSh {scheduledTotal.toLocaleString('en-KE')}</strong><small>Full purchase value</small></div></article>
+      <article className="client-payment-stat-card"><span className="client-payment-stat-icon is-blue"><Check size={18} /></span><div><p>Amount paid</p><strong>KSh {paidTotal.toLocaleString('en-KE')}</strong><small>{paymentProgress}% of total</small></div><span className="client-payment-ring" style={{ '--payment-progress': `${paymentProgress}%` } as CSSProperties}>{paymentProgress}%</span></article>
+      <article className="client-payment-stat-card"><span className="client-payment-stat-icon is-red"><LockKeyhole size={18} /></span><div><p>Balance due</p><strong>KSh {balanceDue.toLocaleString('en-KE')}</strong><small>Remaining amount</small></div></article>
+      <article className="client-payment-stat-card"><span className="client-payment-stat-icon is-amber"><Clock3 size={18} /></span><div><p>Outstanding</p><strong>KSh {balanceDue.toLocaleString('en-KE')}</strong><small>{nextPayment ? `Next payment ${dueLabel}` : 'KSh remaining'}</small></div></article>
+    </section>
+
+    <div className="client-payment-main-grid">
+      <section id="client-current-unit" className="client-current-unit-panel">
+        <div className="client-current-unit-details"><div className="client-current-unit-title"><h3>Your Current Unit</h3><span className={`client-payment-status ${balanceDue > 0 ? 'is-active' : 'is-paid'}`}>{statusLabel}</span></div><img src={unitImage} alt={`${currentProject?.name || 'NBG'} Unit ${currentUnitLabel}`} className="client-current-unit-image" /><div className="client-current-unit-copy"><h4>Unit {currentUnitLabel}</h4><p><MapPin size={13} />{currentProject?.name || 'Project details pending'}</p><div><span>Floor: {currentUnit?.floor || 'Pending'}</span><span>Type: {currentUnit?.type || 'Residence'}</span></div></div></div>
+        <div className="client-payment-progress-panel"><div className="client-payment-progress-heading"><span>Payment progress</span><strong>{paymentProgress}%</strong></div><div className="client-payment-progress-track"><span style={{ width: `${paymentProgress}%` }} /></div><div className="client-payment-progress-line"><span><i className="is-paid-dot" />Paid</span><strong>KSh {paidTotal.toLocaleString('en-KE')}</strong></div><div className="client-payment-progress-line"><span><i className="is-due-dot" />Remaining</span><strong className={balanceDue > 0 ? 'is-due' : ''}>KSh {balanceDue.toLocaleString('en-KE')}</strong></div>{nextPayment && <button type="button" onClick={() => setSelectedPayment(nextPayment)} className="client-payment-primary-action"><CreditCard size={15} />Complete Payment <ArrowRight size={14} /></button>}{!nextPayment && <p className="client-payment-settled-note"><CircleCheck size={15} />All scheduled payments are cleared.</p>}</div>
+      </section>
+
+      <aside className="client-purchase-lock-panel"><div className="client-purchase-lock-title"><LockKeyhole size={18} /><strong>Purchase Lock</strong></div><p>{lockUnavailable ? 'Your payment status could not be verified. Another unit stays unavailable until NBG confirms it.' : purchaseLocked ? `You cannot buy another unit until Unit ${currentUnitLabel} is fully paid.` : 'You can now request another unit.'}</p><ul><li><CircleCheck size={14} />{lockUnavailable ? 'Payment status needs verification' : balanceDue <= 0 ? 'All installments paid' : 'All installments must be paid'}</li><li><CircleCheck size={14} />{lockUnavailable ? 'Contact NBG support' : balanceDue <= 0 ? 'Final balance cleared' : 'Final balance cleared to unlock'}</li><li><CircleCheck size={14} />Payment recorded by NBG</li></ul><button type="button" disabled={purchaseLocked} onClick={() => navigateTo('availability')} className="client-purchase-lock-button">{purchaseLocked ? <><LockKeyhole size={14} />Buy Another Unit</> : <><Building2 size={14} />Browse Available Homes</>}</button></aside>
+    </div>
+
+    <div className="client-payment-lower-grid">
+      <section className="client-payment-schedule-panel" id="client-payment-schedule">
+        <div className="client-payment-schedule-heading"><h3>Payment Schedule</h3><button type="button" onClick={() => void downloadStatement()} className="client-payment-download-button"><FileDown size={14} />Download Statement</button></div>
+        <div className="client-payment-table-toolbar"><div className="client-payment-tabs">{([['ALL', 'All Payments'], ['SCHEDULED', 'Scheduled'], ['PAID', 'Paid'], ['PENDING', 'Pending'], ['OVERDUE', 'Overdue']] as const).map(([key, label]) => <button type="button" key={key} onClick={() => setPaymentTab(key)} className={`client-payment-tab ${paymentTab === key ? 'is-active' : ''}`}>{label} <span>{tabCounts[key]}</span></button>)}</div><label className="client-payment-project-filter"><span>Filter by project</span><select aria-label="Filter payments by project" value={projectFilter} onChange={(event) => setProjectFilter(event.target.value)}><option value="ALL">All Projects</option>{projectOptions.map((project) => <option key={project.value} value={project.value}>{project.label}</option>)}</select></label></div>
+        <div className="overflow-x-auto"><table className="client-payment-table"><thead><tr><th>#</th><th>Description</th><th>Due date</th><th>Amount (KSh)</th><th>Status</th><th>Payment reference</th><th>Receipt</th><th>Actions</th></tr></thead><tbody>{visiblePayments.map((payment, index) => {
+          const paid = isPaid(payment);
+          const overdue = isOverdue(payment);
+          const statusClass = paid ? 'paid' : overdue ? 'overdue' : payment.status === 'PARTIAL' ? 'partial' : 'pending';
+          return <tr key={payment.id}><td>{index + 1}</td><td><strong>{payment.description}</strong><small>{projectNameFor(payment) || 'NBG residence'}</small></td><td><CalendarDays size={13} />{new Date(`${payment.due_date}T00:00:00`).toLocaleDateString('en-KE', { day: '2-digit', month: 'short', year: 'numeric' })}</td><td><strong>{Number(payment.amount).toLocaleString('en-KE')}</strong>{Number(payment.paid_amount) > 0 && <small>Paid {Number(payment.paid_amount).toLocaleString('en-KE')}</small>}</td><td><span className={`client-payment-badge ${statusClass}`}>{paid ? <CircleCheck size={12} /> : overdue ? <AlertCircle size={12} /> : <Clock3 size={12} />}{paid ? 'Paid' : overdue ? 'Overdue' : payment.status === 'PARTIAL' ? 'Partial' : payment.due_date > today ? 'Scheduled' : 'Pending'}</span></td><td>{payment.transaction_refs?.length ? payment.transaction_refs.map((reference) => <a key={reference} href={`/verify/${encodeURIComponent(reference)}`} className="client-payment-reference">{reference}</a>) : <span className="client-payment-reference">{payment.payment_reference || 'Not assigned'}</span>}</td><td>{payment.receipt_url ? <a href={payment.receipt_url} target="_blank" rel="noreferrer" className="client-payment-receipt-link"><FileDown size={13} />Download</a> : <span className="text-slate-400">—</span>}</td><td><button type="button" onClick={() => setSelectedPayment(payment)} className={`client-payment-row-action ${!paid ? 'is-pay' : ''}`}>{paid ? <Eye size={13} /> : <CreditCard size={13} />}{paid ? 'View' : 'Pay Now'}</button></td></tr>;
+        })}{visiblePayments.length === 0 && <tr><td colSpan={8} className="client-payment-empty">{payments.length ? 'No payments match this filter.' : 'Your payment schedule will appear here once your consultant adds it.'}</td></tr>}</tbody></table></div>
+      </section>
+
+      <aside className="client-payment-quick-actions"><h3>Quick Actions</h3><button type="button" onClick={() => nextPayment && setSelectedPayment(nextPayment)} disabled={!nextPayment} className="is-primary"><CreditCard size={14} />Make Payment</button><button type="button" onClick={() => void downloadStatement()}><FileDown size={14} />Download Statement</button><button type="button" onClick={() => navigateTo('resources')}><FileText size={14} />View Invoices</button><button type="button" onClick={() => navigateTo('resources')}><MessageCircle size={14} />Contact Support</button><p>Bank transfers are verified and recorded by NBG before your balance changes.</p></aside>
+    </div>
+
+    {selectedPayment && <div className="client-payment-modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setSelectedPayment(null); }}><section role="dialog" aria-modal="true" aria-labelledby="payment-details-title" className="client-payment-modal"><header><div><p>Payment details</p><h3 id="payment-details-title">{selectedPayment.description}</h3></div><button type="button" aria-label="Close payment details" onClick={() => setSelectedPayment(null)}><X size={18} /></button></header><div className="client-payment-modal-content"><div className="client-payment-modal-summary"><span>Amount due</span><strong>KSh {amountDueFor(selectedPayment).toLocaleString('en-KE')}</strong></div><p className="client-payment-modal-reference">Payment reference <strong>{selectedPayment.payment_reference || 'Contact NBG for a reference'}</strong></p>{paymentInstructions ? <div className="client-payment-bank-details"><p className="eyebrow">Official NBG bank details</p><dl><div><dt>Bank</dt><dd>{paymentInstructions.bank_name}</dd></div><div><dt>Branch</dt><dd>{paymentInstructions.bank_branch || 'Not specified'}</dd></div><div><dt>Account name</dt><dd>{paymentInstructions.account_name}</dd></div><div><dt>Account number</dt><dd>{paymentInstructions.account_number}</dd></div>{paymentInstructions.swift_code && <div><dt>SWIFT / BIC</dt><dd>{paymentInstructions.swift_code}</dd></div>}</dl>{paymentInstructions.payment_instructions && <p>{paymentInstructions.payment_instructions}</p>}</div> : <p className="client-payment-instructions-missing">NBG has not published payment instructions. Contact support before sending funds; do not use unverified account details.</p>}<p className="client-payment-modal-note">Payment is not collected in this portal. Once NBG verifies and records cleared funds, your payment schedule and unit status will update.</p></div><footer><button type="button" onClick={() => setSelectedPayment(null)} className="client-payment-download-button">Close</button></footer></section></div>}
+  </section>;
 }
 
 function PaymentsContent({ payments }: { payments: ClientPayment[] }) {
