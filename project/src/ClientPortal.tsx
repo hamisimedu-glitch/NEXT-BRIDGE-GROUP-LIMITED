@@ -515,6 +515,49 @@ function ClientPaymentsView({ user, payments, purchaseReceipt, paymentInstructio
   return <>{purchaseReceipt && (paymentInstructions ? <PurchasePaymentConfirmation receipt={purchaseReceipt} instructions={paymentInstructions} user={user} onDismiss={onDismissPurchase} /> : <section role="alert" className="mb-8 border border-[#e4b8ad] bg-[#fff7f4] p-5"><p className="eyebrow text-[#a55445]">Payment details need confirmation</p><h2 className="mt-2 font-serif text-2xl text-[#123b4b]">Unit {purchaseReceipt.unit.unit_number} · request pending</h2><p className="mt-2 text-sm leading-6 text-slate-600">Your request is recorded, but NBG bank instructions are currently unavailable. Do not transfer funds using old or unverified details. Contact the NBG team and quote <strong className="font-mono">{purchaseReceipt.payment_reference}</strong>.</p><button type="button" onClick={onDismissPurchase} className="btn-secondary mt-4 !px-3 !py-2">Close</button></section>)}<PaymentsDashboard user={user} payments={payments} paymentInstructions={paymentInstructions} /></>;
 }
 
+function ClientPaymentFollowup({ user, payment, paymentReference, instructionsAvailable }: { user: AdminUser; payment: ClientPayment; paymentReference: string; instructionsAvailable: boolean }) {
+  const [bankReference, setBankReference] = useState('');
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState('');
+  const [sent, setSent] = useState(false);
+
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (sending) return;
+    setSending(true);
+    setError('');
+    const subject = bankReference.trim()
+      ? `Payment notice · ${payment.description}`
+      : `Payment reference request · ${payment.description}`;
+    const message = [
+      bankReference.trim() ? 'The client reports that a payment was sent and requests verification.' : 'The client needs an official payment reference and/or current payment instructions.',
+      `Payment schedule item: ${payment.id}`,
+      `Description: ${payment.description}`,
+      `Amount due: KSh ${Math.max(0, Number(payment.amount) - Number(payment.paid_amount)).toLocaleString('en-KE')}`,
+      `NBG payment reference: ${paymentReference || 'Not assigned'}`,
+      `Bank / M-Pesa transaction reference: ${bankReference.trim() || 'Not supplied'}`,
+      `Official payment instructions currently published: ${instructionsAvailable ? 'Yes' : 'No'}`,
+      'Do not mark this payment paid until cleared funds are verified and recorded by NBG staff.',
+    ].join('\n');
+    const { error: ticketError } = await supabase.from('client_support_tickets').insert({ user_id: user.id, subject, message });
+    setSending(false);
+    if (ticketError) {
+      setError(ticketError.message || 'Your payment notice could not be sent. Please contact NBG support.');
+      return;
+    }
+    setSent(true);
+  };
+
+  if (sent) return <p role="status" className="client-payment-followup-success"><CircleCheck size={16} />Request sent to NBG. Your balance will update after staff verify and record the payment.</p>;
+
+  return <form onSubmit={submit} className="client-payment-followup-form">
+    <div><p className="client-payment-followup-title">Next step</p><p className="client-payment-followup-copy">{paymentReference && instructionsAvailable ? 'Transfer using the official details above, then send NBG your bank or M-Pesa confirmation reference.' : 'A reference or verified payment details are missing. Request them from NBG before transferring funds.'} Your balance changes only after NBG verifies the payment.</p></div>
+    <label><span>Bank / M-Pesa transaction reference <small>(if already paid)</small></span><input value={bankReference} onChange={(event) => setBankReference(event.target.value)} maxLength={120} placeholder="Enter the confirmation code" /></label>
+    {error && <p role="alert" className="client-payment-followup-error">{error}</p>}
+    <button type="submit" disabled={sending} className="client-payment-followup-submit"><MessageCircle size={14} />{sending ? 'Sending request...' : bankReference.trim() ? 'Submit payment notice' : 'Request payment help'}</button>
+  </form>;
+}
+
 function PaymentsDashboard({ user, payments, paymentInstructions }: { user: AdminUser; payments: ClientPayment[]; paymentInstructions: PurchasePaymentInstructions | null }) {
   const [purchaseStatus, setPurchaseStatus] = useState<ClientPurchaseStatus | null>(null);
   const [purchaseStatusLoading, setPurchaseStatusLoading] = useState(true);
@@ -688,7 +731,7 @@ function PaymentsDashboard({ user, payments, paymentInstructions }: { user: Admi
       <aside className="client-payment-quick-actions"><h3>Quick Actions</h3><button type="button" onClick={() => nextPayment && setSelectedPayment(nextPayment)} disabled={!nextPayment} className="is-primary"><CreditCard size={14} />Make Payment</button><button type="button" onClick={() => void downloadStatement()}><FileDown size={14} />Download Statement</button><button type="button" onClick={() => navigateTo('resources')}><FileText size={14} />View Invoices</button><button type="button" onClick={() => navigateTo('resources')}><MessageCircle size={14} />Contact Support</button><p>Bank transfers are verified and recorded by NBG before your balance changes.</p></aside>
     </div>
 
-    {selectedPayment && <div className="client-payment-modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setSelectedPayment(null); }}><section role="dialog" aria-modal="true" aria-labelledby="payment-details-title" className="client-payment-modal"><header><div><p>Payment details</p><h3 id="payment-details-title">{selectedPayment.description}</h3></div><button type="button" aria-label="Close payment details" onClick={() => setSelectedPayment(null)}><X size={18} /></button></header><div className="client-payment-modal-content"><div className="client-payment-modal-summary"><span>Amount due</span><strong>KSh {amountDueFor(selectedPayment).toLocaleString('en-KE')}</strong></div><p className="client-payment-modal-reference">Payment reference <strong>{selectedPayment.payment_reference || 'Contact NBG for a reference'}</strong></p>{paymentInstructions ? <div className="client-payment-bank-details"><p className="eyebrow">Official NBG bank details</p><dl><div><dt>Bank</dt><dd>{paymentInstructions.bank_name}</dd></div><div><dt>Branch</dt><dd>{paymentInstructions.bank_branch || 'Not specified'}</dd></div><div><dt>Account name</dt><dd>{paymentInstructions.account_name}</dd></div><div><dt>Account number</dt><dd>{paymentInstructions.account_number}</dd></div>{paymentInstructions.swift_code && <div><dt>SWIFT / BIC</dt><dd>{paymentInstructions.swift_code}</dd></div>}</dl>{paymentInstructions.payment_instructions && <p>{paymentInstructions.payment_instructions}</p>}</div> : <p className="client-payment-instructions-missing">NBG has not published payment instructions. Contact support before sending funds; do not use unverified account details.</p>}<p className="client-payment-modal-note">Payment is not collected in this portal. Once NBG verifies and records cleared funds, your payment schedule and unit status will update.</p></div><footer><button type="button" onClick={() => setSelectedPayment(null)} className="client-payment-download-button">Close</button></footer></section></div>}
+    {selectedPayment && <div className="client-payment-modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setSelectedPayment(null); }}><section role="dialog" aria-modal="true" aria-labelledby="payment-details-title" className="client-payment-modal"><header><div><p>Payment details</p><h3 id="payment-details-title">{selectedPayment.description}</h3></div><button type="button" aria-label="Close payment details" onClick={() => setSelectedPayment(null)}><X size={18} /></button></header><div className="client-payment-modal-content"><div className="client-payment-modal-summary"><span>Amount due</span><strong>KSh {amountDueFor(selectedPayment).toLocaleString('en-KE')}</strong></div><p className="client-payment-modal-reference">Payment reference <strong>{selectedPayment.payment_reference || 'Contact NBG for a reference'}</strong></p>{paymentInstructions ? <div className="client-payment-bank-details"><p className="eyebrow">Official NBG bank details</p><dl><div><dt>Bank</dt><dd>{paymentInstructions.bank_name}</dd></div><div><dt>Branch</dt><dd>{paymentInstructions.bank_branch || 'Not specified'}</dd></div><div><dt>Account name</dt><dd>{paymentInstructions.account_name}</dd></div><div><dt>Account number</dt><dd>{paymentInstructions.account_number}</dd></div>{paymentInstructions.swift_code && <div><dt>SWIFT / BIC</dt><dd>{paymentInstructions.swift_code}</dd></div>}</dl>{paymentInstructions.payment_instructions && <p>{paymentInstructions.payment_instructions}</p>}</div> : <p className="client-payment-instructions-missing">NBG has not published payment instructions. Contact support before sending funds; do not use unverified account details.</p>}<p className="client-payment-modal-note">Payment is not collected in this portal. Once NBG verifies and records cleared funds, your payment schedule and unit status will update.</p>{amountDueFor(selectedPayment) > 0 && <ClientPaymentFollowup user={user} payment={selectedPayment} paymentReference={selectedPayment.payment_reference || ''} instructionsAvailable={Boolean(paymentInstructions)} />}</div><footer><button type="button" onClick={() => setSelectedPayment(null)} className="client-payment-download-button">Close</button></footer></section></div>}
   </section>;
 }
 
