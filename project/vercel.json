@@ -1,6 +1,7 @@
 {
+  "$schema": "https://openapi.vercel.sh/vercel.json",
   "rewrites": [
-    { "source": "/(.*)", "destination": "/index.html" }
+    { "source": "/:path*", "destination": "/index.html" }
   ],
   "headers": [
     {
@@ -9,12 +10,6 @@
         { "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" },
         { "key": "Pragma", "value": "no-cache" },
         { "key": "Expires", "value": "0" }
-      ]
-    },
-    {
-      "source": "/(.*\\.(js|css|png|jpg|jpeg|gif|svg|webp|ico|woff|woff2))",
-      "headers": [
-        { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }
       ]
     }
   ]
