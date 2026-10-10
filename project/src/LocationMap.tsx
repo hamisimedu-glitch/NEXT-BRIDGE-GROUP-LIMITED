@@ -23,6 +23,8 @@ export default function LocationMap({ projects, title = 'Available homes, on the
   const selected = projects.find((project) => project.id === selectedId) ?? mapped[0] ?? projects[0];
   const hasCoordinates = selected?.latitude != null && selected.longitude != null;
   const externalMapUrl = selected?.map_url || (selected ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent([selected.name, selected.locality, selected.location, selected.county, selected.country].filter(Boolean).join(', '))}` : '');
+  const destination = selected ? (hasCoordinates ? `${selected.latitude},${selected.longitude}` : [selected.name, selected.locality, selected.location, selected.county, selected.country].filter(Boolean).join(', ')) : '';
+  const directionsUrl = destination ? `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(destination)}` : '';
 
   return (
     <section className="mt-10 border border-[#a9d9d8] bg-[#eefbf9] p-5 md:p-7">
@@ -51,6 +53,7 @@ export default function LocationMap({ projects, title = 'Available homes, on the
             </div>
             <div>
               <p className="text-xs leading-5 text-slate-500">{hasCoordinates ? 'Map pin uses the published project coordinates.' : 'Showing the approximate Nyali, Mombasa area until exact project coordinates are published.'}</p>
+              {directionsUrl && <a href={directionsUrl} target="_blank" rel="noreferrer" className="btn-primary mt-3 inline-flex !px-3 !py-2"><MapPin size={14} /> Get directions to residence</a>}
               {externalMapUrl && <a href={externalMapUrl} target="_blank" rel="noreferrer" className="link-arrow mt-3 text-[#087f88]">Open in Maps <MapPin size={14} /></a>}
             </div>
           </div>

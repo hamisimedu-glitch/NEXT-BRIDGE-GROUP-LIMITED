@@ -217,8 +217,8 @@ function ClientPortal({ user, onSignOut, navigate }: { user: AdminUser; onSignOu
 
     const [stageResult, documentResult, projectDocumentResult, paymentResult, ticketResult, notificationResult, instructionsResult] = await Promise.all([
       supabase.from('client_reservation_stages').select('*').eq('user_id', user.id).order('created_at'),
-      supabase.from('client_documents').select('*').or(`user_id.eq.${user.id},is_global.eq.true`).order('created_at', { ascending: false }),
-      supabase.from('project_investment_documents').select('id,project_id,title,category,storage_path,created_at,is_public,document_ref,verification_code,content_hash').eq('is_published', true).order('created_at', { ascending: false }),
+      supabase.from('client_documents').select('id,title,category,file_url,created_at,project_id,unit_id,is_global,document_ref,verification_code,content_hash,content_summary,source_type').or(`user_id.eq.${user.id},is_global.eq.true`).order('created_at', { ascending: false }).limit(100),
+      supabase.from('project_investment_documents').select('id,project_id,title,category,storage_path,created_at,is_public,document_ref,verification_code,content_hash').eq('is_published', true).order('created_at', { ascending: false }).limit(100),
       supabase.from('client_payment_schedule').select('*').eq('user_id', user.id).order('due_date'),
       supabase.from('client_support_tickets').select('*').eq('user_id', user.id).order('created_at', { ascending: false }),
       supabase.from('client_notifications').select('*').eq('user_id', user.id).order('created_at', { ascending: false }),
@@ -248,6 +248,31 @@ function ClientPortal({ user, onSignOut, navigate }: { user: AdminUser; onSignOu
   }, [user.id]);
 
   useEffect(() => { void load(); }, [load]);
+
+  const refreshDocuments = useCallback(async () => {
+    const [documentResult, projectDocumentResult] = await Promise.all([
+      supabase.from('client_documents').select('id,title,category,file_url,created_at,project_id,unit_id,is_global,document_ref,verification_code,content_hash,content_summary,source_type').or(`user_id.eq.${user.id},is_global.eq.true`).order('created_at', { ascending: false }).limit(100),
+      supabase.from('project_investment_documents').select('id,project_id,title,category,storage_path,created_at,is_public,document_ref,verification_code,content_hash').eq('is_published', true).order('created_at', { ascending: false }).limit(100),
+    ]);
+    if (documentResult.error || projectDocumentResult.error) return false;
+    setDocuments((documentResult.data ?? []) as ClientDocument[]);
+    setProjectDocuments((projectDocumentResult.data ?? []) as ProjectInvestmentDocument[]);
+    return true;
+  }, [user.id]);
+
+  const refreshTickets = useCallback(async () => {
+    const { data, error } = await supabase.from('client_support_tickets').select('*').eq('user_id', user.id).order('created_at', { ascending: false });
+    if (!error) setTickets((data ?? []) as SupportTicket[]);
+  }, [user.id]);
+
+  useEffect(() => {
+    const channel = supabase.channel(`client-documents-support-${user.id}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'client_documents' }, () => { void refreshDocuments(); })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'project_investment_documents' }, () => { void refreshDocuments(); })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'client_support_tickets', filter: `user_id=eq.${user.id}` }, () => { void refreshTickets(); })
+      .subscribe();
+    return () => { void supabase.removeChannel(channel); };
+  }, [refreshDocuments, refreshTickets, user.id]);
 
   useEffect(() => {
     const channel = supabase.channel(`client-payment-schedule-${user.id}`)
@@ -772,10 +797,47 @@ function documentSummary(document: ClientDocument) {
   if (snapshotIndex >= 0) return summary.slice(0, snapshotIndex).trim();
   return summary.replace(/ENGINE TEMPLATE DATA[\s\S]*/i, '').trim();
 }
-function DocumentLink({ document }: { document: ClientDocument }) { const [url, setUrl] = useState(''); useEffect(() => { let active = true; void supabase.storage.from('client-documents').createSignedUrl(document.file_url, 3600).then(({ data }) => { if (active) setUrl(data?.signedUrl || document.file_url); }); return () => { active = false; }; }, [document.file_url]); const print = () => { if (!url) return; const printWindow = window.open(url, '_blank', 'noopener,noreferrer'); if (printWindow) printWindow.addEventListener('load', () => printWindow.print()); }; const summary = documentSummary(document); return <div className={`border-b border-[#e2eeec] py-4 ${url ? '' : 'opacity-50'}`}><div className="flex items-start justify-between gap-3"><span><span className="block text-sm font-semibold text-[#123b4b]">{document.title}</span><span className="mt-1 block text-[10px] uppercase tracking-[.12em] text-slate-400">{document.category} · {document.is_global ? 'All clients' : 'Private'} · {new Date(document.created_at).toLocaleDateString()}</span>{document.verification_code && <span className="mt-1 block text-[10px] text-[#087f88]">Verification code: {document.verification_code}</span>}</span><div className="flex flex-wrap gap-3 text-xs"><a href={url || '#'} target="_blank" rel="noreferrer" download={`${document.document_ref || document.title}.pdf`} onClick={(event) => { if (!url) event.preventDefault(); }} className="text-[#087f88] underline">View / download</a>{document.verification_code && <a href={`/verify/${encodeURIComponent(document.verification_code)}`} className="text-[#087f88] underline">Verify</a>}<button type="button" disabled={!url} onClick={print} className="text-[#087f88] underline disabled:text-slate-400">Print</button></div></div>{summary && <p className="mt-3 whitespace-pre-line text-xs leading-5 text-slate-500">{summary}</p>}</div>; }
+function DocumentLink({ document }: { document: ClientDocument }) {
+  const [url, setUrl] = useState('');
+  const [downloadError, setDownloadError] = useState('');
+  const filename = `${document.document_ref || document.title}.pdf`;
+  useEffect(() => {
+    let active = true;
+    void supabase.storage.from('client-documents').createSignedUrl(document.file_url, 300).then(({ data }) => {
+      if (active) setUrl(data?.signedUrl || '');
+    });
+    return () => { active = false; };
+  }, [document.file_url]);
+  const download = async () => {
+    setDownloadError('');
+    const { data, error } = await supabase.storage.from('client-documents').createSignedUrl(document.file_url, 300, { download: filename });
+    if (error || !data?.signedUrl) setDownloadError(error?.message || 'The PDF download could not be prepared.');
+    else window.location.assign(data.signedUrl);
+  };
+  const print = () => {
+    if (!url) return;
+    const printWindow = window.open(url, '_blank', 'noopener,noreferrer');
+    if (printWindow) printWindow.addEventListener('load', () => printWindow.print());
+  };
+  const summary = documentSummary(document);
+  return <div className="min-w-[170px]">
+    <div className="flex flex-wrap justify-end gap-x-3 gap-y-2 text-xs">
+      <a href={url || '#'} target="_blank" rel="noreferrer" onClick={(event) => { if (!url) event.preventDefault(); }} className="text-[#087f88] underline">Preview</a>
+      <button type="button" onClick={() => void download()} className="font-semibold text-[#087f88] underline">Download PDF</button>
+      {document.verification_code && <a href={`/verify/${encodeURIComponent(document.verification_code)}`} className="text-[#087f88] underline">Verify</a>}
+      <button type="button" disabled={!url} onClick={print} className="text-[#087f88] underline disabled:text-slate-400">Print</button>
+    </div>
+    {downloadError && <p role="alert" className="mt-2 text-[10px] text-[#a55445]">{downloadError}</p>}
+    <p className="mt-1 text-right text-[9px] uppercase text-slate-400">PDF · {document.is_global ? 'All clients' : 'Private'}</p>
+    {summary && <details className="mt-2 text-left"><summary className="cursor-pointer text-[10px] text-[#087f88]">Document details</summary><p className="mt-2 max-h-32 overflow-y-auto whitespace-pre-line text-[10px] leading-4 text-slate-500">{summary}</p></details>}
+  </div>;
+}
 function ProjectInvestmentDocumentLink({ document, projects }: { document: ProjectInvestmentDocument; projects: Project[] }) {
   const [url, setUrl] = useState('');
+  const [downloadError, setDownloadError] = useState('');
   const project = projects.find((item) => item.id === document.project_id);
+  const fileExtension = document.storage_path.match(/\.([^.\/]+)$/)?.[1] || 'pdf';
+  const filename = `${document.document_ref || document.title}.${fileExtension}`;
   useEffect(() => {
     let active = true;
     void supabase.storage.from('investment-documents').createSignedUrl(document.storage_path, 300).then(({ data }) => {
@@ -783,7 +845,13 @@ function ProjectInvestmentDocumentLink({ document, projects }: { document: Proje
     });
     return () => { active = false; };
   }, [document.storage_path]);
-  return <div className="flex flex-col justify-between gap-3 border-b border-[#e2eeec] py-4 last:border-0 sm:flex-row sm:items-center"><div><p className="text-sm font-semibold text-[#123b4b]">{document.title}</p><p className="mt-1 text-[10px] uppercase tracking-[.12em] text-slate-400">{document.category} · {project?.name || 'NBG project'} · {document.is_public ? 'Public' : 'Shared privately'}</p>{document.verification_code && <p className="mt-1 font-mono text-[10px] text-[#087f88]">{document.verification_code}</p>}</div><div className="flex gap-3 text-xs"><a href={url || '#'} target="_blank" rel="noreferrer" onClick={(event) => { if (!url) event.preventDefault(); }} className="font-semibold text-[#087f88] underline">{url ? 'View document' : 'Preparing secure link'}</a>{document.verification_code && <a href={`/verify/${encodeURIComponent(document.verification_code)}`} className="font-semibold text-[#087f88] underline">Verify</a>}</div></div>;
+  const download = async () => {
+    setDownloadError('');
+    const { data, error } = await supabase.storage.from('investment-documents').createSignedUrl(document.storage_path, 300, { download: filename });
+    if (error || !data?.signedUrl) setDownloadError(error?.message || 'The document download could not be prepared.');
+    else window.location.assign(data.signedUrl);
+  };
+  return <div className="flex flex-col justify-between gap-3 border-b border-[#e2eeec] py-4 last:border-0 sm:flex-row sm:items-center"><div><p className="text-sm font-semibold text-[#123b4b]">{document.title}</p><p className="mt-1 text-[10px] uppercase tracking-[.12em] text-slate-400">{document.category} · {project?.name || 'NBG project'} · {document.is_public ? 'Public' : 'Shared privately'}</p>{document.verification_code && <p className="mt-1 font-mono text-[10px] text-[#087f88]">{document.verification_code}</p>}{downloadError && <p role="alert" className="mt-1 text-[10px] text-[#a55445]">{downloadError}</p>}</div><div className="flex flex-wrap gap-3 text-xs"><a href={url || '#'} target="_blank" rel="noreferrer" onClick={(event) => { if (!url) event.preventDefault(); }} className="font-semibold text-[#087f88] underline">{url ? 'Preview' : 'Preparing link'}</a><button type="button" onClick={() => void download()} className="font-semibold text-[#087f88] underline">Download {fileExtension.toUpperCase()}</button>{document.verification_code && <a href={`/verify/${encodeURIComponent(document.verification_code)}`} className="font-semibold text-[#087f88] underline">Verify</a>}</div></div>;
 }
 
 function ClientLeadProjectShares({ user }: { user: AdminUser }) {
@@ -803,14 +871,49 @@ function ResourcesContent({ navigate, documents, projectDocuments, projects, tic
   const [subject, setSubject] = useState('');
   const [message, setMessage] = useState('');
   const [sending, setSending] = useState(false);
+  const [search, setSearch] = useState('');
+  const [category, setCategory] = useState('ALL');
+  const [page, setPage] = useState(1);
+  const [requestError, setRequestError] = useState('');
+  const [requestSuccess, setRequestSuccess] = useState('');
+  const pageSize = 8;
+  const allDocuments = [
+    ...documents.map((document) => ({ id: document.id, title: document.title, category: document.category || 'OTHER', createdAt: document.created_at, source: 'client' as const, document })),
+    ...projectDocuments.map((document) => ({ id: document.id, title: document.title, category: document.category || 'OTHER', createdAt: document.created_at, source: 'project' as const, document })),
+  ].sort((first, second) => new Date(second.createdAt).getTime() - new Date(first.createdAt).getTime());
+  const categories = ['ALL', 'AGREEMENT', 'INVOICE', 'RECEIPT', 'REPORT', 'CONSTRUCTION', 'OTHER'];
+  const matchesCategory = (value: string, selected: string) => selected === 'ALL' || value.toUpperCase().includes(selected);
+  const visibleDocuments = allDocuments.filter((item) => matchesCategory(item.category, category) && `${item.title} ${item.category} ${item.source === 'project' ? projects.find((project) => project.id === item.document.project_id)?.name || '' : ''}`.toLowerCase().includes(search.trim().toLowerCase()));
+  const pageCount = Math.max(1, Math.ceil(visibleDocuments.length / pageSize));
+  const pageDocuments = visibleDocuments.slice((page - 1) * pageSize, page * pageSize);
   const submitTicket = async (event: FormEvent) => {
     event.preventDefault();
+    setRequestError('');
+    setRequestSuccess('');
     setSending(true);
-    const { data } = await supabase.from('client_support_tickets').insert({ user_id: user.id, subject, message }).select().single();
-    if (data) { setTickets([data as SupportTicket, ...tickets]); setSubject(''); setMessage(''); }
+    const { data, error } = await supabase.from('client_support_tickets').insert({ user_id: user.id, subject: subject.trim(), message: message.trim() }).select().single();
+    if (error || !data) setRequestError(error?.message || 'Your request could not be sent. Please try again.');
+    else { setTickets([data as SupportTicket, ...tickets]); setSubject(''); setMessage(''); setRequestSuccess('Your request was sent securely. The NBG team will reply here.'); }
     setSending(false);
   };
-  return <section><div className="portal-section-heading"><div><p className="eyebrow text-[#087f88]">Your resources</p><h2>Everything you need,<br /><em>when you need it.</em></h2></div></div><div className="grid gap-6 xl:grid-cols-[1.1fr_.9fr]"><div className="portal-panel"><div className="flex items-center gap-3"><FileText size={22} className="text-[#087f88]" /><div><p className="eyebrow text-[#087f88]">Document vault</p><h3 className="mt-2 font-serif text-3xl text-[#123b4b]">Your NBG files.</h3></div></div><div className="mt-6 space-y-3">{documents.map((document) => <DocumentLink key={document.id} document={document} />)}{documents.length === 0 && <p className="text-sm leading-6 text-slate-500">Agreements, receipts, brochures, and floor plans will appear here when shared with your account.</p>}</div><div className="mt-7 border-t border-[#e2eeec] pt-6"><p className="eyebrow text-[#087f88]">Project investment documents</p><div className="mt-3">{projectDocuments.map((document) => <ProjectInvestmentDocumentLink key={document.id} document={document} projects={projects} />)}{projectDocuments.length === 0 && <p className="py-3 text-sm leading-6 text-slate-500">No published project documents have been shared with this account.</p>}</div></div></div><div className="portal-panel"><div className="flex items-center gap-3"><MessageCircle size={22} className="text-[#087f88]" /><div><p className="eyebrow text-[#087f88]">Secure support</p><h3 className="mt-2 font-serif text-3xl text-[#123b4b]">Talk to the team.</h3></div></div><form onSubmit={submitTicket} className="mt-6 grid gap-3"><input value={subject} onChange={(event) => setSubject(event.target.value)} required className="admin-input" placeholder="Subject" /><textarea value={message} onChange={(event) => setMessage(event.target.value)} required rows={4} className="admin-input resize-none" placeholder="How can we help?" /><button disabled={sending} className="btn-primary justify-center disabled:opacity-60">{sending ? 'Sending...' : 'Send secure message'} <Send size={15} /></button></form><div className="mt-6 space-y-3">{tickets.slice(0, 3).map((ticket) => <div key={ticket.id} className="border-t border-[#e2eeec] pt-3 text-sm"><div className="flex justify-between gap-3"><strong className="text-[#123b4b]">{ticket.subject}</strong><span className="text-[10px] uppercase text-[#087f88]">{ticket.status}</span></div>{ticket.staff_reply && <p className="mt-2 text-slate-500">{ticket.staff_reply}</p>}</div>)}</div><button onClick={() => navigate('contact')} className="link-arrow mt-6">Open general enquiry <ArrowRight size={14} /></button></div></div><ClientLeadProjectShares user={user} /></section>;
+  return <section className="space-y-5" aria-labelledby="client-documents-title">
+    <header className="relative isolate flex min-h-[210px] items-end overflow-hidden border border-[#b8dfe0] bg-[#123b4b] p-6 text-white sm:min-h-[250px] sm:p-8"><img src="/NBG%20HERO.png" alt="NBG coastal residential development" className="absolute inset-0 -z-20 h-full w-full object-cover object-center" /><div className="absolute inset-0 -z-10 bg-gradient-to-r from-[#092d3a]/90 via-[#092d3a]/60 to-transparent" /><div className="max-w-xl"><p className="eyebrow text-[#8de7e2]">Documents & support</p><h2 id="client-documents-title" className="mt-2 font-serif text-3xl leading-tight sm:text-4xl">Your documents,<br /><em className="text-[#8de7e2]">all in one place.</em></h2><p className="mt-3 max-w-md text-sm leading-6 text-white/85">Access project documents and payment records shared securely with your account.</p></div></header>
+    <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">{[{ label: 'Total documents', value: allDocuments.length, icon: FileText }, { label: 'Agreements', value: allDocuments.filter((item) => matchesCategory(item.category, 'AGREEMENT')).length, icon: ShieldCheck }, { label: 'Payment receipts', value: allDocuments.filter((item) => matchesCategory(item.category, 'RECEIPT')).length, icon: Receipt }, { label: 'Open requests', value: tickets.filter((ticket) => ticket.status !== 'RESOLVED').length, icon: Clock3 }].map(({ label, value, icon: Icon }) => <div key={label} className="flex min-h-[78px] items-center gap-3 border border-[#d6efee] bg-white p-4"><span className="grid h-10 w-10 shrink-0 place-items-center bg-[#e7f8f7] text-[#087f88]"><Icon size={18} /></span><span><span className="block text-xs text-slate-500">{label}</span><strong className="mt-1 block text-xl text-[#123b4b]">{value}</strong></span></div>)}</div>
+    <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_290px]">
+      <div className="min-w-0 border border-[#d6efee] bg-white">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#d6efee] p-4"><div><p className="eyebrow text-[#087f88]">Secure library</p><h3 className="mt-1 font-serif text-2xl text-[#123b4b]">Document center</h3></div></div>
+        <div className="flex gap-1 overflow-x-auto border-b border-[#e2eeec] px-3 pt-2">{categories.map((item) => <button key={item} type="button" onClick={() => { setCategory(item); setPage(1); }} className={`shrink-0 border-b-2 px-3 py-3 text-[10px] font-semibold uppercase tracking-[.1em] ${category === item ? 'border-[#087f88] text-[#087f88]' : 'border-transparent text-slate-500 hover:text-[#123b4b]'}`}>{item === 'ALL' ? 'All documents' : item === 'CONSTRUCTION' ? 'Construction docs' : `${item[0]}${item.slice(1).toLowerCase()}s`}<span className="ml-2 rounded-full bg-[#eef7f6] px-1.5 py-0.5 text-[9px]">{item === 'ALL' ? allDocuments.length : allDocuments.filter((doc) => matchesCategory(doc.category, item)).length}</span></button>)}</div>
+        <label className="mx-4 mt-4 flex items-center gap-2 border border-[#cce5e4] px-3 py-2 text-slate-400"><Search size={15} /><input value={search} onChange={(event) => { setSearch(event.target.value); setPage(1); }} className="min-w-0 flex-1 border-0 bg-transparent text-sm text-[#123b4b] outline-none placeholder:text-slate-400" placeholder="Search documents..." aria-label="Search documents" />{search && <button type="button" onClick={() => setSearch('')} aria-label="Clear search"><X size={14} /></button>}</label>
+        <div className="mt-4 overflow-x-auto"><table className="w-full min-w-[600px] text-left"><thead className="bg-[#f3faf9] text-[9px] uppercase tracking-[.12em] text-[#55777d]"><tr><th className="px-4 py-3">Document name</th><th className="px-4 py-3">Type</th><th className="px-4 py-3">Date added</th><th className="px-4 py-3">Access</th><th className="px-4 py-3 text-right">Actions</th></tr></thead><tbody>{pageDocuments.map((item) => <tr key={`${item.source}-${item.id}`} className="border-t border-[#e8f0ef] align-top"><td className="px-4 py-3"><div className="flex items-start gap-2"><FileText size={16} className="mt-0.5 shrink-0 text-[#087f88]" /><span><strong className="block text-xs text-[#123b4b]">{item.title}</strong><small className="mt-1 block text-[10px] text-slate-500">{item.source === 'project' ? projects.find((project) => project.id === item.document.project_id)?.name || 'NBG project' : item.document.is_global ? 'Shared with all clients' : 'Shared privately'}</small></span></div></td><td className="px-4 py-3"><span className="inline-flex bg-[#e8f7f6] px-2 py-1 text-[9px] font-semibold uppercase text-[#087f88]">{item.category.replace(/_/g, ' ')}</span></td><td className="px-4 py-3 text-[10px] text-slate-500">{new Date(item.createdAt).toLocaleDateString()}</td><td className="px-4 py-3"><span className="inline-flex items-center gap-1 text-[10px] text-[#2e6b3e]"><CircleCheck size={12} />Available</span></td><td className="px-4 py-3 text-right">{item.source === 'client' ? <DocumentLink document={item.document} /> : <ProjectInvestmentDocumentLink document={item.document} projects={projects} />}</td></tr>)}</tbody></table></div>
+        {pageDocuments.length === 0 && <p className="px-4 py-10 text-center text-sm text-slate-500">No documents match this search. Try another category or contact NBG to request a file.</p>}
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[#e2eeec] px-4 py-3 text-[10px] text-slate-500"><span>Showing {visibleDocuments.length ? (page - 1) * pageSize + 1 : 0}–{Math.min(page * pageSize, visibleDocuments.length)} of {visibleDocuments.length} documents</span><div className="flex items-center gap-1"><button type="button" onClick={() => setPage((current) => Math.max(1, current - 1))} disabled={page === 1} aria-label="Previous page" className="grid h-8 w-8 place-items-center border border-[#d6efee] disabled:opacity-40"><ChevronLeft size={14} /></button><span className="px-2">{page} / {pageCount}</span><button type="button" onClick={() => setPage((current) => Math.min(pageCount, current + 1))} disabled={page === pageCount} aria-label="Next page" className="grid h-8 w-8 place-items-center border border-[#d6efee] disabled:opacity-40"><ChevronRight size={14} /></button></div></div>
+      </div>
+      <aside className="space-y-4"><section className="border border-[#d6efee] bg-white p-4"><p className="eyebrow text-[#087f88]">Quick actions</p><h3 className="mt-1 font-serif text-xl text-[#123b4b]">Need a hand?</h3><button type="button" onClick={() => { setSubject('Document request'); document.getElementById('client-support-form')?.scrollIntoView({ behavior: 'smooth', block: 'center' }); }} className="mt-3 flex w-full items-center justify-between border-b border-[#e2eeec] py-3 text-left text-xs font-semibold text-[#123b4b]"><span className="flex items-center gap-2"><FileDown size={15} className="text-[#087f88]" />Request a document</span><ArrowRight size={14} /></button><button type="button" onClick={() => navigate('contact')} className="flex w-full items-center justify-between border-b border-[#e2eeec] py-3 text-left text-xs font-semibold text-[#123b4b]"><span className="flex items-center gap-2"><MessageCircle size={15} className="text-[#087f88]" />Submit an inquiry</span><ArrowRight size={14} /></button><p className="pt-3 text-[11px] leading-5 text-slate-500">Open the secure inbox in the portal header for a real-time conversation.</p></section><section className="border border-[#d6efee] bg-[#e9f8f7] p-4"><div className="flex items-center gap-2"><ShieldCheck size={17} className="text-[#087f88]" /><h3 className="text-sm font-semibold text-[#123b4b]">Secure document access</h3></div><p className="mt-2 text-xs leading-5 text-slate-600">Private links expire and are checked against your client account.</p></section><section className="border border-[#d6efee] bg-white p-4"><p className="eyebrow text-[#087f88]">Your requests</p><div className="mt-3 space-y-3">{tickets.slice(0, 4).map((ticket) => <article key={ticket.id} className="border-t border-[#e2eeec] pt-3"><div className="flex items-start justify-between gap-2"><strong className="text-xs text-[#123b4b]">{ticket.subject}</strong><span className="shrink-0 text-[9px] font-semibold uppercase text-[#087f88]">{ticket.status.replace('_', ' ')}</span></div><p className="mt-1 text-[10px] text-slate-500">Updated {new Date(ticket.updated_at || ticket.created_at).toLocaleDateString()}</p>{ticket.staff_reply && <p className="mt-2 border-l-2 border-[#8de7e2] pl-2 text-xs leading-5 text-slate-600">{ticket.staff_reply}</p>}</article>)}{tickets.length === 0 && <p className="text-xs leading-5 text-slate-500">Your support requests and team replies will appear here.</p>}</div></section></aside>
+    </div>
+    <section id="client-support-form" className="grid gap-5 border border-[#d6efee] bg-white p-5 lg:grid-cols-[.8fr_1.2fr]"><div><p className="eyebrow text-[#087f88]">Secure support</p><h3 className="mt-2 font-serif text-2xl text-[#123b4b]">Talk to the NBG team.</h3><p className="mt-2 text-sm leading-6 text-slate-500">Send a request here or use the secure inbox for a live conversation.</p></div><form onSubmit={submitTicket} className="grid gap-3 sm:grid-cols-2"><input value={subject} onChange={(event) => setSubject(event.target.value)} required className="admin-input" placeholder="Subject" aria-label="Support request subject" /><textarea value={message} onChange={(event) => setMessage(event.target.value)} required rows={2} className="admin-input resize-y" placeholder="How can we help?" aria-label="Support request message" /><div className="flex items-center justify-between gap-3 sm:col-span-2">{requestError ? <p role="alert" className="text-xs text-[#a55445]">{requestError}</p> : requestSuccess ? <p role="status" className="text-xs text-[#2e6b3e]">{requestSuccess}</p> : <span /> }<button disabled={sending} className="btn-primary ml-auto justify-center disabled:opacity-60">{sending ? 'Sending...' : 'Send secure request'} <Send size={15} /></button></div></form></section>
+    {projects.length > 0 && <LocationMap projects={projects} title="Directions to your residence" />}
+    <ClientLeadProjectShares user={user} />
+  </section>;
 }
 function ProfileContent({ user, recovery, profile, onSaveProfile, onSignOut }: { user: AdminUser; recovery: boolean; profile: ClientProfile | null; onSaveProfile: (values: Omit<ClientProfile, 'id'>) => Promise<void>; onSignOut: () => void }) {
   const [fullName, setFullName] = useState(profile?.full_name ?? user.full_name ?? '');
