@@ -174,7 +174,7 @@ function InvestmentCalculator() {
 }
 
 function ClientPortal({ user, onSignOut, navigate }: { user: AdminUser; onSignOut: () => void; navigate: (view: View) => void }) {
-  const [section, setSection] = useState<PortalSection>('overview');
+  const [section, setSection] = useState<PortalSection>(() => new URLSearchParams(window.location.search).get('complete_profile') === '1' ? 'profile' : 'overview');
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [projects, setProjects] = useState<Project[]>([]);
   const [updates, setUpdates] = useState<ConstructionUpdate[]>([]);
@@ -836,7 +836,7 @@ function ProjectInvestmentDocumentLink({ document, projects }: { document: Proje
   const [url, setUrl] = useState('');
   const [downloadError, setDownloadError] = useState('');
   const project = projects.find((item) => item.id === document.project_id);
-  const fileExtension = document.storage_path.match(/\.([^.\/]+)$/)?.[1] || 'pdf';
+  const fileExtension = document.storage_path.match(/\.([^./]+)$/)?.[1] || 'pdf';
   const filename = `${document.document_ref || document.title}.${fileExtension}`;
   useEffect(() => {
     let active = true;
@@ -916,6 +916,7 @@ function ResourcesContent({ navigate, documents, projectDocuments, projects, tic
   </section>;
 }
 function ProfileContent({ user, recovery, profile, onSaveProfile, onSignOut }: { user: AdminUser; recovery: boolean; profile: ClientProfile | null; onSaveProfile: (values: Omit<ClientProfile, 'id'>) => Promise<void>; onSignOut: () => void }) {
+  const completingInvite = new URLSearchParams(window.location.search).get('complete_profile') === '1';
   const [fullName, setFullName] = useState(profile?.full_name ?? user.full_name ?? '');
   const [phone, setPhone] = useState(profile?.phone ?? user.phone ?? '');
   const [preferredLocation, setPreferredLocation] = useState(profile?.preferred_location ?? '');
@@ -924,13 +925,15 @@ function ProfileContent({ user, recovery, profile, onSaveProfile, onSignOut }: {
   const [identityDocumentType, setIdentityDocumentType] = useState(profile?.identity_document_type ?? '');
   const [identityDocumentNumber, setIdentityDocumentNumber] = useState(profile?.identity_document_number ?? '');
   const [residentialAddress, setResidentialAddress] = useState(profile?.residential_address ?? '');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
-  const [editing, setEditing] = useState(false);
+  const [editing, setEditing] = useState(completingInvite);
   const [saveError, setSaveError] = useState('');
   const [resetNotice, setResetNotice] = useState('');
-  const completedFields = [fullName, phone, preferredLocation, investmentBudget].filter(Boolean).length;
-  const completion = Math.round((completedFields / 4) * 100);
+  const completedFields = [fullName, phone, preferredLocation, investmentBudget, identityDocumentType, identityDocumentNumber, residentialAddress].filter(Boolean).length;
+  const completion = Math.round((completedFields / 7) * 100);
 
   useEffect(() => {
     setFullName(profile?.full_name ?? user.full_name ?? '');
@@ -945,10 +948,23 @@ function ProfileContent({ user, recovery, profile, onSaveProfile, onSignOut }: {
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
+    if (completingInvite && (newPassword.length < 8 || newPassword !== confirmPassword)) {
+      setSaveError(newPassword.length < 8 ? 'Choose a password with at least 8 characters.' : 'The passwords do not match.');
+      return;
+    }
     setSaving(true);
     setSaved(false);
     setSaveError('');
-    try { await onSaveProfile({ full_name: fullName, phone, preferred_location: preferredLocation, investment_budget: investmentBudget, notes, identity_document_type: identityDocumentType, identity_document_number: identityDocumentNumber, residential_address: residentialAddress }); setSaved(true); setEditing(false); }
+    try {
+      await onSaveProfile({ full_name: fullName, phone, preferred_location: preferredLocation, investment_budget: investmentBudget, notes, identity_document_type: identityDocumentType, identity_document_number: identityDocumentNumber, residential_address: residentialAddress });
+      if (completingInvite) {
+        const { error: passwordError } = await updatePassword(newPassword);
+        if (passwordError) throw new Error(passwordError.message || 'The account password could not be set.');
+        window.history.replaceState({}, '', `${window.location.pathname}${window.location.hash}`);
+      }
+      setSaved(true);
+      setEditing(false);
+    }
     catch (error) { setSaveError(error instanceof Error ? error.message : 'Profile could not be saved.'); }
     finally { setSaving(false); }
   };
@@ -958,9 +974,10 @@ function ProfileContent({ user, recovery, profile, onSaveProfile, onSignOut }: {
     setResetNotice(error ? 'We could not send reset instructions right now.' : 'Password reset instructions have been sent to your email.');
   };
 
-  return <section><div className="portal-section-heading"><div><p className="eyebrow text-[#087f88]">Account controls</p><h2>Your profile,<br /><em>kept secure.</em></h2></div></div><div className="portal-profile"><div><p className="eyebrow text-slate-500">Signed-in email</p><p className="mt-2 text-lg text-[#123b4b]">{user.email}</p></div><div><p className="eyebrow text-slate-500">Access level</p><p className="mt-2 text-lg text-[#087f88]">Client</p></div><button onClick={onSignOut} className="btn-primary">Sign out <ArrowRight size={15} /></button></div><div className="mt-6 border border-[#a9d9d8] bg-[#eefbf9] p-5"><div className="flex items-center justify-between gap-4"><div><p className="eyebrow text-[#087f88]">Profile completion</p><p className="mt-2 text-sm text-slate-600">{completion}% complete · Add your details to help the NBG team personalize your journey.</p></div><span className="font-serif text-3xl text-[#087f88]">{completion}%</span></div><div className="mt-4 h-2 bg-white"><div className="h-full bg-[#19c6c9] transition-all" style={{ width: `${completion}%` }} /></div></div>
+  return <section><div className="portal-section-heading"><div><p className="eyebrow text-[#087f88]">Account controls</p><h2>{completingInvite ? <>Complete your account<br /><em>and client profile.</em></> : <>Your profile,<br /><em>kept secure.</em></>}</h2></div></div>{completingInvite && <p className="mb-5 border border-[#a9d9d8] bg-[#eefbf9] p-4 text-sm leading-6 text-[#315a62]">Confirm your contact and identity details to finish setting up your private NBG client account.</p>}<div className="portal-profile"><div><p className="eyebrow text-slate-500">Signed-in email</p><p className="mt-2 text-lg text-[#123b4b]">{user.email}</p></div><div><p className="eyebrow text-slate-500">Access level</p><p className="mt-2 text-lg text-[#087f88]">Client</p></div><button onClick={onSignOut} className="btn-primary">Sign out <ArrowRight size={15} /></button></div><div className="mt-6 border border-[#a9d9d8] bg-[#eefbf9] p-5"><div className="flex items-center justify-between gap-4"><div><p className="eyebrow text-[#087f88]">Profile completion</p><p className="mt-2 text-sm text-slate-600">{completion}% complete · Add your details to help the NBG team personalize your journey.</p></div><span className="font-serif text-3xl text-[#087f88]">{completion}%</span></div><div className="mt-4 h-2 bg-white"><div className="h-full bg-[#19c6c9] transition-all" style={{ width: `${completion}%` }} /></div></div>
     <div className="mt-6 flex items-center justify-between gap-3"><div><p className="eyebrow text-[#087f88]">Your saved details</p><p className="mt-1 text-sm text-slate-500">Review your profile without re-entering it each visit.</p></div>{!editing && <button type="button" onClick={() => setEditing(true)} className="btn-secondary">Edit profile</button>}</div>
     <form onSubmit={submit} className="mt-3 grid gap-4 rounded-xl border border-[#d6efee] bg-white p-5">
+      {completingInvite && <div className="grid gap-4 border-b border-[#e2eeec] pb-4 sm:grid-cols-2"><label className="grid gap-2 text-sm text-slate-600"><span className="eyebrow text-slate-500">Create password</span><input type="password" required minLength={8} autoComplete="new-password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} className="admin-input" /></label><label className="grid gap-2 text-sm text-slate-600"><span className="eyebrow text-slate-500">Confirm password</span><input type="password" required minLength={8} autoComplete="new-password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} className="admin-input" /></label></div>}
       <div className="grid gap-4 md:grid-cols-2">
         <label className="grid gap-2 text-sm text-slate-600"><span className="eyebrow text-slate-500">Full name</span><input disabled={!editing} value={fullName} onChange={(event) => setFullName(event.target.value)} className="admin-input disabled:bg-[#f4f1eb]" placeholder="Your full name" /></label>
         <label className="grid gap-2 text-sm text-slate-600"><span className="eyebrow text-slate-500">Phone</span><input disabled={!editing} value={phone} onChange={(event) => setPhone(event.target.value)} className="admin-input disabled:bg-[#f4f1eb]" placeholder="+254..." /></label>
@@ -970,14 +987,14 @@ function ProfileContent({ user, recovery, profile, onSaveProfile, onSignOut }: {
         <label className="grid gap-2 text-sm text-slate-600"><span className="eyebrow text-slate-500">Investment budget</span><input disabled={!editing} value={investmentBudget} onChange={(event) => setInvestmentBudget(event.target.value)} className="admin-input disabled:bg-[#f4f1eb]" placeholder="KSh 8,000,000" /></label>
       </div>
       <div className="grid gap-4 border-t border-[#e2eeec] pt-4 md:grid-cols-2">
-        <label className="grid gap-2 text-sm text-slate-600"><span className="eyebrow text-slate-500">Identity document type</span><select disabled={!editing} value={identityDocumentType} onChange={(event) => setIdentityDocumentType(event.target.value)} className="admin-input disabled:bg-[#f4f1eb]"><option value="">Select document type</option><option value="NATIONAL_ID">National ID</option><option value="PASSPORT">Passport</option></select></label>
-        <label className="grid gap-2 text-sm text-slate-600"><span className="eyebrow text-slate-500">ID / passport number</span><input disabled={!editing} value={identityDocumentNumber} onChange={(event) => setIdentityDocumentNumber(event.target.value)} className="admin-input disabled:bg-[#f4f1eb]" placeholder="Enter your document number" autoComplete="off" /></label>
+        <label className="grid gap-2 text-sm text-slate-600"><span className="eyebrow text-slate-500">Identity document type</span><select required={completingInvite} disabled={!editing} value={identityDocumentType} onChange={(event) => setIdentityDocumentType(event.target.value)} className="admin-input disabled:bg-[#f4f1eb]"><option value="">Select document type</option><option value="NATIONAL_ID">National ID</option><option value="PASSPORT">Passport</option></select></label>
+        <label className="grid gap-2 text-sm text-slate-600"><span className="eyebrow text-slate-500">ID / passport number</span><input required={completingInvite} disabled={!editing} value={identityDocumentNumber} onChange={(event) => setIdentityDocumentNumber(event.target.value)} className="admin-input disabled:bg-[#f4f1eb]" placeholder="Enter your document number" autoComplete="off" /></label>
       </div>
-      <label className="grid gap-2 text-sm text-slate-600"><span className="eyebrow text-slate-500">Residential address</span><textarea disabled={!editing} value={residentialAddress} onChange={(event) => setResidentialAddress(event.target.value)} rows={2} className="admin-input resize-y disabled:bg-[#f4f1eb]" placeholder="Street, area, town, country" /></label>
+      <label className="grid gap-2 text-sm text-slate-600"><span className="eyebrow text-slate-500">Residential address</span><textarea required={completingInvite} disabled={!editing} value={residentialAddress} onChange={(event) => setResidentialAddress(event.target.value)} rows={2} className="admin-input resize-y disabled:bg-[#f4f1eb]" placeholder="Street, area, town, country" /></label>
       <label className="grid gap-2 text-sm text-slate-600"><span className="eyebrow text-slate-500">Notes</span><textarea disabled={!editing} value={notes} onChange={(event) => setNotes(event.target.value)} rows={3} className="admin-input resize-none disabled:bg-[#f4f1eb]" placeholder="Tell us what you are looking for" /></label>
       <div className="flex items-center justify-between gap-3">
         {saved && <p className="text-sm text-[#2e6b3e]">Profile saved.</p>}{saveError && <p className="text-sm text-[#a55445]">{saveError}</p>}
-        {editing && <button type="submit" disabled={saving} className="btn-primary ml-auto disabled:opacity-60">{saving ? 'Saving...' : 'Save profile'}</button>}
+        {editing && <button type="submit" disabled={saving} className="btn-primary ml-auto disabled:opacity-60">{saving ? 'Saving...' : completingInvite ? 'Finish account setup' : 'Save profile'}</button>}
       </div>
     </form>
     <div className="mt-6 flex flex-wrap items-center gap-4 border-t border-[#d6efee] pt-5"><button type="button" onClick={() => void requestPasswordReset()} className="btn-secondary"><LockKeyhole size={15} /> Email password reset link</button>{resetNotice && <p className="text-sm text-[#087f88]">{resetNotice}</p>}</div>{!recovery && <p className="mt-3 text-xs text-slate-500">Password changes use Supabase’s secure recovery flow. We never display or store your password.</p>}</section>; }

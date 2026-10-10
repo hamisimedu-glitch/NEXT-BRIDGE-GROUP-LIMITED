@@ -2946,6 +2946,11 @@ function DocumentsTab() {
     setLoading(false);
   }, []);
   useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    const refreshDirectory = () => { void load(); };
+    window.addEventListener('nbg-client-directory-refresh', refreshDirectory);
+    return () => window.removeEventListener('nbg-client-directory-refresh', refreshDirectory);
+  }, [load]);
   const remove = async (document: AdminDocument) => {
     if (!window.confirm(`Remove ${document.title}?`)) return;
     const { error } = await supabase.from('client_documents').delete().eq('id', document.id);
@@ -3003,6 +3008,35 @@ function ReadOnlySummary({ title, rows }: { title: string; rows: [string, string
   return <section className="rounded border border-[#a9d9d8] bg-[#eefbf9] p-4"><p className="eyebrow text-[#087f88]">{title}</p><div className="mt-3 grid gap-3 sm:grid-cols-2">{rows.map(([label, value]) => <div key={label}><p className="text-[10px] uppercase tracking-[.1em] text-slate-400">{label}</p><p className="mt-1 text-sm text-[#123b4b]">{value || 'Information not available'}</p></div>)}</div></section>;
 }
 
+function ClientInviteForm({ onCancel, onCreated }: { onCancel: () => void; onCreated: (client: DocumentClient, message: string) => void }) {
+  const [values, setValues] = useState({ full_name: '', email: '', phone: '', identity_document_type: '', identity_document_number: '', residential_address: '' });
+  const [error, setError] = useState('');
+  const [sending, setSending] = useState(false);
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    setSending(true);
+    setError('');
+    const { data, error: inviteError } = await supabase.functions.invoke<{ client?: DocumentClient; message?: string; error?: string }>('invite-client', { body: values });
+    setSending(false);
+    if (inviteError || !data?.client) { setError(data?.error || inviteError?.message || 'The secure client invitation could not be sent.'); return; }
+    onCreated(data.client, data.message || `A secure setup link was sent to ${values.email}.`);
+  };
+
+  return <form onSubmit={submit} className="grid gap-4">
+    <p className="text-sm leading-5 text-slate-600">Create a client login and send a one-time account setup link. KYC details are stored in the client’s private profile.</p>
+    <AF label="Client full name" value={values.full_name} onChange={(full_name) => setValues((current) => ({ ...current, full_name }))} required />
+    <AF label="Email for account link" type="email" value={values.email} onChange={(email) => setValues((current) => ({ ...current, email }))} required />
+    <AF label="Phone number" type="tel" value={values.phone} onChange={(phone) => setValues((current) => ({ ...current, phone }))} required />
+    <div className="grid gap-4 sm:grid-cols-2">
+      <DocumentSelect label="Identity document type" value={values.identity_document_type} onChange={(identity_document_type) => setValues((current) => ({ ...current, identity_document_type }))} required><option value="">Select type...</option><option value="NATIONAL_ID">National ID</option><option value="PASSPORT">Passport</option></DocumentSelect>
+      <AF label="ID / passport number" value={values.identity_document_number} onChange={(identity_document_number) => setValues((current) => ({ ...current, identity_document_number }))} required />
+    </div>
+    <label className="block"><span className="eyebrow mb-1.5 block text-slate-400">Residential address *</span><textarea value={values.residential_address} onChange={(event) => setValues((current) => ({ ...current, residential_address: event.target.value }))} required rows={2} className="admin-input w-full resize-y" autoComplete="street-address" /></label>
+    {error && <p role="alert" className="border border-[#e4b8ad] bg-[#fff7f4] p-3 text-sm text-[#a55445]">{error}</p>}
+    <div className="flex justify-end gap-2"><button type="button" onClick={onCancel} className="btn-secondary">Cancel</button><button type="submit" disabled={sending} className="btn-primary disabled:opacity-60">{sending ? 'Sending account link...' : 'Create client & send link'} <Send size={14} /></button></div>
+  </form>;
+}
+
 function DocumentForm({ clients, onDone }: { clients: DocumentClient[]; onDone: (document: AdminDocument) => void }) {
   const [category, setCategory] = useState<DocumentType>('AGREEMENT');
   const [step, setStep] = useState<'source' | 'details' | 'review'>('source');
@@ -3014,6 +3048,11 @@ function DocumentForm({ clients, onDone }: { clients: DocumentClient[]; onDone: 
   const [saleLoadError, setSaleLoadError] = useState('');
   const [projectId, setProjectId] = useState('');
   const [clientId, setClientId] = useState('');
+  const [createdClient, setCreatedClient] = useState<DocumentClient | null>(null);
+  const [clientSearch, setClientSearch] = useState('');
+  const [showInviteForm, setShowInviteForm] = useState(false);
+  const [inviteNotice, setInviteNotice] = useState('');
+  const [shareWithAllClients, setShareWithAllClients] = useState(false);
   const [unitId, setUnitId] = useState('');
   const [saleId, setSaleId] = useState('');
   const [paymentId, setPaymentId] = useState('');
@@ -3032,7 +3071,8 @@ function DocumentForm({ clients, onDone }: { clients: DocumentClient[]; onDone: 
 
   const template = DOCUMENT_TEMPLATES[category];
   const project = projects.find((item) => item.id === projectId);
-  const client = clients.find((item) => item.id === clientId);
+  const availableClients = createdClient && !clients.some((item) => item.id === createdClient.id) ? [...clients, createdClient] : clients;
+  const client = availableClients.find((item) => item.id === clientId);
   const unit = units.find((item) => item.id === unitId);
   const sale = sales.find((item) => item.id === saleId);
   const payment = payments.find((item) => item.id === paymentId);
@@ -3040,19 +3080,30 @@ function DocumentForm({ clients, onDone }: { clients: DocumentClient[]; onDone: 
   const saleInstallments = installments.filter((item) => item.sale_id === saleId);
   const normalizeSaleMatch = (value: string | null | undefined) => (value || '').trim().toLocaleLowerCase().replace(/\s+/g, ' ');
   const normalizePhoneMatch = (value: string | null | undefined) => (value || '').replace(/\D/g, '').replace(/^0/, '254');
-  const clientForSale = (saleRecord: Sale) => clients.find((candidate) => candidate.id === saleRecord.buyer_user_id)
-    || clients.find((candidate) => Boolean(candidate.email && saleRecord.buyer_email && normalizeSaleMatch(candidate.email) === normalizeSaleMatch(saleRecord.buyer_email)))
-    || clients.find((candidate) => Boolean(candidate.full_name && saleRecord.buyer_name && normalizeSaleMatch(candidate.full_name) === normalizeSaleMatch(saleRecord.buyer_name)))
-    || clients.find((candidate) => Boolean(candidate.phone && saleRecord.buyer_phone && normalizePhoneMatch(candidate.phone) === normalizePhoneMatch(saleRecord.buyer_phone)));
+  const clientForSale = (saleRecord: Sale) => {
+    if (saleRecord.buyer_user_id) return availableClients.find((candidate) => candidate.id === saleRecord.buyer_user_id);
+    if (saleRecord.buyer_email) {
+      const matches = availableClients.filter((candidate) => candidate.email && normalizeSaleMatch(candidate.email) === normalizeSaleMatch(saleRecord.buyer_email));
+      return matches.length === 1 ? matches[0] : undefined;
+    }
+    if (saleRecord.buyer_phone) {
+      const phoneMatch = normalizePhoneMatch(saleRecord.buyer_phone);
+      const matches = availableClients.filter((candidate) => candidate.phone && normalizePhoneMatch(candidate.phone) === phoneMatch);
+      return matches.length === 1 ? matches[0] : undefined;
+    }
+    if (saleRecord.buyer_name) {
+      const matches = availableClients.filter((candidate) => candidate.full_name && normalizeSaleMatch(candidate.full_name) === normalizeSaleMatch(saleRecord.buyer_name));
+      return matches.length === 1 ? matches[0] : undefined;
+    }
+    return undefined;
+  };
   const saleMatchesClient = (saleRecord: Sale, candidate: DocumentClient | undefined) => {
     if (!candidate) return false;
-    return saleRecord.buyer_user_id === candidate.id
-      || Boolean(candidate.email && saleRecord.buyer_email && normalizeSaleMatch(candidate.email) === normalizeSaleMatch(saleRecord.buyer_email))
-      || Boolean(candidate.full_name && saleRecord.buyer_name && normalizeSaleMatch(candidate.full_name) === normalizeSaleMatch(saleRecord.buyer_name))
-      || Boolean(candidate.phone && saleRecord.buyer_phone && normalizePhoneMatch(candidate.phone) === normalizePhoneMatch(saleRecord.buyer_phone));
+    return clientForSale(saleRecord)?.id === candidate.id;
   };
   const projectOptions = projects.map((item) => ({ value: item.id, label: `${item.name} · ${item.locality || item.location || 'Location pending'}`, search: `${item.county || ''} ${item.property_category || ''}` }));
-  const clientOptions = clients.map((item) => ({ value: item.id, label: item.full_name || item.email || item.id, search: `${item.email || ''} ${item.phone || ''}` }));
+  const clientOptions = availableClients.map((item) => ({ value: item.id, label: item.full_name || item.email || item.id, search: `${item.full_name || ''} ${item.email || ''} ${item.phone || ''}` }));
+  const filteredClientOptions = clientOptions.filter((option) => `${option.label} ${option.search}`.toLowerCase().includes(clientSearch.trim().toLowerCase()));
   const unitOptions = projectUnits.map((item) => ({ value: item.id, label: `Unit ${item.unit_number} · ${item.type || 'Residence'} · ${item.status}`, search: `${item.size || ''} ${item.view || ''}` }));
   const unitSaleOptions = sales.filter((item) => {
     const saleUnit = item.unit_id ? units.find((candidate) => candidate.id === item.unit_id) : null;
@@ -3076,12 +3127,30 @@ function DocumentForm({ clients, onDone }: { clients: DocumentClient[]; onDone: 
     };
   });
   const saleBuyerMismatchCount = saleOptions.filter((option) => !option.buyerMatchesClient).length;
-  const paymentOptions = payments.filter((item) => { if (!clientId) return true; const relatedSale = sales.find((saleItem) => saleItem.id === item.sale_id); return relatedSale?.buyer_name === client?.full_name; }).map((item) => ({ value: item.id, label: `${item.method} · ${item.reference || 'No reference'} · KSh ${Number(item.amount).toLocaleString()}`, search: item.sale_id }));
+  const matchingClientSales = !clientId || !['AGREEMENT', 'CLIENT_INVOICE'].includes(category) ? [] : unitSaleOptions.filter((item) => saleMatchesClient(item, client));
+  const autoSelectedSaleId = matchingClientSales.length === 1 ? matchingClientSales[0].id : '';
+  useEffect(() => {
+    if (autoSelectedSaleId && autoSelectedSaleId !== saleId) setSaleId(autoSelectedSaleId);
+  }, [autoSelectedSaleId, saleId]);
+  const selectedClientSaleIds = new Set(sales.filter((saleRecord) => saleMatchesClient(saleRecord, client)).map((saleRecord) => saleRecord.id));
+  const paymentOptions = payments.filter((item) => !clientId || selectedClientSaleIds.has(item.sale_id)).map((item) => ({ value: item.id, label: `${item.method} · ${item.reference || 'No reference'} · KSh ${Number(item.amount).toLocaleString()}`, search: `${item.sale_id} ${sales.find((saleRecord) => saleRecord.id === item.sale_id)?.unit_number || ''}` }));
+  const uniqueMatchingSaleFor = (candidate: DocumentClient | undefined, nextUnitId: string) => {
+    if (!candidate || !nextUnitId) return '';
+    const nextUnit = units.find((item) => item.id === nextUnitId);
+    const matches = sales.filter((saleRecord) => {
+      const saleUnit = saleRecord.unit_id ? units.find((item) => item.id === saleRecord.unit_id) : null;
+      const sameUnitNumber = Boolean(nextUnit && normalizeSaleMatch(saleRecord.unit_number) === normalizeSaleMatch(nextUnit.unit_number));
+      const sameUnit = saleRecord.unit_id === nextUnitId || (sameUnitNumber && (!saleUnit || saleUnit.project_id === nextUnit?.project_id));
+      return sameUnit && (!projectId || !saleUnit || saleUnit.project_id === projectId) && saleMatchesClient(saleRecord, candidate);
+    });
+    return matches.length === 1 ? matches[0].id : '';
+  };
   const invoiceSubtotal = invoiceItems.reduce((sum, item) => sum + Math.max(0, Number(item.quantity) || 0) * Math.max(0, Number(item.unit_price) || 0), 0);
   const invoiceTax = Math.max(0, Number(manual.tax_amount) || 0);
   const invoiceTotal = invoiceSubtotal + invoiceTax;
   const paymentSchedule = [...(sale?.deposit_amount ? [{ description: 'Deposit', amount: sale.deposit_amount }] : []), ...saleInstallments.map((item) => ({ description: `Installment ${item.installment_number} · ${item.due_date}`, amount: item.amount }))];
   const sourceFields = {
+    ...manual,
     project_id: projectId || undefined,
     project_name: project?.name || '',
     project_description: project?.description || '',
@@ -3125,11 +3194,12 @@ function DocumentForm({ clients, onDone }: { clients: DocumentClient[]; onDone: 
     due_date: String(manual.due_date || new Date(Date.now() + 14 * 86400000).toISOString().slice(0, 10)),
     payment_terms: String(manual.payment_terms || 'Payment is due within 14 days. Use the invoice number as payment reference.'),
     payment_schedule: paymentSchedule,
-    ...manual,
   };
   const documentData = { ...sourceFields, invoice_items: invoiceItems.filter((item) => item.description.trim()).map((item) => ({ ...item, amount: item.quantity * item.unit_price })), subtotal: invoiceSubtotal, tax_amount: invoiceTax, grand_total: invoiceTotal };
   const missingKycFields = client ? [!client.identity_document_type ? 'identity document type' : '', !client.identity_document_number ? 'ID / passport number' : '', !client.residential_address ? 'residential address' : ''].filter(Boolean) : [];
   const primaryError = () => {
+    if (requiresClient && !client && !shareWithAllClients) return 'Select an existing client account or explicitly share this public brochure/floor plan with all clients.';
+    if (shareWithAllClients && !['BROCHURE', 'FLOOR_PLAN'].includes(category)) return 'Only public brochures and floor plans can be shared with all client accounts.';
     if (category === 'AGREEMENT' && (!project || !client || !unit || !sale)) return 'Select a project, client, property/unit, and matching sale before generating an Agreement for Sale.';
     if (category === 'AGREEMENT' && sale && client && !saleMatchesClient(sale, client)) return `The selected sale belongs to ${sale.buyer_name}. Select that buyer profile before generating the agreement.`;
     if (category === 'AGREEMENT' && missingKycFields.length) return `The selected client is missing ${missingKycFields.join(', ')}. Request an update before generating the agreement.`;
@@ -3168,7 +3238,7 @@ function DocumentForm({ clients, onDone }: { clients: DocumentClient[]; onDone: 
       const generatedAmount = category === 'CLIENT_INVOICE' ? invoiceTotal : sale?.sale_price || payment?.amount || Number(manual.amount) || 0;
       const generated = await generateBrandedPdf(category, title, recipient, detailText, String(generatedAmount || ''), documentNumber, verificationCode);
       const fileUrl = await uploadPrivateDocument(generated.blob, `${documentNumber}.pdf`);
-      const record = { user_id: clientId || null, is_global: !clientId, recipient_name: recipient, title, category, file_url: fileUrl, document_ref: documentNumber, document_number: documentNumber, document_type: category, version_number: 1, status: 'DRAFT', approval_status: template.workflow.some((step) => ['LEGAL_REVIEW', 'APPROVAL', 'TECHNICAL_REVIEW'].includes(step)) ? 'PENDING' : 'NOT_REQUIRED', signature_status: template.workflow.includes('SIGNED') ? 'PENDING' : 'NOT_REQUIRED', project_id: projectId || null, unit_id: unitId || null, source_record_id: saleId || paymentId || unitId || projectId || null, content_summary: detailText, form_data: snapshot, content_hash: generated.contentHash, verification_code: generated.verificationCode, generated_at: new Date().toISOString(), source_type: 'GENERATED' };
+      const record = { user_id: clientId || null, is_global: shareWithAllClients, recipient_name: recipient, title, category, file_url: fileUrl, document_ref: documentNumber, document_number: documentNumber, document_type: category, version_number: 1, status: 'DRAFT', approval_status: template.workflow.some((step) => ['LEGAL_REVIEW', 'APPROVAL', 'TECHNICAL_REVIEW'].includes(step)) ? 'PENDING' : 'NOT_REQUIRED', signature_status: template.workflow.includes('SIGNED') ? 'PENDING' : 'NOT_REQUIRED', project_id: projectId || null, unit_id: unitId || null, source_record_id: saleId || paymentId || unitId || projectId || null, content_summary: detailText, form_data: snapshot, content_hash: generated.contentHash, verification_code: generated.verificationCode, generated_at: new Date().toISOString(), source_type: 'GENERATED' };
       const { data: saved, error: saveError } = await supabase.from('client_documents').insert(record).select().single();
       if (saveError || !saved) throw new Error(saveError?.message || 'Could not save generated document. Apply the NBG document engine migration first.');
       await supabase.from('document_workflow_events').insert({ document_id: saved.id, action: 'CREATED', to_status: 'DRAFT', comment: `${template.label} generated from linked source records` });
@@ -3209,14 +3279,22 @@ function DocumentForm({ clients, onDone }: { clients: DocumentClient[]; onDone: 
     <div className="min-h-0 overflow-y-auto pr-1">
       {step === 'source' && <div className="grid gap-4 lg:grid-cols-2">
         <section className="grid content-start gap-4 border border-[#d9d5cc] bg-white p-4 sm:p-5">
-          <DocumentSelect label="Document type" value={category} onChange={(value) => { setCategory(value as DocumentType); setStep('source'); setProjectId(''); setClientId(''); setUnitId(''); setSaleId(''); setPaymentId(''); setManualData({}); setInvoiceItems([{ description: '', quantity: 1, unit_price: 0 }]); setError(''); }} required>
+          <DocumentSelect label="Document type" value={category} onChange={(value) => { setCategory(value as DocumentType); setStep('source'); setProjectId(''); setClientId(''); setClientSearch(''); setUnitId(''); setSaleId(''); setPaymentId(''); setShareWithAllClients(false); setManualData({}); setInvoiceItems([{ description: '', quantity: 1, unit_price: 0 }]); setError(''); setInviteNotice(''); }} required>
             {DOCUMENT_TYPE_OPTIONS.map((option) => <option key={option.type} value={option.type}>{option.label}</option>)}
           </DocumentSelect>
-          {requiresClient && <DocumentSelect label="Client / recipient" value={clientId} onChange={(value) => { setClientId(value); setSaleId(''); setPaymentId(''); }} required={category === 'AGREEMENT' || category === 'CLIENT_INVOICE' || category === 'RECEIPT'}><option value="">Select a saved client...</option>{clientOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</DocumentSelect>}
+          {requiresClient && <section className="grid gap-3 border border-[#d9d5cc] bg-white p-3">
+            <label className="block"><span className="eyebrow mb-1.5 block text-slate-400">Search all registered clients</span><input type="search" value={clientSearch} onChange={(event) => setClientSearch(event.target.value)} className="admin-input w-full" placeholder="Name, email, or phone" autoComplete="off" /></label>
+            <DocumentSelect label="Client / recipient" value={clientId} onChange={(value) => { const nextClient = availableClients.find((item) => item.id === value); setClientId(value); setSaleId(uniqueMatchingSaleFor(nextClient, unitId)); setPaymentId(''); setShareWithAllClients(false); setInviteNotice(''); }} required={requiresClient && !['BROCHURE', 'FLOOR_PLAN'].includes(category)}><option value="">Select a registered client...</option>{filteredClientOptions.map((option) => <option key={option.value} value={option.value}>{option.label}{availableClients.find((item) => item.id === option.value)?.email ? ` · ${availableClients.find((item) => item.id === option.value)?.email}` : ''}</option>)}</DocumentSelect>
+            <div className="flex flex-wrap items-center justify-between gap-2"><p className="text-[10px] text-slate-500">{filteredClientOptions.length} matching account{filteredClientOptions.length === 1 ? '' : 's'} from {availableClients.length} registered clients</p><div className="flex gap-2"><button type="button" onClick={() => window.dispatchEvent(new CustomEvent('nbg-client-directory-refresh'))} className="btn-secondary !px-3 !py-2"><RefreshCw size={14} />Refresh clients</button><button type="button" onClick={() => { setShowInviteForm((open) => !open); setInviteNotice(''); }} className="btn-secondary !px-3 !py-2"><Plus size={14} />{showInviteForm ? 'Close create form' : 'Create client account'}</button></div></div>
+            {filteredClientOptions.length === 0 && <p className="text-xs text-slate-500">No registered client matches. Create an account and send a secure setup link.</p>}
+            {inviteNotice && <p role="status" className="border border-[#9bcfc4] bg-[#eaf7f2] p-2 text-xs text-[#26765f]">{inviteNotice}</p>}
+            {showInviteForm && <div className="border-t border-[#e2eeec] pt-3"><ClientInviteForm onCancel={() => setShowInviteForm(false)} onCreated={(newClient, notice) => { setCreatedClient(newClient); setClientId(newClient.id); setClientSearch(''); setSaleId(''); setPaymentId(''); setShareWithAllClients(false); setShowInviteForm(false); setInviteNotice(notice); setError(''); window.dispatchEvent(new CustomEvent('nbg-client-directory-refresh')); }} /></div>}
+          </section>}
+          {['BROCHURE', 'FLOOR_PLAN'].includes(category) && !clientId && <label className="flex items-start gap-3 border border-[#a9d9d8] bg-[#eefbf9] p-3 text-xs leading-5 text-[#315a62]"><input type="checkbox" checked={shareWithAllClients} onChange={(event) => setShareWithAllClients(event.target.checked)} className="mt-1 accent-[#087f88]" /><span><strong className="block text-[#123b4b]">Share with all client accounts</strong>Only enable this for public project materials. Otherwise, choose one registered client above.</span></label>}
           {requiresProject && <DocumentSelect label="Project / site" value={projectId} onChange={(value) => { setProjectId(value); setUnitId(''); setSaleId(''); }} required={['AGREEMENT', 'CLIENT_INVOICE', 'BROCHURE', 'FLOOR_PLAN'].includes(category)}><option value="">Select an existing project...</option>{projectOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</DocumentSelect>}
-          {requiresUnit && <DocumentSelect label="Unit / property" value={unitId} onChange={(value) => { setUnitId(value); setSaleId(''); }} required={category === 'AGREEMENT' || category === 'FLOOR_PLAN'}><option value="">{projectId ? 'Select a unit...' : 'Choose a project first'}</option>{unitOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</DocumentSelect>}
+          {requiresUnit && <DocumentSelect label="Unit / property" value={unitId} onChange={(value) => { setUnitId(value); setSaleId(uniqueMatchingSaleFor(client, value)); }} required={category === 'AGREEMENT' || category === 'FLOOR_PLAN'}><option value="">{projectId ? 'Select a unit...' : 'Choose a project first'}</option>{unitOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</DocumentSelect>}
           {(category === 'AGREEMENT' || category === 'CLIENT_INVOICE') && <div><DocumentSelect label="Sale / agreement" value={saleId} onChange={(value) => { const option = saleOptions.find((item) => item.value === value); if (option && !option.saleClientId) { setSaleId(''); setError(`Sale for Unit ${sales.find((item) => item.id === value)?.unit_number || ''} belongs to ${sales.find((item) => item.id === value)?.buyer_name || 'a buyer'} without a matching saved client profile. Add or correct the client profile before generating this document.`); return; } setSaleId(value); if (option?.saleClientId && option.saleClientId !== clientId) { setClientId(option.saleClientId); setError('Client selection updated to match the selected sale buyer.'); } else setError(''); }}><option value="">{category === 'AGREEMENT' ? 'Select sale for this unit...' : 'Optional: link a sale...'}</option>{saleOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}{saleOptions.length === 0 && <option value="" disabled>{saleLoadError ? 'Sales could not be loaded' : unitId ? 'No sale is linked to this unit' : projectId ? 'No sales found for this project' : 'Choose a project and unit to find a sale'}</option>}</DocumentSelect>{saleLoadError ? <p role="alert" className="mt-2 text-xs text-[#a55445]">Sales could not be loaded: {saleLoadError}</p> : saleBuyerMismatchCount > 0 ? <p className="mt-2 border border-[#e7d3a8] bg-[#fff8e6] p-2 text-xs leading-5 text-[#765d2b]">This unit has a sale under a different buyer profile. Selecting that sale will switch the client to the recorded buyer.</p> : saleOptions.length === 0 && unitId && unit?.status === 'SOLD' ? <p className="mt-2 border border-[#e4b8ad] bg-[#fff7f4] p-2 text-xs leading-5 text-[#a55445]">This unit is marked sold but has no linked sale record. Create or repair its sale in the Sales section before generating an agreement.</p> : saleOptions.length === 0 && unitId ? <p className="mt-2 text-xs text-slate-500">No sale is linked to this unit yet. Sales for other units are not shown.</p> : null}</div>}
-          {category === 'RECEIPT' && <DocumentSelect label="Verified payment" value={paymentId} onChange={setPaymentId} required><option value="">Select a recorded payment...</option>{paymentOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</DocumentSelect>}
+          {category === 'RECEIPT' && <DocumentSelect label="Verified payment" value={paymentId} onChange={(value) => { const nextPayment = payments.find((item) => item.id === value); const linkedSale = nextPayment ? sales.find((item) => item.id === nextPayment.sale_id) : undefined; const linkedClient = linkedSale ? clientForSale(linkedSale) : undefined; setPaymentId(value); if (linkedSale) setSaleId(linkedSale.id); if (linkedClient && linkedClient.id !== clientId) setClientId(linkedClient.id); }} required><option value="">Select a payment for this client...</option>{paymentOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</DocumentSelect>}
         </section>
         <section className="grid content-start gap-3">
           {client && <div className="border border-[#a9d9d8] bg-[#eefbf9] p-4"><div className="flex items-start justify-between gap-2"><div><p className="eyebrow text-[#087f88]">Fetched client KYC</p><p className="mt-1 text-sm font-semibold text-[#123b4b]">{client.full_name || client.email || 'Client record'}</p></div><span className="text-[10px] font-semibold uppercase text-[#087f88]">Profile source</span></div><div className="mt-3 grid gap-x-4 gap-y-2 text-xs sm:grid-cols-2"><p><span className="text-slate-400">ID / passport</span><br />{client.identity_document_number || 'Not on file'}</p><p><span className="text-slate-400">Document type</span><br />{client.identity_document_type?.replace('_', ' ') || 'Not on file'}</p><p><span className="text-slate-400">Email / phone</span><br />{[client.email, client.phone].filter(Boolean).join(' · ') || 'Not on file'}</p><p><span className="text-slate-400">Residential address</span><br />{client.residential_address || 'Not on file'}</p></div><ClientKycStatus client={client} missingFields={missingKycFields} /></div>}
