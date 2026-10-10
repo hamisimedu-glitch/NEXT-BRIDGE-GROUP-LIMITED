@@ -12,11 +12,12 @@ type AvailableHomeCardProps = {
   bedrooms?: number | null;
   size?: string | null;
   imageUrl?: string | null;
+  paymentPolicy?: 'ONE_TIME_ONLY' | 'INSTALLMENTS_OPTIONAL';
   allowUnavailable?: boolean;
   onSelect: () => void;
 };
 
-export default function AvailableHomeCard({ unitNumber, projectName, location, type, status, availabilityNote, price, bedrooms, size, imageUrl, allowUnavailable = false, onSelect }: AvailableHomeCardProps) {
+export default function AvailableHomeCard({ unitNumber, projectName, location, type, status, availabilityNote, price, bedrooms, size, imageUrl, paymentPolicy = 'INSTALLMENTS_OPTIONAL', allowUnavailable = false, onSelect }: AvailableHomeCardProps) {
   const [saved, setSaved] = useState(false);
   const isAvailable = status === 'AVAILABLE';
   const statusLabel = availabilityNote || (status === 'SOLD' ? 'Sold Out' : status === 'RESERVED' ? 'Reserved' : 'Available');
@@ -33,6 +34,7 @@ export default function AvailableHomeCard({ unitNumber, projectName, location, t
       <h3>{projectName || type || 'Residence'}</h3>
       <div className="homes-card-price"><span>From <strong>{price || 'Price on request'}</strong></span><span>{type || 'Residence'}</span></div>
       <div className="homes-card-details"><span><BedDouble size={13} /> {bedrooms ?? '—'} Bedrooms</span><span><Ruler size={13} /> {size || 'Size on request'}</span></div>
+      <p className="mt-2 text-[10px] font-semibold uppercase tracking-wide text-[#087f88]">{paymentPolicy === 'ONE_TIME_ONLY' ? 'One-time payment required' : 'Installments available'}</p>
       <p className="homes-unit-number">Unit {unitNumber}</p>
       <button type="button" onClick={onSelect} disabled={!canSelect} className="homes-details-button">{canSelect ? <>View details <ArrowRight size={14} /></> : statusLabel}</button>
     </div>

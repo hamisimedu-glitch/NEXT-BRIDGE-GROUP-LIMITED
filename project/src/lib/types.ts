@@ -4,6 +4,7 @@ export type LeadStatus = 'NEW' | 'CONTACTED' | 'QUALIFIED' | 'VIEWING_BOOKED' | 
 export type UnitStatus = 'AVAILABLE' | 'RESERVED' | 'SOLD';
 export type SaleStatus = 'RESERVED' | 'DEPOSIT_PAID' | 'COMPLETED' | 'CANCELLED';
 export type ProjectStatus = 'COMING SOON' | 'UNDER CONSTRUCTION' | 'COMPLETED' | 'PLANNING';
+export type ProjectPaymentPolicy = 'ONE_TIME_ONLY' | 'INSTALLMENTS_OPTIONAL';
 export type RealtorStatus = 'PENDING' | 'ACTIVE' | 'SUSPENDED';
 export type CommissionStatus = 'PENDING' | 'APPROVED' | 'PAID';
 export type InvestmentStatus = 'INQUIRY' | 'SOFT_COMMIT' | 'COMMITTED' | 'WITHDRAWN';
@@ -67,6 +68,7 @@ export type Project = {
   map_url?: string | null;
   expected_completion?: string | null;
   total_floors?: number | null;
+  payment_policy?: ProjectPaymentPolicy;
   created_at: string;
 };
 
@@ -104,6 +106,8 @@ export type Sale = {
   deposit_amount: number;
   installment_count: number;
   installment_frequency: string;
+  reservation_expires_at?: string | null;
+  reservation_source?: string | null;
   created_at: string;
 };
 
