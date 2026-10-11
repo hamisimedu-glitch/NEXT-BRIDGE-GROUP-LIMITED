@@ -1,5 +1,6 @@
 import { FormEvent, useCallback, useEffect, useState, type CSSProperties } from 'react';
-import { AlertCircle, ArrowRight, BarChart3, Bell, Building2, Calculator, CalendarDays, Check, ChevronDown, ChevronLeft, ChevronRight, CircleCheck, Clock3, CreditCard, Eye, EyeOff, FileText, FileDown, Grid2X2, Home, List, LockKeyhole, Mail, MapPin, Menu, MessageCircle, Phone, Receipt, Search, Send, Settings, ShieldCheck, UserRound, X } from 'lucide-react';
+import Tesseract from 'tesseract.js';
+import { AlertCircle, ArrowRight, BarChart3, Bell, Building2, Calculator, CalendarDays, Check, ChevronDown, ChevronLeft, ChevronRight, CircleCheck, Clock3, CreditCard, Eye, EyeOff, FileText, FileDown, Grid2X2, Home, List, LockKeyhole, Mail, MapPin, Menu, MessageCircle, Phone, Receipt, Search, Send, Settings, ShieldCheck, Upload, UserRound, X } from 'lucide-react';
 import { sendMagicLink, sendPasswordReset, signInWithGoogle, signInWithPassword, signUp, updatePassword, type AdminUser } from '@/lib/auth';
 import AvailableHomeCard from '@/AvailableHomeCard';
 import AvailableHomesCatalog from '@/AvailableHomesCatalog';
@@ -23,7 +24,7 @@ type ProjectInvestmentDocument = { id: string; project_id: string; title: string
 type ClientPayment = { id: string; user_id: string; unit_id: string | null; project_id: string | null; project_name?: string | null; buyer_installment_id: string | null; payment_reference?: string | null; description: string; due_date: string; amount: number; paid_amount: number; status: string; receipt_url: string | null; transaction_refs?: string[]; created_at: string };
 type PurchasePaymentInstructions = { bank_name: string; bank_branch: string; account_name: string; account_number: string; swift_code: string; payment_instructions: string; is_published: boolean };
 type SupportTicket = { id: string; subject: string; message: string; status: string; staff_reply: string | null; created_at: string; updated_at: string };
-type ClientNotification = { id: string; title: string; body: string; kind: string; read_at: string | null; created_at: string };
+type ClientNotification = { id: string; title: string; body: string; kind: string; read_at: string | null; created_at: string; action_url?: string | null };
 type PurchaseRequestReceipt = { sale_id: string; unit: ProjectUnit; payment_mode: 'INSTALLMENTS' | 'FULL'; total_amount: number; initial_amount: number; installment_count: number; frequency: string; payment_reference: string; reservation_expires_at?: string | null };
 type ClientUnitReservation = { sale_id: string; unit_id: string; project_id: string | null; unit_number: string; expires_at: string; reservation_source: string };
 type ClientPurchaseStatus = { sale_id: string; unit_id: string; project_id: string | null; unit_number: string; sale_price: number; paid_amount: number; status: string; reservation_expires_at: string | null; purchase_locked: boolean };
@@ -33,6 +34,19 @@ function kenyaCalendarDate() {
   const parts = new Intl.DateTimeFormat('en-CA', { timeZone: 'Africa/Nairobi', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date());
   const part = (type: string) => parts.find((item) => item.type === type)?.value ?? '';
   return `${part('year')}-${part('month')}-${part('day')}`;
+}
+
+function parseIdentityDocumentText(rawText: string) {
+  const text = rawText.replace(/\r/g, '');
+  const findMatch = (pattern: RegExp) => {
+    const match = Array.from(text.matchAll(pattern))[0]?.[1];
+    return match?.replace(/\s+/g, ' ').trim() || null;
+  };
+  const fullName = findMatch(/(?:full\s*name|name|holder\s*name|surname\s*and\s*other\s*names)\s*[-:\n]+\s*([A-Z][A-Z'., -]{3,})/gi);
+  const identityNumber = findMatch(/(?:id\s*(?:no|number)|identity\s*(?:no|number)|national\s*id|passport\s*(?:no|number)|document\s*no|personal\s*no)\s*[-:\n]+\s*([A-Z0-9/-]{6,})/gi)?.replace(/\s+/g, '') ?? null;
+  const address = findMatch(/(?:residential\s*address|address|physical\s*address)\s*[-:\n]+\s*([A-Z0-9\s,./#-]{8,})/gi);
+  const documentType = /passport/i.test(text) ? 'PASSPORT' : /national\s*id|identity\s*card|id\s*card/i.test(text) ? 'NATIONAL_ID' : null;
+  return { fullName, identityNumber, address, documentType };
 }
 
 export function ClientPortalSignIn() {
@@ -174,7 +188,10 @@ function InvestmentCalculator() {
 }
 
 function ClientPortal({ user, onSignOut, navigate }: { user: AdminUser; onSignOut: () => void; navigate: (view: View) => void }) {
-  const [section, setSection] = useState<PortalSection>(() => new URLSearchParams(window.location.search).get('complete_profile') === '1' ? 'profile' : 'overview');
+  const [section, setSection] = useState<PortalSection>(() => {
+    const params = new URLSearchParams(window.location.search);
+    return params.get('complete_profile') === '1' || params.get('section') === 'profile' ? 'profile' : 'overview';
+  });
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [projects, setProjects] = useState<Project[]>([]);
   const [updates, setUpdates] = useState<ConstructionUpdate[]>([]);
@@ -434,7 +451,7 @@ function OverviewContent({ user, profile, projects, updates, units, reservations
   </section>;
 }
 
-function NotificationPanel({ notifications }: { notifications: ClientNotification[] }) { return <section className="portal-panel"><div className="flex items-center gap-3"><Bell size={19} className="text-[#087f88]" /><div><p className="eyebrow text-[#087f88]">Your notifications</p><h3 className="mt-1 font-serif text-2xl text-[#123b4b]">Updates worth knowing.</h3></div></div><div className="mt-5 grid gap-3 md:grid-cols-2">{notifications.slice(0, 4).map((notification) => { const kycRequest = notification.kind === 'KYC_UPDATE_REQUEST'; return <article key={notification.id} className={`border p-4 ${kycRequest ? 'border-[#d58a7d] bg-[#fff2ee]' : notification.read_at ? 'border-[#e2eeec]' : 'border-[#a9d9d8] bg-[#eefbf9]'}`}><p className={`text-sm font-semibold ${kycRequest ? 'text-[#8d332b]' : 'text-[#123b4b]'}`}>{kycRequest && <AlertCircle size={14} className="mr-1 inline" />}{notification.title}</p><p className="mt-1 text-xs leading-5 text-slate-600">{notification.body}</p>{kycRequest && <button type="button" onClick={() => window.dispatchEvent(new CustomEvent('nbg-client-profile-request'))} className="mt-3 inline-flex items-center gap-2 bg-[#a55445] px-3 py-2 text-xs font-semibold text-white hover:bg-[#873c31]">Update KYC details <ArrowRight size={13} /></button>}<p className="mt-3 text-[10px] uppercase tracking-[.1em] text-slate-400">{new Date(notification.created_at).toLocaleDateString()}</p></article>; })}{notifications.length === 0 && <p className="text-sm text-slate-500">New construction updates and payment reminders will appear here.</p>}</div></section>; }
+function NotificationPanel({ notifications }: { notifications: ClientNotification[] }) { return <section className="portal-panel"><div className="flex items-center gap-3"><Bell size={19} className="text-[#087f88]" /><div><p className="eyebrow text-[#087f88]">Your notifications</p><h3 className="mt-1 font-serif text-2xl text-[#123b4b]">Updates worth knowing.</h3></div></div><div className="mt-5 grid gap-3 md:grid-cols-2">{notifications.slice(0, 4).map((notification) => { const kycRequest = notification.kind === 'KYC_UPDATE_REQUEST'; return <article key={notification.id} className={`border p-4 ${kycRequest ? 'border-[#d58a7d] bg-[#fff2ee]' : notification.read_at ? 'border-[#e2eeec]' : 'border-[#a9d9d8] bg-[#eefbf9]'}`}><p className={`text-sm font-semibold ${kycRequest ? 'text-[#8d332b]' : 'text-[#123b4b]'}`}>{kycRequest && <AlertCircle size={14} className="mr-1 inline" />}{notification.title}</p><p className="mt-1 text-xs leading-5 text-slate-600">{notification.body}</p>{notification.action_url ? <a href={notification.action_url} className="mt-3 inline-flex items-center gap-2 bg-[#a55445] px-3 py-2 text-xs font-semibold text-white hover:bg-[#873c31]">{kycRequest ? 'Update KYC details' : 'Open action'} <ArrowRight size={13} /></a> : kycRequest && <button type="button" onClick={() => window.dispatchEvent(new CustomEvent('nbg-client-profile-request'))} className="mt-3 inline-flex items-center gap-2 bg-[#a55445] px-3 py-2 text-xs font-semibold text-white hover:bg-[#873c31]">Update KYC details <ArrowRight size={13} /></button>}<p className="mt-3 text-[10px] uppercase tracking-[.1em] text-slate-400">{new Date(notification.created_at).toLocaleDateString()}</p></article>; })}{notifications.length === 0 && <p className="text-sm text-slate-500">New construction updates and payment reminders will appear here.</p>}</div></section>; }
 
 const RESERVATION_STAGES = ['ENQUIRY', 'VIEWING', 'RESERVATION', 'DEPOSIT', 'AGREEMENT', 'HANDOVER'];
 function ReservationTimeline({ stages }: { stages: ReservationStage[] }) { const completed = new Set(stages.map((stage) => stage.stage)); return <section className="portal-panel"><div className="flex items-center justify-between"><div><p className="eyebrow text-[#087f88]">Your reservation journey</p><h3 className="mt-2 font-serif text-3xl text-[#123b4b]">A clear path to handover.</h3></div><CircleCheck className="text-[#087f88]" /></div><div className="mt-7 grid gap-3 sm:grid-cols-3">{RESERVATION_STAGES.map((stage, index) => <div key={stage} className={`border p-4 ${completed.has(stage) ? 'border-[#8dd6cd] bg-[#eefbf9]' : 'border-[#e3e0d8] bg-[#fffdf8]'}`}><div className="flex items-center justify-between"><span className="text-xs text-[#087f88]">0{index + 1}</span>{completed.has(stage) ? <Check size={15} className="text-[#2e6b3e" /> : <Clock3 size={15} className="text-slate-300" />}</div><p className="mt-5 text-[10px] font-semibold uppercase tracking-[.12em] text-[#315a62]">{stage.replace('_', ' ')}</p></div>)}</div></section>; }
@@ -575,14 +592,78 @@ function ClientPaymentFollowup({ user, payment, paymentReference, instructionsAv
     setSent(true);
   };
 
-  if (sent) return <p role="status" className="client-payment-followup-success"><CircleCheck size={16} />Request sent to NBG. Your balance will update after staff verify and record the payment.</p>;
+  if (sent) return <div><p role="status" className="client-payment-followup-success"><CircleCheck size={16} />Request sent to NBG. Your balance will update after staff verify and record the payment.</p><PaymentProofUpload user={user} /></div>;
 
-  return <form onSubmit={submit} className="client-payment-followup-form">
+  return <div><form onSubmit={submit} className="client-payment-followup-form">
     <div><p className="client-payment-followup-title">Next step</p><p className="client-payment-followup-copy">{paymentReference && instructionsAvailable ? 'Transfer using the official details above, then send NBG your bank or M-Pesa confirmation reference.' : 'A reference or verified payment details are missing. Request them from NBG before transferring funds.'} Your balance changes only after NBG verifies the payment.</p></div>
     <label><span>Bank / M-Pesa transaction reference <small>(if already paid)</small></span><input value={bankReference} onChange={(event) => setBankReference(event.target.value)} maxLength={120} placeholder="Enter the confirmation code" /></label>
     {error && <p role="alert" className="client-payment-followup-error">{error}</p>}
     <button type="submit" disabled={sending} className="client-payment-followup-submit"><MessageCircle size={14} />{sending ? 'Sending request...' : bankReference.trim() ? 'Submit payment notice' : 'Request payment help'}</button>
-  </form>;
+  </form><PaymentProofUpload user={user} /></div>;
+}
+
+function PaymentProofUpload({ user }: { user: AdminUser }) {
+  const [saleId, setSaleId] = useState('');
+  const [file, setFile] = useState<File | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+  const [proofs, setProofs] = useState<Array<{ id: string; proof_url: string; uploaded_at: string; status: string }>>([]);
+
+  useEffect(() => {
+    let active = true;
+    void supabase.rpc('get_my_current_unit_purchase').then(({ data, error: purchaseError }) => {
+      if (!active) return;
+      const purchase = (data as ClientPurchaseStatus[] | null)?.[0];
+      if (purchaseError || !purchase?.sale_id) {
+        setError('A current purchase could not be linked to this payment. Contact NBG support to submit your advice.');
+        return;
+      }
+      setSaleId(purchase.sale_id);
+    });
+    return () => { active = false; };
+  }, [user.id]);
+
+  const loadProofs = useCallback(async () => {
+    if (!saleId) return;
+    const { data, error: queryError } = await supabase.from('payment_proof_uploads').select('id,proof_url,uploaded_at,status').eq('sale_id', saleId).eq('user_id', user.id).order('uploaded_at', { ascending: false });
+    if (queryError) {
+      setError(queryError.message || 'Payment proof records could not be loaded. Apply the payment-proof migration and try again.');
+      return;
+    }
+    setProofs((data ?? []) as Array<{ id: string; proof_url: string; uploaded_at: string; status: string }>);
+  }, [saleId, user.id]);
+
+  useEffect(() => { void loadProofs(); }, [loadProofs]);
+
+  const submitProof = async () => {
+    if (!file || !saleId) return;
+    if (file.size > 10 * 1024 * 1024) { setError('Choose an image or PDF smaller than 10 MB.'); return; }
+    setUploading(true);
+    setError('');
+    setSuccess('');
+    const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+    const path = `payment-proofs/${saleId}/${user.id}/${crypto.randomUUID()}-${safeName}`;
+    const { error: uploadError } = await supabase.storage.from('client-documents').upload(path, file, { upsert: false, contentType: file.type || 'application/octet-stream' });
+    if (uploadError) { setError(uploadError.message || 'The bank advice could not be uploaded.'); setUploading(false); return; }
+    const { error: insertError } = await supabase.from('payment_proof_uploads').insert({ sale_id: saleId, user_id: user.id, proof_url: path, description: 'Bank remittance advice', status: 'PENDING' });
+    setUploading(false);
+    if (insertError) { setError(insertError.message || 'The payment proof record could not be saved.'); return; }
+    setFile(null);
+    setSuccess('Advice uploaded. NBG staff must authenticate it before recording your payment.');
+    void loadProofs();
+  };
+
+  return <section className="mt-4 border border-[#d6efee] bg-[#f8fdfd] p-4">
+    <p className="eyebrow text-[#087f88]">Remittance advice</p>
+    <p className="mt-1 text-xs leading-5 text-slate-600">Upload a bank confirmation image or PDF. Uploading evidence does not mark the payment as paid.</p>
+    <div className="mt-3 grid gap-2 sm:grid-cols-[1fr_auto]">
+      <label className="flex min-w-0 cursor-pointer items-center gap-2 border border-dashed border-[#20afd1] bg-white px-3 py-3 text-xs text-[#247b85]"><Upload size={15} /><span className="truncate">{file?.name || 'Choose image or PDF (max 10 MB)'}</span><input type="file" accept="image/*,.pdf" className="hidden" onChange={(event) => { setFile(event.target.files?.[0] ?? null); setError(''); event.currentTarget.value = ''; }} /></label>
+      <button type="button" disabled={!file || !saleId || uploading} onClick={() => void submitProof()} className="btn-primary disabled:opacity-60">{uploading ? 'Uploading...' : 'Upload advice'}</button>
+    </div>
+    {error && <p role="alert" className="mt-2 text-xs text-[#a55445]">{error}</p>}{success && <p role="status" className="mt-2 text-xs text-[#2e6b3e]">{success}</p>}
+    {proofs.map((proof) => <div key={proof.id} className="mt-3 flex items-center justify-between gap-3 border-t border-[#dbeae8] pt-3"><span className="text-xs text-slate-600">{new Date(proof.uploaded_at).toLocaleDateString()} · {proof.status}</span><button type="button" onClick={async () => { const { data } = await supabase.storage.from('client-documents').createSignedUrl(proof.proof_url, 180); if (data?.signedUrl) window.open(data.signedUrl, '_blank', 'noopener,noreferrer'); }} className="text-xs font-semibold text-[#087f88] underline">Open advice</button></div>)}
+  </section>;
 }
 
 function PaymentsDashboard({ user, payments, paymentInstructions }: { user: AdminUser; payments: ClientPayment[]; paymentInstructions: PurchasePaymentInstructions | null }) {
@@ -927,6 +1008,8 @@ function ProfileContent({ user, recovery, profile, onSaveProfile, onSignOut }: {
   const [identityDocumentType, setIdentityDocumentType] = useState(profile?.identity_document_type ?? '');
   const [identityDocumentNumber, setIdentityDocumentNumber] = useState(profile?.identity_document_number ?? '');
   const [residentialAddress, setResidentialAddress] = useState(profile?.residential_address ?? '');
+  const [kycScanStatus, setKycScanStatus] = useState('');
+  const [kycScanFile, setKycScanFile] = useState<File | null>(null);
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [saving, setSaving] = useState(false);
@@ -947,6 +1030,25 @@ function ProfileContent({ user, recovery, profile, onSaveProfile, onSignOut }: {
     setIdentityDocumentNumber(profile?.identity_document_number ?? '');
     setResidentialAddress(profile?.residential_address ?? '');
   }, [profile, user.full_name, user.phone]);
+
+  const scanIdentityDocument = async (file: File | null) => {
+    if (!file) return;
+    if (!file.type.startsWith('image/')) { setKycScanStatus('Choose a clear image of your ID or passport. PDF scanning is not supported yet.'); return; }
+    setKycScanStatus('Scanning identity document...');
+    try {
+      const result = await Tesseract.recognize(file, 'eng', { logger: (progress: { status?: string; progress?: number }) => {
+        if (progress.status === 'recognizing text') setKycScanStatus(`Scanning identity document... ${Math.round((progress.progress ?? 0) * 100)}%`);
+      } });
+      const parsed = parseIdentityDocumentText(result.data.text || '');
+      if (parsed.fullName) setFullName(parsed.fullName);
+      if (parsed.identityNumber) setIdentityDocumentNumber(parsed.identityNumber);
+      if (parsed.address) setResidentialAddress(parsed.address);
+      if (parsed.documentType) setIdentityDocumentType(parsed.documentType);
+      setKycScanStatus(parsed.fullName || parsed.identityNumber ? 'Details extracted. Check every field against your original document; this scan does not verify authenticity.' : 'The document could not be read clearly. Enter and verify the details manually.');
+    } catch {
+      setKycScanStatus('The document could not be scanned. Enter and verify the details manually.');
+    }
+  };
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
@@ -980,6 +1082,7 @@ function ProfileContent({ user, recovery, profile, onSaveProfile, onSignOut }: {
     <div className="mt-6 flex items-center justify-between gap-3"><div><p className="eyebrow text-[#087f88]">Your saved details</p><p className="mt-1 text-sm text-slate-500">Review your profile without re-entering it each visit.</p></div>{!editing && <button type="button" onClick={() => setEditing(true)} className="btn-secondary">Edit profile</button>}</div>
     <form onSubmit={submit} className="mt-3 grid gap-4 rounded-xl border border-[#d6efee] bg-white p-5">
       {completingInvite && <div className="grid gap-4 border-b border-[#e2eeec] pb-4 sm:grid-cols-2"><label className="grid gap-2 text-sm text-slate-600"><span className="eyebrow text-slate-500">Create password</span><input type="password" required minLength={8} autoComplete="new-password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} className="admin-input" /></label><label className="grid gap-2 text-sm text-slate-600"><span className="eyebrow text-slate-500">Confirm password</span><input type="password" required minLength={8} autoComplete="new-password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} className="admin-input" /></label></div>}
+      <section className="border border-[#d6efee] bg-[#f6fbfc] p-4"><p className="eyebrow text-[#087f88]">Identity document scan</p><p className="mt-1 text-xs leading-5 text-slate-600">OCR can suggest profile values, but NBG must verify the original document before approving identity.</p><div className="mt-3 grid gap-2 sm:grid-cols-[1fr_auto]"><label className="flex min-w-0 cursor-pointer items-center gap-2 border border-dashed border-[#20afd1] bg-white px-3 py-3 text-xs text-[#247b85]"><Upload size={15} /><span className="truncate">{kycScanFile?.name || 'Choose ID / passport image'}</span><input type="file" accept="image/*" disabled={!editing} className="hidden" onChange={(event) => { const file = event.target.files?.[0] ?? null; setKycScanFile(file); void scanIdentityDocument(file); event.currentTarget.value = ''; }} /></label><button type="button" disabled={!editing || !kycScanFile} onClick={() => void scanIdentityDocument(kycScanFile)} className="btn-secondary disabled:opacity-50">Scan and autofill</button></div>{kycScanStatus && <p role="status" className="mt-2 text-xs text-slate-600">{kycScanStatus}</p>}</section>
       <div className="grid gap-4 md:grid-cols-2">
         <label className="grid gap-2 text-sm text-slate-600"><span className="eyebrow text-slate-500">Full name</span><input disabled={!editing} value={fullName} onChange={(event) => setFullName(event.target.value)} className="admin-input disabled:bg-[#f4f1eb]" placeholder="Your full name" /></label>
         <label className="grid gap-2 text-sm text-slate-600"><span className="eyebrow text-slate-500">Phone</span><input disabled={!editing} value={phone} onChange={(event) => setPhone(event.target.value)} className="admin-input disabled:bg-[#f4f1eb]" placeholder="+254..." /></label>
