@@ -106,6 +106,11 @@ button { cursor: pointer; }
 .portal-content { padding: 42px 5vw 72px; }
 .portal-reveal { animation: portal-reveal .45s ease both; }
 @keyframes portal-reveal { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+.transaction-success-panel { display: flex; align-items: center; gap: 12px; border: 1px solid #a9d9a8; background: linear-gradient(105deg, #effaf0, #fff 75%); padding: 14px 16px; animation: transaction-success-in .42s cubic-bezier(.2,.8,.25,1) both; }
+.transaction-success-icon { display: grid; width: 42px; height: 42px; flex: 0 0 auto; place-items: center; border-radius: 50%; background: #def3df; color: #2e6b3e; animation: transaction-success-check .5s .08s cubic-bezier(.2,.8,.25,1) both; }
+.transaction-success-check { display: grid; width: 28px; height: 28px; flex: 0 0 auto; place-items: center; border-radius: 50%; background: #2e6b3e; color: white; }
+@keyframes transaction-success-in { from { opacity: 0; transform: translateY(10px) scale(.985); } to { opacity: 1; transform: translateY(0) scale(1); } }
+@keyframes transaction-success-check { from { opacity: 0; transform: scale(.55) rotate(-20deg); } to { opacity: 1; transform: scale(1) rotate(0); } }
 .portal-welcome { display: flex; min-height: 230px; align-items: center; justify-content: space-between; gap: 24px; border: 1px solid rgba(255,255,255,.72); background: rgba(255,255,255,.38); padding: 34px; backdrop-filter: blur(22px); box-shadow: 0 22px 55px rgba(36,99,103,.08); }
 .portal-welcome h2, .portal-section-heading h2 { margin-top: 12px; color: #123b4b; font-family: 'DM Serif Display', Georgia, serif; font-size: clamp(2.6rem, 5vw, 5.2rem); line-height: .9; }
 .portal-welcome p:not(.eyebrow) { margin-top: 20px; max-width: 520px; color: #55777d; font-size: 14px; line-height: 1.7; }

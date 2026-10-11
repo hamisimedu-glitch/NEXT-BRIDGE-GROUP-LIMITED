@@ -1,5 +1,5 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
-import { AlertCircle, ArrowRight, Award, BarChart3, Building2, CalendarDays, Calculator, Check, ChevronRight, ClipboardList, Clock3, Construction, CreditCard, Download, DollarSign, Eye, EyeOff, FileDown, FileText, Info, LayoutDashboard, LogOut, Mail, MapPin, Menu, MessageCircle, Pencil, Phone, Plus, RefreshCw, Search, Send, SlidersHorizontal, TrendingUp, Trash2, Upload, Users, X } from 'lucide-react';
+import { AlertCircle, ArrowRight, Award, BarChart3, Building2, CalendarDays, Calculator, Check, ChevronRight, CircleCheck, ClipboardList, Clock3, Construction, CreditCard, Download, DollarSign, Eye, EyeOff, FileDown, FileText, Info, LayoutDashboard, LogOut, Mail, MapPin, Menu, MessageCircle, Pencil, Phone, Plus, RefreshCw, Search, Send, SlidersHorizontal, TrendingUp, Trash2, Upload, Users, X } from 'lucide-react';
 import { GState, jsPDF } from 'jspdf';
 import QRCode from 'qrcode';
 import { supabase } from '@/lib/supabase';
@@ -597,7 +597,7 @@ function uploadErrorMessage(error: unknown) {
 
 export default function AdminDashboard({ user, onSignOut }: { user: AdminUser; onSignOut: () => void }) {
   useFinancialPrivacy();
-  const [tab, setTab] = useState<AdminTab>('overview');
+  const [tab, setTab] = useState<AdminTab>(() => new URLSearchParams(window.location.search).get('tab') === 'leads' ? 'leads' : 'overview');
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const isAdmin = user.role === 'admin' || user.role === 'owner';
@@ -1437,6 +1437,7 @@ function LeadsTab({ user }: { user: AdminUser }) {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [selected, setSelected] = useState<Lead | null>(null);
+  const [slaAlerts, setSlaAlerts] = useState<{ id: string; title: string; body: string; created_at: string; read_at: string | null }[]>([]);
   const selectedContactDraft = selected ? createLeadContactDraft(selected) : null;
 
   const load = useCallback(async () => {
@@ -1448,9 +1449,16 @@ function LeadsTab({ user }: { user: AdminUser }) {
     setLeads((data ?? []) as Lead[]);
     setStaff((staffRows ?? []) as { id: string; full_name: string | null; role: string }[]);
     setProjects((projectRows ?? []) as Project[]);
+    const { data: alerts } = await supabase.from('client_notifications').select('id,title,body,created_at,read_at').eq('user_id', user.id).eq('kind', 'LEAD_SLA_ALERT').order('created_at', { ascending: false }).limit(8);
+    setSlaAlerts((alerts ?? []) as typeof slaAlerts);
     setLoading(false);
-  }, []);
+  }, [user.id]);
   useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    const refreshAfterLeadAction = () => { void load(); };
+    window.addEventListener('nbg-lead-activity-recorded', refreshAfterLeadAction);
+    return () => window.removeEventListener('nbg-lead-activity-recorded', refreshAfterLeadAction);
+  }, [load]);
 
   const filtered = useMemo(() => leads.filter((l) => {
     const q = search.toLowerCase();
@@ -1459,9 +1467,20 @@ function LeadsTab({ user }: { user: AdminUser }) {
   }), [leads, search, statusFilter]);
 
   const updateStatus = async (id: string, status: string) => {
-    setLeads((p) => p.map((l) => l.id === id ? { ...l, status } : l));
-    if (selected?.id === id) setSelected((s) => s ? { ...s, status } : s);
-    await supabase.from('leads').update({ status }).eq('id', id);
+    const currentStatus = leads.find((lead) => lead.id === id)?.status;
+    const currentIndex = LEAD_STATUSES.indexOf(currentStatus as typeof LEAD_STATUSES[number]);
+    const nextIndex = LEAD_STATUSES.indexOf(status as typeof LEAD_STATUSES[number]);
+    if (status === 'CONVERTED' && currentStatus !== 'NEGOTIATING') { notifyAdmin('Move the lead through Negotiating before recording a Won outcome.', 'error'); return; }
+    if (!['CONVERTED', 'LOST'].includes(status) && nextIndex > currentIndex + 1) { notifyAdmin('Progress leads one stage at a time.', 'error'); return; }
+    const terminal = status === 'CONVERTED' || status === 'LOST';
+    const outcomeNotes = terminal ? window.prompt(`${status === 'CONVERTED' ? 'Record the win result (agreement, value, or close details)' : 'Record why this lead was lost'}:`)?.trim() : '';
+    if (terminal && !outcomeNotes) return;
+    const changes = { status, outcome: status === 'CONVERTED' ? 'WON' : status === 'LOST' ? 'LOST' : null, outcome_notes: terminal ? outcomeNotes : null };
+    const { error } = await supabase.from('leads').update(changes).eq('id', id);
+    if (error) { notifyAdmin(`Lead stage could not be updated: ${error.message}`, 'error'); return; }
+    setLeads((p) => p.map((l) => l.id === id ? { ...l, ...changes, stage_entered_at: new Date().toISOString(), last_action_at: new Date().toISOString() } : l));
+    if (selected?.id === id) setSelected((s) => s ? { ...s, ...changes, stage_entered_at: new Date().toISOString(), last_action_at: new Date().toISOString() } : s);
+    await recordLeadActivity(id, 'STAGE_CHANGE', null, `Lead progressed to ${status.replace('_', ' ')}${terminal ? ` · ${changes.outcome}: ${outcomeNotes}` : ''}`);
   };
 
   const saveNotes = async (id: string, notes: string) => {
@@ -1473,6 +1492,7 @@ function LeadsTab({ user }: { user: AdminUser }) {
 
   return (
     <div>
+      {slaAlerts.length > 0 && <section className="mb-5 border border-[#e4b8ad] bg-[#fff7f4] p-4"><div className="flex items-center gap-2"><AlertCircle size={16} className="text-[#a55445]" /><h3 className="text-sm font-semibold text-[#8d332b]">48-hour follow-ups due</h3></div><div className="mt-3 grid gap-2 sm:grid-cols-2">{slaAlerts.map((alert) => { const leadId = alert.body.match(/Lead ID:\s*([0-9a-f-]{36})/i)?.[1]; const lead = leads.find((item) => item.id === leadId); return <button type="button" key={alert.id} onClick={() => { if (lead) setSelected(lead); }} className="border border-[#efd4ce] bg-white p-3 text-left hover:border-[#d58a7d]"><span className="block text-xs font-semibold text-[#8d332b]">{alert.title}</span><span className="mt-1 block text-[10px] leading-4 text-slate-500">{alert.body.replace(/Lead ID:\s*[0-9a-f-]{36}\.\s*/i, '')}</span><span className="mt-2 block text-[9px] text-slate-400">{fmt(alert.created_at)} · {lead ? 'Open lead' : 'Lead may have been removed'}</span></button>; })}</div></section>}
       <div className="flex flex-wrap gap-3">
         <div className="relative flex-1 min-w-[200px]">
           <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
@@ -1482,15 +1502,17 @@ function LeadsTab({ user }: { user: AdminUser }) {
           <option value="ALL">All statuses</option>
           {LEAD_STATUSES.map((s) => <option key={s} value={s}>{s.replace('_', ' ')}</option>)}
         </select>
-        <p className="flex items-center text-xs text-slate-400">{filtered.length} lead{filtered.length !== 1 ? 's' : ''}</p>
+        <p className="flex items-center text-xs text-slate-400">{filtered.length} lead{filtered.length !== 1 ? 's' : ''} · {leads.filter((lead) => !['CONVERTED', 'LOST'].includes(lead.status) && Date.now() - new Date(lead.last_action_at || lead.stage_entered_at || lead.created_at).getTime() >= 48 * 60 * 60 * 1000).length} over 48h without action</p>
         <button onClick={() => void downloadReportPdf('nbg-leads.pdf', ['Name', 'Email', 'Phone', 'Status', 'Owner', 'Next action', 'Due'], filtered.map((lead) => [lead.name, lead.email, lead.phone, lead.status, lead.assigned_consultant, lead.next_action, lead.next_action_at]), 'Lead Register')} className="admin-add-btn flex items-center gap-2"><Download size={14} /> Export PDF</button>
       </div>
+
+      <div className="mt-4 flex gap-1 overflow-x-auto border-b border-[#c9c5bd] bg-white px-2 pt-2">{LEAD_STATUSES.map((stage) => <button key={stage} type="button" onClick={() => setStatusFilter(stage)} className={`flex min-h-10 shrink-0 items-center gap-2 border-b-2 px-3 text-[10px] font-semibold uppercase ${statusFilter === stage ? 'border-[#087f88] text-[#087f88]' : 'border-transparent text-slate-500 hover:text-[#123b4b]'}`}><span>{stage.replace('_', ' ')}</span><span className="grid min-w-5 place-items-center bg-[#f0ede6] px-1 py-0.5 text-[9px]">{leads.filter((lead) => lead.status === stage).length}</span></button>)}</div>
 
       <div className="mt-5 overflow-x-auto rounded-lg border border-[#c9c5bd] bg-white shadow-sm">
         <table className="w-full text-left text-sm">
           <thead className="border-b border-[#c9c5bd] bg-[#f0ede6] text-[10px] uppercase tracking-[.12em] text-slate-400">
             <tr>
-              {['Name', 'Contact', 'Source', 'Status', 'Next action', 'Date', ''].map((h) => (
+              {['Name', 'Contact', 'Source', 'Lead journey / SLA', 'Next action', 'Date', ''].map((h) => (
                 <th key={h} className="px-4 py-3 font-semibold">{h}</th>
               ))}
             </tr>
@@ -1501,9 +1523,7 @@ function LeadsTab({ user }: { user: AdminUser }) {
                 <td className="px-4 py-3 font-medium">{lead.name}</td>
                 <td className="px-4 py-3 text-xs text-slate-500">{lead.email ?? lead.phone ?? '—'}</td>
                 <td className="px-4 py-3 text-xs text-slate-500">{lead.source ?? '—'}</td>
-                <td className="px-4 py-3">
-                  <StatusSelect value={lead.status} options={LEAD_STATUSES} colors={LEAD_STATUS_COLORS} onChange={(v) => updateStatus(lead.id, v)} />
-                </td>
+                <td className="px-4 py-3"><div className="flex min-w-[220px] flex-wrap items-center gap-1">{LEAD_STATUSES.map((stage, index) => <span key={stage} className={`grid h-5 min-w-5 place-items-center px-1 text-[8px] font-semibold ${stage === lead.status ? 'bg-[#087f88] text-white' : index < LEAD_STATUSES.indexOf(lead.status as typeof LEAD_STATUSES[number]) || ['CONVERTED', 'LOST'].includes(lead.status) && index < 5 ? 'bg-[#dceeea] text-[#3a6f69]' : 'bg-[#f0ede6] text-slate-400'}`} title={stage.replace('_', ' ')}>{index + 1}</span>)}</div><span className="mt-1 block text-[10px] font-semibold text-[#123b4b]">{lead.status.replace('_', ' ')}</span>{!['CONVERTED', 'LOST'].includes(lead.status) && (() => { const lastActionMs = Date.now() - new Date(lead.last_action_at || lead.stage_entered_at || lead.created_at).getTime(); const stageMs = Date.now() - new Date(lead.stage_entered_at || lead.created_at).getTime(); const overdue = lastActionMs >= 48 * 60 * 60 * 1000; return <><span className={`mt-1 inline-flex items-center gap-1 text-[10px] ${overdue ? 'font-semibold text-[#a55445]' : 'text-slate-400'}`}><Clock3 size={11} />{overdue ? `Follow-up due · ${Math.floor(lastActionMs / 3600000)}h idle` : `${Math.floor(lastActionMs / 3600000)}h since action`}</span><small className="mt-1 block text-[9px] text-slate-400">{Math.floor(stageMs / 3600000)}h in this stage</small></>; })()}</td>
                 <td className="px-4 py-3 text-xs"><span className={lead.priority === 'URGENT' ? 'font-semibold text-[#a55445]' : lead.priority === 'HIGH' ? 'font-semibold text-[#856b2e]' : 'text-slate-500'}>{lead.next_action ?? 'Set action'}</span>{lead.next_action_at && <span className="mt-1 block text-[10px] text-slate-400">Due {fmt(lead.next_action_at)}</span>}</td>
                 <td className="px-4 py-3 text-xs text-slate-400">{fmt(lead.created_at)}</td>
                 <td className="px-4 py-3">
@@ -1536,10 +1556,8 @@ function LeadsTab({ user }: { user: AdminUser }) {
               <p className="mt-2 text-sm text-slate-600">{selected.message}</p>
             </div>
           )}
-          <div>
-            <p className="eyebrow text-slate-400">Status</p>
-            <StatusSelect value={selected.status} options={LEAD_STATUSES} colors={LEAD_STATUS_COLORS} onChange={(v) => updateStatus(selected.id, v)} className="mt-2 w-full" />
-          </div>
+          <LeadJourney lead={selected} onChange={(status) => void updateStatus(selected.id, status)} />
+          {selected.outcome && <section className="border border-[#a9d9a8] bg-[#effaf0] p-3"><p className="eyebrow text-[#2e6b3e]">Lead outcome · {selected.outcome}</p><p className="mt-1 text-xs leading-5 text-slate-600">{selected.outcome_notes || 'Outcome reason was not recorded.'}</p></section>}
           <LeadActionPanel lead={selected} staff={staff} projects={projects} actorId={user.id} onUpdate={(changes) => {
             setLeads((p) => p.map((lead) => lead.id === selected.id ? { ...lead, ...changes } : lead));
             setSelected((lead) => lead ? { ...lead, ...changes } : lead);
@@ -1561,6 +1579,14 @@ async function recordLeadActivity(leadId: string, activityType: string, channel:
   });
   if (error) notifyAdmin(`Activity could not be recorded: ${error.message}`, 'error');
   else window.dispatchEvent(new CustomEvent('nbg-lead-activity-recorded', { detail: { leadId } }));
+}
+
+function LeadJourney({ lead, onChange }: { lead: Lead; onChange: (status: string) => void }) {
+  const stages = ['NEW', 'CONTACTED', 'QUALIFIED', 'VIEWING_BOOKED', 'NEGOTIATING', 'CONVERTED', 'LOST'];
+  const activeIndex = stages.indexOf(lead.status);
+  const staleMs = Date.now() - new Date(lead.last_action_at || lead.stage_entered_at || lead.created_at).getTime();
+  const terminal = lead.status === 'CONVERTED' || lead.status === 'LOST';
+  return <section className="border border-[#d6efee] bg-[#f8fdfd] p-4"><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="eyebrow text-[#087f88]">Lead journey</p><p className="mt-1 text-xs text-slate-500">Every stage resets the 48-hour action clock.</p></div><span className={`inline-flex items-center gap-1 text-[10px] font-semibold ${terminal ? 'text-[#2e6b3e]' : staleMs >= 48 * 60 * 60 * 1000 ? 'text-[#a55445]' : 'text-slate-500'}`}><Clock3 size={12} />{terminal ? `Outcome ${lead.outcome || (lead.status === 'CONVERTED' ? 'WON' : 'LOST')}` : staleMs >= 48 * 60 * 60 * 1000 ? '48h follow-up overdue' : `${Math.floor(staleMs / 3600000)}h in stage`}</span></div><div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">{stages.map((stage, index) => { const current = stage === lead.status; const completed = activeIndex > index || terminal && index < 5; const lost = stage === 'LOST' && lead.status === 'LOST'; const blocked = terminal || stage !== 'LOST' && index > activeIndex + 1 || stage === 'CONVERTED' && lead.status !== 'NEGOTIATING'; return <button key={stage} type="button" disabled={blocked} onClick={() => onChange(stage)} aria-current={current ? 'step' : undefined} className={`min-h-10 border px-2 py-2 text-left text-[10px] font-semibold transition-colors disabled:cursor-default disabled:opacity-55 ${current ? 'border-[#087f88] bg-[#087f88] text-white' : lost ? 'border-[#a55445] bg-[#fff2ee] text-[#a55445]' : completed ? 'border-[#a9d9a8] bg-[#effaf0] text-[#2e6b3e]' : 'border-[#d6efee] bg-white text-slate-500 hover:border-[#087f88]'}`}><span className="mr-1 opacity-70">{index + 1}.</span>{stage.replace('_', ' ')}</button>; })}</div>{terminal && <p className="mt-3 text-xs font-semibold text-[#2e6b3e]">Final result recorded: {lead.status === 'CONVERTED' ? 'WON' : 'LOST'}.</p>}</section>;
 }
 
 function LeadActivityTimeline({ leadId, actorId }: { leadId: string; actorId: string }) {
@@ -1588,7 +1614,7 @@ function LeadActivityTimeline({ leadId, actorId }: { leadId: string; actorId: st
 }
 
 function LeadActionPanel({ lead, staff, projects, actorId, onUpdate }: { lead: Lead; staff: { id: string; full_name: string | null; role: string }[]; projects: Project[]; actorId: string; onUpdate: (changes: Partial<Lead>) => void }) {
-  const [f, setF] = useState({ assigned_consultant: lead.assigned_consultant ?? '', priority: lead.priority ?? 'NORMAL', next_action: lead.next_action ?? 'Call lead', next_action_at: lead.next_action_at ? lead.next_action_at.slice(0, 16) : '', action_project_id: lead.action_project_id ?? '' });
+  const [f, setF] = useState({ assigned_consultant_user_id: lead.assigned_consultant_user_id || staff.find((member) => member.full_name === lead.assigned_consultant)?.id || '', priority: lead.priority ?? 'NORMAL', next_action: lead.next_action ?? 'Call lead', next_action_at: lead.next_action_at ? lead.next_action_at.slice(0, 16) : '', action_project_id: lead.action_project_id ?? '' });
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
 
@@ -1598,7 +1624,8 @@ function LeadActionPanel({ lead, staff, projects, actorId, onUpdate }: { lead: L
       return;
     }
     setSaving(true); setMessage('');
-    const changes = { assigned_consultant: f.assigned_consultant || null, priority: f.priority, next_action: f.next_action || null, next_action_at: f.next_action_at ? new Date(f.next_action_at).toISOString() : null, action_project_id: f.next_action === 'Send project details' ? f.action_project_id : null };
+    const assignee = staff.find((member) => member.id === f.assigned_consultant_user_id);
+    const changes = { assigned_consultant: assignee?.full_name || null, assigned_consultant_user_id: assignee?.id || null, priority: f.priority, next_action: f.next_action || null, next_action_at: f.next_action_at ? new Date(f.next_action_at).toISOString() : null, action_project_id: f.next_action === 'Send project details' ? f.action_project_id : null };
     const { error } = await supabase.from('leads').update(changes).eq('id', lead.id);
     setSaving(false);
     if (error) { setMessage(error.message); return; }
@@ -1613,7 +1640,7 @@ function LeadActionPanel({ lead, staff, projects, actorId, onUpdate }: { lead: L
       setMessage('Action plan saved.');
     }
     notifyAdmin('Lead action plan saved.');
-    await recordLeadActivity(lead.id, 'ACTION_PLAN', null, `Assigned ${f.assigned_consultant || 'unassigned'} · ${f.next_action || 'No action'}${f.action_project_id ? ` · Project ${projects.find((project) => project.id === f.action_project_id)?.name || ''}` : ''}`);
+    await recordLeadActivity(lead.id, 'ACTION_PLAN', null, `Assigned ${assignee?.full_name || 'unassigned'} · ${f.next_action || 'No action'}${f.action_project_id ? ` · Project ${projects.find((project) => project.id === f.action_project_id)?.name || ''}` : ''}`);
   };
 
   const markContacted = async () => {
@@ -1624,7 +1651,7 @@ function LeadActionPanel({ lead, staff, projects, actorId, onUpdate }: { lead: L
 
   return <div className="space-y-4 border-y border-[#c9c5bd] py-5">
     <div className="flex items-center justify-between"><p className="eyebrow text-[#20afd1]">Next action</p><button onClick={markContacted} className="text-[10px] font-semibold uppercase tracking-[.1em] text-[#247b85] hover:underline">Mark contacted</button></div>
-    <div className="grid grid-cols-2 gap-3"><label className="block"><span className="eyebrow mb-1.5 block text-slate-400">Owner</span><select value={f.assigned_consultant} onChange={(e) => setF({ ...f, assigned_consultant: e.target.value })} className="admin-input w-full"><option value="">Unassigned</option>{staff.map((member) => <option key={member.id} value={member.full_name || member.id}>{member.full_name || member.id} · {member.role}</option>)}</select></label><label className="block"><span className="eyebrow mb-1.5 block text-slate-400">Priority</span><select value={f.priority} onChange={(e) => setF({ ...f, priority: e.target.value })} className="admin-input w-full">{LEAD_PRIORITIES.map((item) => <option key={item}>{item}</option>)}</select></label></div>
+    <div className="grid grid-cols-2 gap-3"><label className="block"><span className="eyebrow mb-1.5 block text-slate-400">Owner</span><select value={f.assigned_consultant_user_id} onChange={(e) => setF({ ...f, assigned_consultant_user_id: e.target.value })} className="admin-input w-full"><option value="">Unassigned</option>{staff.map((member) => <option key={member.id} value={member.id}>{member.full_name || member.id} · {member.role}</option>)}</select></label><label className="block"><span className="eyebrow mb-1.5 block text-slate-400">Priority</span><select value={f.priority} onChange={(e) => setF({ ...f, priority: e.target.value })} className="admin-input w-full">{LEAD_PRIORITIES.map((item) => <option key={item}>{item}</option>)}</select></label></div>
     <div className="grid grid-cols-2 gap-3"><label className="block"><span className="eyebrow mb-1.5 block text-slate-400">Action</span><select value={f.next_action} onChange={(e) => setF({ ...f, next_action: e.target.value, action_project_id: e.target.value === 'Send project details' ? f.action_project_id : '' })} className="admin-input w-full">{LEAD_ACTIONS.map((item) => <option key={item}>{item}</option>)}</select></label><label className="block"><span className="eyebrow mb-1.5 block text-slate-400">Due date</span><input type="datetime-local" value={f.next_action_at} onChange={(e) => setF({ ...f, next_action_at: e.target.value })} className="admin-input w-full" /></label></div>
     {f.next_action === 'Send project details' && <label className="block"><span className="eyebrow mb-1.5 block text-slate-400">Published project to share</span><select required value={f.action_project_id} onChange={(event) => setF({ ...f, action_project_id: event.target.value })} className="admin-input w-full"><option value="">Choose a published project...</option>{projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}</select><span className="mt-1 block text-[10px] text-slate-400">Only published project information and public documents will be shared.</span></label>}
     {lead.last_contacted_at && <p className="text-[10px] text-slate-400">Last contacted {fmt(lead.last_contacted_at)}</p>}
@@ -1917,7 +1944,7 @@ function InstallmentPanel({ sale, goTo, initialView = 'summary' }: { sale: Sale;
     </nav>
     <div className="grid gap-3">
       {realtimeNotice && <p role="status" className="border border-[#a9d9d8] bg-[#eefbf9] px-3 py-2 text-xs text-[#087f88]">{realtimeNotice}</p>}
-      {successNotice && <p role="status" className="flex flex-wrap items-center gap-2 border border-[#a9d9d8] bg-[#eefbf9] px-3 py-2 text-xs text-[#2e6b3e]">{successNotice}{successReference && <a href={`/verify/${encodeURIComponent(successReference)}`} target="_blank" rel="noreferrer" className="font-mono font-semibold text-[#087f88] underline">{successReference} · Verify receipt</a>}</p>}
+      {successNotice && <section key={successReference || successNotice} role="status" aria-live="polite" className="transaction-success-panel"><span className="transaction-success-icon"><CircleCheck size={22} /></span><div className="min-w-0 flex-1"><p className="text-sm font-semibold text-[#225f3b]">{successNotice}</p><p className="mt-1 text-xs text-[#52725c]">The payment has been posted to the buyer ledger.</p>{successReference && <a href={`/verify/${encodeURIComponent(successReference)}`} target="_blank" rel="noreferrer" className="mt-2 inline-block font-mono text-xs font-semibold text-[#087f88] underline">{successReference} · Verify receipt</a>}</div><span className="transaction-success-check"><Check size={15} /></span></section>}
       {loadError && <p role="alert" className="flex flex-wrap items-center justify-between gap-3 border border-[#e4b8ad] bg-[#fff7f4] px-3 py-2 text-xs text-[#a55445]">{loadError}<button type="button" onClick={() => void load()} className="font-semibold underline">Retry</button></p>}
     </div>
 
@@ -2008,6 +2035,11 @@ function UnitsTab({ canReserve }: { canReserve: boolean }) {
   const [reservations, setReservations] = useState<{ unit_id: string; buyer_name: string; reservation_expires_at: string | null; reservation_source: string; reservation_reason: string | null }[]>([]);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState('ALL');
+  const [search, setSearch] = useState('');
+  const [typeFilter, setTypeFilter] = useState('ALL');
+  const [floorFilter, setFloorFilter] = useState('ALL');
+  const [visibilityFilter, setVisibilityFilter] = useState('ALL');
+  const [sortOrder, setSortOrder] = useState<'UNIT' | 'PRICE_ASC' | 'PRICE_DESC'>('UNIT');
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<ProjectUnit | null>(null);
   const [reservationUnit, setReservationUnit] = useState<ProjectUnit | null>(null);
@@ -2015,7 +2047,7 @@ function UnitsTab({ canReserve }: { canReserve: boolean }) {
   const load = useCallback(async () => {
     const [ur, pr, sr] = await Promise.all([
       supabase.from('project_units').select('*').order('unit_number'),
-      supabase.from('projects').select('id,name'),
+      supabase.from('projects').select('id,name,payment_policy'),
       supabase.from('sales').select('unit_id,buyer_name,reservation_expires_at,reservation_source,reservation_reason').eq('status', 'RESERVED').not('unit_id', 'is', null).order('created_at', { ascending: false }),
     ]);
     setUnits((ur.data ?? []) as ProjectUnit[]);
@@ -2032,7 +2064,14 @@ function UnitsTab({ canReserve }: { canReserve: boolean }) {
     return () => { void supabase.removeChannel(channel); };
   }, [load]);
 
-  const filtered = useMemo(() => units.filter((u) => statusFilter === 'ALL' || u.status === statusFilter), [units, statusFilter]);
+  const filtered = useMemo(() => units.filter((unit) => {
+    const query = search.trim().toLowerCase();
+    return (statusFilter === 'ALL' || unit.status === statusFilter)
+      && (typeFilter === 'ALL' || unit.type === typeFilter)
+      && (floorFilter === 'ALL' || unit.floor === floorFilter)
+      && (visibilityFilter === 'ALL' || String(Boolean(unit.is_published)) === visibilityFilter)
+      && (!query || `${unit.unit_number} ${unit.type ?? ''} ${unit.view ?? ''} ${projects.find((project) => project.id === unit.project_id)?.name ?? ''}`.toLowerCase().includes(query));
+  }).sort((left, right) => sortOrder === 'PRICE_ASC' ? parseMoney(left.price ?? '') - parseMoney(right.price ?? '') : sortOrder === 'PRICE_DESC' ? parseMoney(right.price ?? '') - parseMoney(left.price ?? '') : left.unit_number.localeCompare(right.unit_number)), [units, projects, search, statusFilter, typeFilter, floorFilter, visibilityFilter, sortOrder]);
 
   const togglePublished = async (unit: ProjectUnit) => {
     const is_published = !unit.is_published;
@@ -2056,70 +2095,35 @@ function UnitsTab({ canReserve }: { canReserve: boolean }) {
 
   return (
     <div>
-      <div className="grid gap-4 sm:grid-cols-3 mb-6">
-        {UNIT_STATUSES.map((s) => <StatMini key={s} label={s} value={String(counts[s])} color={s === 'AVAILABLE' ? 'text-[#20afd1]' : s === 'RESERVED' ? 'text-[#856b2e]' : 'text-[#7a2e2e]'} />)}
-      </div>
-
-      <div className="flex items-center justify-between mb-5">
-        <div><select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="admin-input">
-          <option value="ALL">All statuses</option>
-          {UNIT_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
-        </select><p className="mt-1 flex items-center gap-1 text-[10px] text-[#247b85]"><Upload size={12} /> Add or replace unit photos in the editor</p></div>
-        <button onClick={() => setShowForm(true)} className="admin-add-btn flex items-center gap-2"><Plus size={16} /> Add Unit</button>
-      </div>
-
-      <div className="overflow-x-auto rounded-lg border border-[#c9c5bd] bg-white shadow-sm">
-        <table className="w-full text-left text-sm">
-          <thead className="border-b border-[#c9c5bd] bg-[#f0ede6] text-[10px] uppercase tracking-[.12em] text-slate-400">
-            <tr>{['Unit', 'Type', 'Beds', 'Floor', 'Size', 'Price', 'View', 'Status', 'Reservation', 'Visibility', ''].map((h) => <th key={h} className="px-4 py-3 font-semibold">{h}</th>)}</tr>
-          </thead>
-          <tbody>
-            {filtered.map((u) => (
-              <tr key={u.id} className="border-b border-[#e6e2da] last:border-0 hover:bg-[#f0ede6]/60">
-                <td className="px-4 py-3 font-medium">{u.unit_number}</td>
-                <td className="px-4 py-3 text-xs text-slate-500">{u.type ?? '—'}</td>
-                <td className="px-4 py-3 text-xs text-slate-500">{u.bedrooms ?? '—'}</td>
-                <td className="px-4 py-3 text-xs text-slate-500">{u.floor ?? '—'}</td>
-                <td className="px-4 py-3 text-xs text-slate-500">{u.size ?? '—'}</td>
-                <td className="px-4 py-3 text-xs text-slate-500">{u.price ?? '—'}</td>
-                <td className="px-4 py-3 text-xs text-slate-500">{u.view ?? '—'}</td>
-                <td className="px-4 py-3"><span className={`inline-flex px-2.5 py-1 text-[10px] font-semibold uppercase ${u.status === 'AVAILABLE' ? 'bg-[#dceeea] text-[#3a6f69]' : u.status === 'RESERVED' ? 'bg-[#f2e7c9] text-[#856b2e]' : 'bg-[#f5d4d4] text-[#7a2e2e]'}`}>{u.status}</span></td>
-                <td className="px-4 py-3 text-xs text-slate-500">{(() => { const reservation = reservations.find((item) => item.unit_id === u.id && item.reservation_expires_at && new Date(item.reservation_expires_at).getTime() > Date.now()); return reservation ? <span><span>{reservation.buyer_name}{reservation.reservation_source === 'ADMIN' ? ' · Override' : ''}</span><span className="mt-1 block text-[10px]">Until {new Date(reservation.reservation_expires_at!).toLocaleString()}</span>{reservation.reservation_reason && <span className="mt-1 block max-w-[180px] truncate text-[10px]" title={reservation.reservation_reason}>Reason: {reservation.reservation_reason}</span>}</span> : canReserve && (u.status === 'AVAILABLE' || reservations.some((item) => item.unit_id === u.id && item.reservation_expires_at && new Date(item.reservation_expires_at).getTime() <= Date.now())) ? <button type="button" onClick={() => setReservationUnit(u)} className="inline-flex items-center gap-1.5 font-semibold text-[#087f88] hover:underline"><CalendarDays size={13} /> Reserve</button> : '—'; })()}</td>
-                <td className="px-4 py-3"><button onClick={() => togglePublished(u)} className={`flex items-center gap-1 text-[10px] uppercase tracking-[.1em] ${u.is_published ? 'text-[#2e6b3e]' : 'text-slate-400'}`}>{u.is_published ? <Eye size={13} /> : <EyeOff size={13} />}{u.is_published ? 'Live' : 'Hidden'}</button></td>
-                <td className="px-4 py-3"><div className="flex items-center gap-3"><button onClick={() => setEditing(u)} className="text-slate-300 hover:text-[#20afd1]" aria-label={`Edit unit ${u.unit_number}`}><Pencil size={15} /></button><button onClick={() => remove(u.id)} className="text-slate-300 hover:text-[#a55445]" aria-label={`Delete unit ${u.unit_number}`}><Trash2 size={15} /></button></div></td>
-              </tr>
-            ))}
-            {filtered.length === 0 && <EmptyRow cols={11} text="No units in inventory yet." />}
-          </tbody>
-        </table>
-      </div>
-
-      {showForm && (
-        <Modal title="Add Unit" onClose={() => setShowForm(false)}>
-          <UnitForm projects={projects} onDone={(u) => { setUnits((p) => [u, ...p]); setShowForm(false); }} />
-        </Modal>
-      )}
-      {editing && <Modal title={`Edit ${editing.unit_number}`} onClose={() => setEditing(null)}><UnitForm projects={projects} initial={editing} onDone={(u) => { setUnits((p) => p.map((item) => item.id === u.id ? u : item)); setEditing(null); }} /></Modal>}
+      <header className="mb-6 flex flex-wrap items-center justify-between gap-4"><div><p className="eyebrow text-[#087f88]">Inventory management</p><h2 className="mt-1 font-serif text-3xl text-[#123b4b]">Units & Inventory</h2><p className="mt-1 text-sm text-slate-500">Manage apartment inventory, pricing, availability and public visibility.</p></div><div className="flex gap-2"><button type="button" onClick={() => { const csv = ['Unit,Project,Type,Floor,Bedrooms,Area,Price,View,Status,Payment mode,Visibility', ...filtered.map((unit) => [unit.unit_number, projects.find((project) => project.id === unit.project_id)?.name ?? '', unit.type ?? '', unit.floor ?? '', unit.bedrooms ?? '', unit.size ?? '', unit.price ?? '', unit.view ?? '', unit.status, unit.payment_mode ?? 'INSTALLMENTS', unit.is_published ? 'Public' : 'Hidden'].map((value) => `"${String(value).replace(/"/g, '""')}"`).join(','))].join('\n'); const link = document.createElement('a'); link.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' })); link.download = 'nbg-units.csv'; link.click(); URL.revokeObjectURL(link.href); }} className="btn-secondary"><Download size={14} /> Export CSV</button><button type="button" onClick={() => setShowForm(true)} className="admin-add-btn flex items-center gap-2"><Plus size={15} /> Add unit</button></div></header>
+      <div className="mb-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">{[{ label: 'Total units', value: units.length, tone: 'text-[#123b4b]', icon: Building2 }, { label: 'Available', value: counts.AVAILABLE || 0, tone: 'text-[#2e6b3e]', icon: Eye }, { label: 'Reserved', value: counts.RESERVED || 0, tone: 'text-[#856b2e]', icon: CalendarDays }, { label: 'Sold', value: counts.SOLD || 0, tone: 'text-[#a55445]', icon: Check }].map(({ label, value, tone, icon: Icon }) => <article key={label} className="flex items-center justify-between border border-[#d6efee] bg-white p-4"><div><p className="eyebrow text-slate-500">{label}</p><p className={`mt-2 text-2xl font-semibold ${tone}`}>{value}</p></div><span className="grid size-10 place-items-center bg-[#eefbf9] text-[#087f88]"><Icon size={18} /></span></article>)}</div>
+      <div className="mb-4 grid gap-2 lg:grid-cols-[minmax(220px,1fr)_repeat(4,minmax(110px,auto))]"><label className="relative"><Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" /><input value={search} onChange={(event) => setSearch(event.target.value)} className="admin-input w-full pl-9" placeholder="Search unit, type, floor or project" aria-label="Search units" /></label><select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} className="admin-input"><option value="ALL">All statuses</option>{UNIT_STATUSES.map((status) => <option key={status}>{status}</option>)}</select><select value={typeFilter} onChange={(event) => setTypeFilter(event.target.value)} className="admin-input"><option value="ALL">All unit types</option>{UNIT_TYPES.map((type) => <option key={type}>{type}</option>)}</select><select value={floorFilter} onChange={(event) => setFloorFilter(event.target.value)} className="admin-input"><option value="ALL">All floors</option>{[...new Set(units.map((unit) => unit.floor).filter(Boolean))].sort((a, b) => Number(a) - Number(b)).map((floor) => <option key={floor ?? 'unknown'} value={floor ?? ''}>Floor {floor}</option>)}</select><select value={visibilityFilter} onChange={(event) => setVisibilityFilter(event.target.value)} className="admin-input"><option value="ALL">Any visibility</option><option value="true">Public</option><option value="false">Hidden</option></select></div>
+      <div className="overflow-hidden border border-[#c9c5bd] bg-white"><div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#e6e2da] bg-[#f8f7f3] px-4 py-3"><p className="text-xs text-slate-500">Showing {filtered.length} of {units.length} homes</p><label className="flex items-center gap-2 text-xs text-slate-500">Sort<select value={sortOrder} onChange={(event) => setSortOrder(event.target.value as typeof sortOrder)} className="admin-input !py-1.5"><option value="UNIT">Unit number</option><option value="PRICE_ASC">Price: low to high</option><option value="PRICE_DESC">Price: high to low</option></select></label></div><div className="overflow-x-auto"><table className="w-full min-w-[850px] text-left text-sm"><thead className="bg-[#f4f3ef] text-[10px] uppercase tracking-[.1em] text-[#55777d]"><tr>{['Unit', 'Unit type', 'Floor', 'Beds', 'Area (m²)', 'Price (KES)', 'View', 'Status', 'Payment', 'Public', 'Actions'].map((heading) => <th key={heading} className="px-3 py-3 font-semibold">{heading}</th>)}</tr></thead><tbody>{filtered.map((unit) => { const reservation = reservations.find((item) => item.unit_id === unit.id && item.reservation_expires_at && new Date(item.reservation_expires_at).getTime() > Date.now()); return <tr key={unit.id} className="border-t border-[#e6e2da] hover:bg-[#f8fbfa]"><td className="px-3 py-3"><div className="flex items-center gap-2.5">{unit.image_url ? <img src={unit.image_url} alt="" className="size-11 object-cover" /> : <span className="grid size-11 place-items-center bg-[#eefbf9] text-[#087f88]"><Building2 size={17} /></span>}<span><strong className="block text-xs text-[#123b4b]">{unit.unit_number}</strong><small className="text-[10px] text-slate-400">{projects.find((project) => project.id === unit.project_id)?.name || 'Project pending'}</small></span></div></td><td className="px-3 py-3 text-xs">{unit.type || '—'}</td><td className="px-3 py-3 text-xs">{unit.floor ? `Floor ${unit.floor}` : '—'}</td><td className="px-3 py-3 text-xs">{unit.bedrooms ?? '—'}</td><td className="px-3 py-3 text-xs">{unit.size || '—'}</td><td className="px-3 py-3 text-xs font-semibold">{unit.price ? `KSh ${parseMoney(unit.price).toLocaleString('en-KE')}` : 'Price pending'}</td><td className="px-3 py-3 text-xs">{unit.view || '—'}</td><td className="px-3 py-3"><span className={`inline-flex px-2 py-1 text-[10px] font-semibold ${unit.status === 'AVAILABLE' ? 'bg-[#e3f4e6] text-[#2e6b3e]' : unit.status === 'RESERVED' ? 'bg-[#fff2d8] text-[#856b2e]' : 'bg-[#fae4e2] text-[#a55445]'}`}>{unit.status}</span>{reservation && <small className="mt-1 block max-w-[110px] truncate text-[9px] text-slate-400" title={reservation.buyer_name}>{reservation.buyer_name}</small>}</td><td className="px-3 py-3 text-[10px] text-slate-500">{unit.payment_mode === 'ONE_TIME' ? 'One-time' : 'Installments'}</td><td className="px-3 py-3"><button type="button" onClick={() => void togglePublished(unit)} aria-label={`${unit.is_published ? 'Hide' : 'Publish'} ${unit.unit_number}`} className={`text-xs font-semibold ${unit.is_published ? 'text-[#2e6b3e]' : 'text-slate-400'}`}>{unit.is_published ? '● Live' : '○ Hidden'}</button></td><td className="px-3 py-3"><div className="flex items-center gap-2"><button type="button" onClick={() => setEditing(unit)} aria-label={`Edit ${unit.unit_number}`} className="grid size-8 place-items-center border border-[#d6efee] text-[#087f88]"><Pencil size={14} /></button><button type="button" onClick={() => void remove(unit.id)} aria-label={`Delete ${unit.unit_number}`} className="grid size-8 place-items-center border border-[#f0ddda] text-[#a55445]"><Trash2 size={14} /></button>{canReserve && unit.status === 'AVAILABLE' && <button type="button" onClick={() => setReservationUnit(unit)} className="text-[10px] font-semibold text-[#087f88]">Reserve</button>}</div></td></tr>; })}{filtered.length === 0 && <EmptyRow cols={11} text="No homes match these filters." />}</tbody></table></div></div>
+      {(showForm || editing) && <div className="fixed inset-0 z-50 flex justify-end bg-[#071116]/55" role="dialog" aria-modal="true" aria-label={editing ? `Edit unit ${editing.unit_number}` : 'Add unit'}><button type="button" className="absolute inset-0 cursor-default" onClick={() => { setShowForm(false); setEditing(null); }} aria-label="Close unit editor" /><aside className="relative z-10 h-full w-full max-w-[560px] overflow-y-auto border-l border-[#c9c5bd] bg-[#faf9f6] shadow-2xl"><div className="sticky top-0 z-10 flex items-center justify-between border-b border-[#e6e2da] bg-white px-5 py-4"><div><p className="eyebrow text-[#087f88]">{editing ? 'Inventory record' : 'New inventory'}</p><h3 className="mt-1 font-serif text-2xl text-[#123b4b]">{editing ? `Edit ${editing.unit_number}` : 'Add a unit'}</h3></div><button type="button" onClick={() => { setShowForm(false); setEditing(null); }} aria-label="Close unit editor" className="grid size-9 place-items-center border border-[#d6efee]"><X size={17} /></button></div><div className="p-5"><UnitForm key={editing?.id || 'new-unit'} projects={projects} initial={editing ?? undefined} onDone={(unit) => { setUnits((previous) => editing ? previous.map((item) => item.id === unit.id ? unit : item) : [unit, ...previous]); setShowForm(false); setEditing(null); }} /></div></aside></div>}
       {reservationUnit && <Modal title={`Reserve ${reservationUnit.unit_number}`} onClose={() => setReservationUnit(null)}><AdminUnitReservationForm unit={reservationUnit} onDone={() => { setReservationUnit(null); void load(); }} /></Modal>}
     </div>
   );
 }
 
 function UnitForm({ projects, initial, onDone }: { projects: Project[]; initial?: ProjectUnit; onDone: (u: ProjectUnit) => void }) {
-  const [f, setF] = useState({ unit_number: initial?.unit_number ?? '', project_id: initial?.project_id ?? '', type: initial?.type ?? '', bedrooms: initial?.bedrooms?.toString() ?? '', size: initial?.size ?? '', floor: initial?.floor ?? '', parking: initial?.parking ?? '', view: initial?.view ?? '', price: initial?.price ?? '', is_published: initial?.is_published ?? false });
+  const initialProject = projects.find((project) => project.id === initial?.project_id);
+  const initialMode = initialProject?.payment_policy === 'ONE_TIME_ONLY' ? 'ONE_TIME' : initial?.payment_mode ?? '';
+  const [f, setF] = useState({ unit_number: initial?.unit_number ?? '', project_id: initial?.project_id ?? '', type: initial?.type ?? '', bedrooms: initial?.bedrooms?.toString() ?? '', bathrooms: initial?.bathrooms?.toString() ?? '', size: initial?.size ?? '', floor: initial?.floor ?? '', parking: initial?.parking ?? '', view: initial?.view ?? '', description: initial?.description ?? '', price: initial?.price ?? '', payment_mode: initialMode as 'ONE_TIME' | 'INSTALLMENTS', is_published: initial?.is_published ?? false });
   const [image, setImage] = useState<File | null>(null);
   const [err, setErr] = useState('');
   const [saving, setSaving] = useState(false);
 
   const submit = async (e: FormEvent) => {
-    e.preventDefault(); setSaving(true); setErr('');
+    e.preventDefault(); setErr('');
+    if (!f.payment_mode) { setErr('Choose a payment mode for this unit.'); return; }
+    setSaving(true);
     let image_url: string | null = initial?.image_url ?? null;
     try { if (image) image_url = await uploadPublicMedia(image, 'units'); } catch (error) { setErr(uploadErrorMessage(error)); setSaving(false); return; }
     const values = {
       unit_number: f.unit_number || 'AUTO', project_id: f.project_id || null, type: f.type || null,
-      bedrooms: f.bedrooms ? parseInt(f.bedrooms) : null, size: f.size || null,
+      bedrooms: f.bedrooms ? parseInt(f.bedrooms) : null, bathrooms: f.bathrooms ? parseInt(f.bathrooms) : null, size: f.size || null,
       floor: f.floor || null, parking: f.parking || null, view: f.view || null,
-      price: f.price || null, image_url, is_published: f.is_published,
+      description: f.description || null, price: f.price || null, payment_mode: f.payment_mode, image_url, is_published: f.is_published,
     };
     const response = initial
       ? await supabase.from('project_units').update(values).eq('id', initial.id).select().single()
@@ -2136,7 +2140,7 @@ function UnitForm({ projects, initial, onDone }: { projects: Project[]; initial?
         <div className="rounded border border-[#c9c5bd] bg-[#f0ede6] px-3 py-2"><span className="eyebrow block text-slate-400">Unit Number</span><p className="mt-1 text-sm font-semibold text-[#17232b]">{f.unit_number || `F${(parseInt(f.floor) || 1).toString().padStart(2, '0')}-next`}</p><p className="mt-1 text-[10px] text-slate-500">Generated automatically from the floor</p></div>
         <label className="block">
           <span className="eyebrow mb-1.5 block text-slate-400">Project</span>
-          <select value={f.project_id} onChange={(e) => setF({ ...f, project_id: e.target.value })} className="admin-input w-full">
+          <select value={f.project_id} onChange={(e) => { const project = projects.find((item) => item.id === e.target.value); setF({ ...f, project_id: e.target.value, payment_mode: project?.payment_policy === 'ONE_TIME_ONLY' ? 'ONE_TIME' : f.payment_mode }); }} className="admin-input w-full">
             <option value="">— No project —</option>
             {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
           </select>
@@ -2144,19 +2148,18 @@ function UnitForm({ projects, initial, onDone }: { projects: Project[]; initial?
       </div>
       <label className="block"><span className="eyebrow mb-1.5 block text-slate-400">Unit image</span>{initial?.image_url && !image && <img src={initial.image_url} alt="Current unit" className="mb-2 h-24 w-full object-cover" />}<span className="flex cursor-pointer items-center gap-2 border border-dashed border-[#20afd1] bg-[#f5fbfc] px-3 py-3 text-xs text-[#247b85] hover:bg-[#e8f7fa]"><Upload size={15} /> {image?.name ?? (initial?.image_url ? 'Replace current image' : 'Choose image from computer')}<input type="file" accept="image/*" className="hidden" onChange={(e) => setImage(e.target.files?.[0] ?? null)} /></span></label>
       <label className="flex items-center gap-2 text-xs text-slate-600"><input type="checkbox" checked={f.is_published} onChange={(e) => setF({ ...f, is_published: e.target.checked })} /> Publish this unit on the public website</label>
+      <div className="grid grid-cols-2 gap-4"><label className="block"><span className="eyebrow mb-1.5 block text-slate-400">Unit type</span><select value={f.type} onChange={(e) => setF({ ...f, type: e.target.value })} className="admin-input w-full"><option value="">— Select type —</option>{UNIT_TYPES.map((item) => <option key={item}>{item}</option>)}</select></label><AF label="Bedrooms" type="number" value={f.bedrooms} onChange={(v) => setF({ ...f, bedrooms: v })} /></div>
+      <div className="grid grid-cols-2 gap-4"><AF label="Bathrooms" type="number" value={f.bathrooms} onChange={(v) => setF({ ...f, bathrooms: v })} /><AF label="Area (m²)" value={f.size} onChange={(v) => setF({ ...f, size: v })} /></div>
       <div className="grid grid-cols-2 gap-4">
-        <label className="block"><span className="eyebrow mb-1.5 block text-slate-400">Unit type</span><select value={f.type} onChange={(e) => setF({ ...f, type: e.target.value })} className="admin-input w-full"><option value="">— Select type —</option>{UNIT_TYPES.map((item) => <option key={item}>{item}</option>)}</select></label>
-        <AF label="Bedrooms" type="number" value={f.bedrooms} onChange={(v) => setF({ ...f, bedrooms: v })} />
-      </div>
-      <div className="grid grid-cols-2 gap-4">
-        <AF label="Size (sq ft)" value={f.size} onChange={(v) => setF({ ...f, size: v })} />
         <label className="block"><span className="eyebrow mb-1.5 block text-slate-400">Floor</span><select value={f.floor} onChange={(e) => setF({ ...f, floor: e.target.value })} className="admin-input w-full"><option value="">— Select floor —</option>{FLOOR_OPTIONS.map((item) => <option key={item} value={item}>Floor {item}</option>)}</select></label>
       </div>
       <div className="grid grid-cols-2 gap-4">
         <label className="block"><span className="eyebrow mb-1.5 block text-slate-400">Parking</span><select value={f.parking} onChange={(e) => setF({ ...f, parking: e.target.value })} className="admin-input w-full"><option value="">— Select parking —</option>{PARKING_OPTIONS.map((item) => <option key={item}>{item}</option>)}</select></label>
         <label className="block"><span className="eyebrow mb-1.5 block text-slate-400">View</span><select value={f.view} onChange={(e) => setF({ ...f, view: e.target.value })} className="admin-input w-full"><option value="">— Select view —</option>{VIEW_OPTIONS.map((item) => <option key={item}>{item}</option>)}</select></label>
       </div>
+      <label className="block"><span className="eyebrow mb-1.5 block text-slate-400">Unit description</span><textarea maxLength={500} value={f.description} onChange={(event) => setF({ ...f, description: event.target.value })} rows={3} className="admin-input w-full resize-y" placeholder="Describe the layout, finishes and key features" /><span className="mt-1 block text-right text-[10px] text-slate-400">{f.description.length}/500</span></label>
       <AF label="Price (KSh)" value={f.price} onChange={(v) => setF({ ...f, price: v })} currency />
+      <fieldset><legend className="eyebrow mb-2 text-slate-500">Payment mode *</legend>{projects.find((project) => project.id === f.project_id)?.payment_policy === 'ONE_TIME_ONLY' ? <p className="border border-[#e7d3a8] bg-[#fff8e6] p-3 text-xs font-semibold text-[#765d2b]">One-time payment is required by this project.</p> : <div className="grid grid-cols-2 gap-2"><button type="button" aria-pressed={f.payment_mode === 'ONE_TIME'} onClick={() => setF({ ...f, payment_mode: 'ONE_TIME' })} className={`flex items-center gap-2 border p-3 text-left text-xs font-semibold ${f.payment_mode === 'ONE_TIME' ? 'border-[#087f88] bg-[#e8f7f6] text-[#087f88]' : 'border-[#d6efee] bg-white text-slate-600'}`}><CircleCheck size={15} />One-time payment</button><button type="button" aria-pressed={f.payment_mode === 'INSTALLMENTS'} onClick={() => setF({ ...f, payment_mode: 'INSTALLMENTS' })} className={`flex items-center gap-2 border p-3 text-left text-xs font-semibold ${f.payment_mode === 'INSTALLMENTS' ? 'border-[#087f88] bg-[#e8f7f6] text-[#087f88]' : 'border-[#d6efee] bg-white text-slate-600'}`}><CalendarDays size={15} />Installments</button></div>}{!f.payment_mode && <p className="mt-2 text-[10px] text-[#a55445]">Select one option to save this unit.</p>}</fieldset>
       {err && <p className="text-sm text-[#a55445]">{err}</p>}
       <button disabled={saving} className="btn-primary disabled:opacity-60">{saving ? 'Saving…' : initial ? 'Save Unit Changes' : 'Add Unit'} <ArrowRight size={15} /></button>
     </form>
@@ -2192,8 +2195,9 @@ function AdminUnitReservationForm({ unit, onDone }: { unit: ProjectUnit; onDone:
     setError('');
     if (!buyer) { setError('Choose a registered client account.'); return; }
     if (!unitPrice) { setError('A confirmed price is required before reserving this unit.'); return; }
-    const amount = parseMoney(initialPayment);
-    if (!amount || amount > unitPrice || (amount < unitPrice && Number(installments) < 1)) { setError('Enter a valid initial payment and installment plan.'); return; }
+    const oneTime = unit.payment_mode === 'ONE_TIME';
+    const amount = oneTime ? unitPrice : parseMoney(initialPayment);
+    if (!amount || amount > unitPrice || (!oneTime && amount >= unitPrice) || (!oneTime && Number(installments) < 1)) { setError('Enter a valid initial payment and installment plan for this unit.'); return; }
     setSaving(true);
     const { data, error: reservationError } = await supabase.rpc('reserve_unit_for_client', {
       p_unit_id: unit.id,
@@ -2201,8 +2205,8 @@ function AdminUnitReservationForm({ unit, onDone }: { unit: ProjectUnit; onDone:
       p_reservation_hours: Number(hours),
       p_reason: reason.trim(),
       p_initial_payment: amount,
-      p_installment_count: amount === unitPrice ? 0 : Number(installments),
-      p_frequency: frequency,
+      p_installment_count: oneTime ? 0 : Number(installments),
+      p_frequency: oneTime ? 'ONE_TIME' : frequency,
     });
     setSaving(false);
     if (reservationError || !data?.length) { setError(reservationError?.message || 'The unit could not be reserved. Refresh inventory and retry.'); return; }
@@ -2213,8 +2217,8 @@ function AdminUnitReservationForm({ unit, onDone }: { unit: ProjectUnit; onDone:
   return <form onSubmit={submit} className="grid gap-4">
     <p className="text-sm leading-6 text-slate-500">An override reservation requires a registered client, recorded justification, and payment schedule. Maximum duration is 168 hours.</p>
     <div className="relative"><label className="block"><span className="eyebrow mb-1.5 block text-slate-500">Registered buyer account *</span><input value={buyer ? buyer.full_name || buyer.email || '' : buyerQuery} onChange={(event) => { setBuyer(null); setBuyerQuery(event.target.value); }} required className="admin-input w-full" autoComplete="off" placeholder="Search name, email, or phone" /></label>{buyerMatches.length > 0 && <div className="absolute z-20 mt-1 max-h-48 w-full overflow-y-auto border border-[#c9c5bd] bg-white shadow-lg">{buyerMatches.map((match) => <button key={match.user_id} type="button" onClick={() => { setBuyer(match); setBuyerQuery(''); setBuyerMatches([]); }} className="block w-full border-b border-[#e6e2da] px-3 py-2 text-left hover:bg-[#eefbf9]"><span className="block text-sm font-semibold">{match.full_name || 'NBG client'}</span><span className="text-xs text-slate-500">{match.email || 'No email'}{match.phone ? ` · ${match.phone}` : ''}</span></button>)}</div>}{buyer && <p className="mt-1 text-xs text-[#087f88]">Client account selected: {buyer.email}</p>}</div>
-    <div className="grid gap-3 sm:grid-cols-2"><label className="block"><span className="eyebrow mb-1.5 block text-slate-500">Reservation duration (hours)</span><input type="number" min="1" max="168" required value={hours} onChange={(event) => setHours(event.target.value)} className="admin-input w-full" /></label><label className="block"><span className="eyebrow mb-1.5 block text-slate-500">Initial payment (KSh)</span><CurrencyInput value={initialPayment} onChange={setInitialPayment} className="admin-input w-full" /></label></div>
-    <div className="grid gap-3 sm:grid-cols-2"><label className="block"><span className="eyebrow mb-1.5 block text-slate-500">Installments after initial payment</span><input type="number" min="0" max="120" value={installments} onChange={(event) => setInstallments(event.target.value)} className="admin-input w-full" /></label><label className="block"><span className="eyebrow mb-1.5 block text-slate-500">Frequency</span><select value={frequency} onChange={(event) => setFrequency(event.target.value)} className="admin-input w-full"><option value="MONTHLY">Monthly</option><option value="QUARTERLY">Quarterly</option><option value="ANNUALLY">Annually</option></select></label></div>
+    <div className="grid gap-3 sm:grid-cols-2"><label className="block"><span className="eyebrow mb-1.5 block text-slate-500">Reservation duration (hours)</span><input type="number" min="1" max="168" required value={hours} onChange={(event) => setHours(event.target.value)} className="admin-input w-full" /></label><label className="block"><span className="eyebrow mb-1.5 block text-slate-500">{unit.payment_mode === 'ONE_TIME' ? 'Full payment (KSh)' : 'Initial payment (KSh)'}</span>{unit.payment_mode === 'ONE_TIME' ? <p className="admin-input w-full bg-[#f4f1eb]">KSh {unitPrice.toLocaleString('en-KE')}</p> : <CurrencyInput value={initialPayment} onChange={setInitialPayment} className="admin-input w-full" />}</label></div>
+    {unit.payment_mode !== 'ONE_TIME' && <div className="grid gap-3 sm:grid-cols-2"><label className="block"><span className="eyebrow mb-1.5 block text-slate-500">Installments after initial payment</span><input type="number" min="1" max="120" value={installments} onChange={(event) => setInstallments(event.target.value)} className="admin-input w-full" /></label><label className="block"><span className="eyebrow mb-1.5 block text-slate-500">Frequency</span><select value={frequency} onChange={(event) => setFrequency(event.target.value)} className="admin-input w-full"><option value="MONTHLY">Monthly</option><option value="QUARTERLY">Quarterly</option><option value="ANNUALLY">Annually</option></select></label></div>}
     <label className="block"><span className="eyebrow mb-1.5 block text-slate-500">Reason for override *</span><textarea minLength={12} maxLength={500} required value={reason} onChange={(event) => setReason(event.target.value)} rows={3} className="admin-input w-full resize-y" placeholder="Record the business reason for this reservation" /></label>
     {error && <p role="alert" className="text-sm text-[#a55445]">{error}</p>}
     <button type="submit" disabled={saving || !buyer || !unitPrice} className="btn-primary justify-center disabled:opacity-60">{saving ? 'Reserving…' : 'Confirm reservation'} <CalendarDays size={15} /></button>

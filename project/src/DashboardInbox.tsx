@@ -29,9 +29,7 @@ export default function DashboardInbox({ user, mode }: { user: AdminUser; mode: 
     if (showLoading) setLoading(true);
     const messageQuery = supabase.from('dashboard_messages').select('*').order('created_at', { ascending: false }).limit(500);
     const scopedMessageQuery = mode === 'client' ? messageQuery.eq('client_id', user.id) : messageQuery;
-    const notificationQuery = mode === 'client'
-      ? supabase.from('client_notifications').select('*').eq('user_id', user.id).order('created_at', { ascending: false }).limit(30)
-      : Promise.resolve({ data: [], error: null });
+    const notificationQuery = supabase.from('client_notifications').select('*').eq('user_id', user.id).order('created_at', { ascending: false }).limit(30);
     const clientQuery = mode === 'staff'
       ? supabase.rpc('list_document_client_profiles')
       : Promise.resolve({ data: [], error: null });
@@ -49,10 +47,8 @@ export default function DashboardInbox({ user, mode }: { user: AdminUser; mode: 
         setSelectedClientId((current) => current || latestInbound?.client_id || directory[0]?.id || '');
       }
     }
-    if (mode === 'client') {
-      if (notificationResult.error) setError(`Notifications could not be loaded: ${notificationResult.error.message}`);
-      setNotifications((notificationResult.data ?? []) as InboxNotification[]);
-    }
+    if (notificationResult.error) setError(`Notifications could not be loaded: ${notificationResult.error.message}`);
+    setNotifications((notificationResult.data ?? []) as InboxNotification[]);
     setLoading(false);
   }, [mode, user.id]);
 
@@ -67,7 +63,7 @@ export default function DashboardInbox({ user, mode }: { user: AdminUser; mode: 
         event: '*', schema: 'public', table: 'dashboard_messages',
         ...(mode === 'client' ? { filter: `client_id=eq.${user.id}` } : {}),
       }, () => { void refresh(); });
-    if (mode === 'client') {
+    {
       channel = channel.on('postgres_changes', {
         event: '*', schema: 'public', table: 'client_notifications', filter: `user_id=eq.${user.id}`,
       }, () => { void refresh(); });
@@ -91,7 +87,7 @@ export default function DashboardInbox({ user, mode }: { user: AdminUser; mode: 
   const selectedClient = clients.find((client) => client.id === threadId);
 
   useEffect(() => {
-    if (mode === 'client' && clientTab !== 'messages') return;
+    if (clientTab !== 'messages') return;
     if (!isOpen || !threadId) return;
     const unread = threadMessages.find((message) => message.sender_role === incomingRole && !message.read_at);
     if (!unread || lastReadMessage.current === unread.id) return;
@@ -193,9 +189,9 @@ export default function DashboardInbox({ user, mode }: { user: AdminUser; mode: 
         <div className="flex items-center gap-1"><button type="button" onClick={() => void refresh()} title="Refresh inbox" aria-label="Refresh inbox" className="grid size-8 place-items-center text-slate-500 hover:bg-slate-100"><RotateCw size={15} /></button><button type="button" onClick={() => setIsOpen(false)} title="Close inbox" aria-label="Close inbox" className="grid size-8 place-items-center text-slate-500 hover:bg-slate-100"><X size={16} /></button></div>
       </header>
 
-      {mode === 'staff' && <label className="grid gap-1 border-b border-[#eeeae2] px-4 py-3"><span className="eyebrow text-slate-500">Client conversation</span><select value={selectedClientId} onChange={(event) => setSelectedClientId(event.target.value)} className="admin-input w-full"><option value="">Select a client...</option>{clients.map((client) => <option key={client.id} value={client.id}>{client.full_name || client.email || client.id.slice(0, 8)}</option>)}</select></label>}
+      {mode === 'staff' && <><label className="grid gap-1 border-b border-[#eeeae2] px-4 py-3"><span className="eyebrow text-slate-500">Client conversation</span><select value={selectedClientId} onChange={(event) => setSelectedClientId(event.target.value)} className="admin-input w-full"><option value="">Select a client...</option>{clients.map((client) => <option key={client.id} value={client.id}>{client.full_name || client.email || client.id.slice(0, 8)}</option>)}</select></label><nav aria-label="Inbox sections" className="grid grid-cols-2 border-b border-[#e4e0d8] bg-white"><button type="button" onClick={() => setClientTab('notifications')} aria-current={clientTab === 'notifications' ? 'page' : undefined} className={`border-b-2 px-4 py-3 text-xs font-semibold ${clientTab === 'notifications' ? 'border-[#087f88] text-[#087f88]' : 'border-transparent text-slate-500'}`}>Alerts{unreadNotificationCount > 0 && <span className="ml-2">{unreadNotificationCount}</span>}</button><button type="button" onClick={() => setClientTab('messages')} aria-current={clientTab === 'messages' ? 'page' : undefined} className={`border-b-2 px-4 py-3 text-xs font-semibold ${clientTab === 'messages' ? 'border-[#087f88] text-[#087f88]' : 'border-transparent text-slate-500'}`}>Messages</button></nav></>}
 
-      <div className="min-h-0 flex-1 overflow-y-auto bg-[#f7f6f2] p-4">
+      {mode === 'staff' && clientTab === 'notifications' ? <div className="min-h-0 flex-1 overflow-y-auto bg-[#f7f6f2] p-4">{notifications.map((notification) => <article key={notification.id} className={`mb-3 border p-4 ${notification.read_at ? 'border-[#e2ded5] bg-white' : 'border-[#d58a7d] bg-[#fff7f4]'}`}><p className="text-sm font-semibold text-[#123b4b]">{notification.title}</p><p className="mt-2 whitespace-pre-line break-words text-xs leading-5 text-slate-600">{notification.body}</p>{notification.action_url && <a href={notification.action_url} onClick={() => setIsOpen(false)} className="mt-3 inline-block text-xs font-semibold text-[#087f88] underline">Open lead queue</a>}<div className="mt-3 flex items-center justify-between"><time className="text-[10px] text-slate-400">{formatTime(notification.created_at)}</time>{!notification.read_at && <button type="button" onClick={() => void markNotificationsRead([notification.id])} className="text-[10px] font-semibold text-[#087f88] underline">Mark read</button>}</div></article>)}{!loading && notifications.length === 0 && <p className="py-8 text-center text-xs text-slate-500">No operational alerts.</p>}</div> : <div className="min-h-0 flex-1 overflow-y-auto bg-[#f7f6f2] p-4">
         {error && <p role="alert" className="mb-3 flex gap-2 border border-[#e4b8ad] bg-[#fff7f4] p-3 text-xs text-[#a55445]"><CircleAlert size={14} className="shrink-0" />{error}</p>}
         {loading && <p className="py-8 text-center text-xs text-slate-500">Loading inbox...</p>}
         {!loading && !threadId && <div className="py-10 text-center"><MessageCircle size={22} className="mx-auto text-slate-300" /><p className="mt-2 text-xs text-slate-500">Choose a client to start a conversation.</p></div>}
@@ -205,13 +201,13 @@ export default function DashboardInbox({ user, mode }: { user: AdminUser; mode: 
           return <article key={message.id} className={`mb-3 flex ${mine ? 'justify-end' : 'justify-start'}`}><div className={`max-w-[88%] border px-3 py-2.5 ${mine ? 'border-[#087f88] bg-[#087f88] text-white' : 'border-[#e1ddd5] bg-white text-[#24383d]'}`}><p className="mb-1 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide opacity-70">{mine ? 'You' : message.sender_role === 'STAFF' ? 'NBG team' : selectedClient?.full_name || 'Client'}{mine && message.read_at && <Check size={11} aria-label="Read" />}</p><p className="whitespace-pre-wrap break-words text-xs leading-5">{message.body}</p><p className="mt-2 text-right text-[9px] opacity-60">{formatTime(message.created_at)}</p></div></article>;
         })}
         <div ref={historyEnd} />
-      </div>
+      </div>}
 
-      <form onSubmit={sendMessage} className="border-t border-[#e2ded5] bg-white p-3">
+      {clientTab === 'messages' && <form onSubmit={sendMessage} className="border-t border-[#e2ded5] bg-white p-3">
         <label className="sr-only" htmlFor={`message-${mode}`}>Write a message</label>
         <textarea id={`message-${mode}`} value={draft} onChange={(event) => setDraft(event.target.value)} maxLength={4000} rows={2} disabled={!threadId || sending} placeholder={mode === 'staff' ? 'Write to this client...' : 'Write to the NBG team...'} className="admin-input w-full resize-none text-xs disabled:bg-slate-50" />
         <div className="mt-2 flex items-center justify-between"><span className="text-[10px] text-slate-400">{draft.length}/4000</span><button type="submit" disabled={!threadId || !draft.trim() || sending} className="inline-flex items-center gap-2 bg-[#0d4055] px-3 py-2 text-xs font-semibold text-white hover:bg-[#123b4b] disabled:opacity-50">{sending ? 'Sending...' : 'Send message'} <ArrowUp size={14} /></button></div>
-      </form>
+      </form>}
     </section>}
   </div>;
 }

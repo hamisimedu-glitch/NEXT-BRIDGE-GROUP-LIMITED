@@ -41,6 +41,11 @@ export type Lead = {
   action_project_id?: string | null;
   tracking_code?: string | null;
   last_contacted_at: string | null;
+  stage_entered_at?: string | null;
+  last_action_at?: string | null;
+  assigned_consultant_user_id?: string | null;
+  outcome?: string | null;
+  outcome_notes?: string | null;
   created_at: string;
 };
 
@@ -84,6 +89,10 @@ export type ProjectUnit = {
   view: string | null;
   price: string | null;
   status: string;
+  payment_mode?: 'ONE_TIME' | 'INSTALLMENTS';
+  bathrooms?: number | null;
+  description?: string | null;
+  amenities?: string[] | null;
   property_category?: string | null;
   availability_note?: string | null;
   image_url: string | null;
