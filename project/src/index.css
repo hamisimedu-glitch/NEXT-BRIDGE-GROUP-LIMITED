@@ -100,7 +100,8 @@ button { cursor: pointer; }
 .portal-nav-group button.portal-nav-active { background: #19c6c9; color: #063e50; font-weight: 700; box-shadow: 0 8px 20px rgba(25,198,201,.2); }
 .portal-signout { margin: 14px; border-top: 1px solid rgba(255,255,255,.12); padding: 18px 12px; color: rgba(255,255,255,.58); font-size: 11px; text-align: left; }
 .portal-main { min-width: 0; width: 100%; margin-left: 258px; }
-.portal-topbar { display: flex; min-height: 82px; align-items: center; justify-content: space-between; border-bottom: 1px solid rgba(169,217,216,.58); background: rgba(255,255,255,.48); padding: 16px 5vw; backdrop-filter: blur(20px); }
+.portal-topbar { position: sticky; top: 0; z-index: 30; display: flex; min-height: 72px; align-items: center; justify-content: space-between; gap: 16px; border-bottom: 1px solid #d8e0df; background: rgba(255,255,255,.97); padding: 12px clamp(18px, 4vw, 56px); backdrop-filter: blur(18px); }
+.portal-topbar .eyebrow { color: #087f88 !important; }
 .portal-topbar h1 { margin-top: 6px; color: #123b4b; font-family: 'DM Serif Display', Georgia, serif; font-size: 30px; }
 .portal-user-dot { width: 8px; height: 8px; border-radius: 99px; background: #19c6c9; box-shadow: 0 0 0 4px #d9f6f3; }
 .portal-content { padding: 42px 5vw 72px; }
@@ -505,7 +506,7 @@ button { cursor: pointer; }
 .client-access-grid button span { color: #59757e; font-size: 7px; }
 .client-map-panel iframe { display: block; width: 100%; height: 105px; margin-top: 10px; border: 0; border-radius: 6px; }
 .client-map-panel > p { margin-top: 6px; color: #607c84; font-size: 8px; }
-.client-mobile-brand { display: flex; align-items: center; gap: 5px; color: white; font-family: 'DM Serif Display', Georgia, serif; font-size: 15px; }
+.client-mobile-brand { display: flex; align-items: center; gap: 5px; color: #123b4b; font-family: 'DM Serif Display', Georgia, serif; font-size: 15px; }
 .client-mobile-brand img { width: 25px; height: 25px; object-fit: contain; }
 .client-payment-shell { display: grid; gap: 20px; }
 .client-payment-hero { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(260px, .88fr); gap: 18px; align-items: stretch; padding: 20px 20px 18px; border: 1px solid #dfeae8; border-radius: 18px; background: linear-gradient(135deg, #f7f3eb 0%, #ebfaf8 42%, #eaf5f4 100%); box-shadow: 0 16px 30px rgba(17,59,74,.04); }
@@ -726,11 +727,11 @@ button { cursor: pointer; }
 	.portal-shell { display: block; min-height: 100vh; background: #f4f8f7; }
 	.portal-sidebar { z-index: 90; width: min(280px, 84vw); }
 	.portal-mobile-trigger { display: none; }
-	.client-mobile-header { position: sticky; top: 0; z-index: 65; display: flex; height: 48px; align-items: center; justify-content: space-between; border-bottom: 1px solid rgba(255,255,255,.18); background: #0d4055; padding: 0 12px; color: white; box-shadow: 0 2px 8px rgba(10,45,60,.14); }
-	.client-mobile-header > button:first-child { display: grid; width: 32px; height: 32px; place-items: center; color: white; }
-	.client-mobile-header > button[aria-label^="Open NBG inbox"] { position: relative; height: 32px; width: 34px; border: 0; background: transparent; padding: 0; }
-	.client-mobile-header > button[aria-label^="Open NBG inbox"] > span:not(.absolute) { display: none; }
-	.client-mobile-header > button[aria-label^="Open NBG inbox"] svg { width: 18px; }
+	.client-mobile-header { position: sticky; top: 0; z-index: 65; display: flex; height: 56px; align-items: center; justify-content: space-between; border-bottom: 1px solid #d8e0df; background: rgba(255,255,255,.98); padding: 0 12px; color: #123b4b; box-shadow: 0 2px 8px rgba(10,45,60,.08); backdrop-filter: blur(16px); }
+	.client-mobile-header > button:first-child { display: grid; width: 32px; height: 32px; place-items: center; color: #123b4b; }
+	.client-mobile-header .relative { gap: 5px; }
+	.client-mobile-header .relative > button { width: 32px; height: 32px; border-color: #d8e0df; background: white; padding: 0; color: #123b4b; }
+	.client-mobile-header .relative > button svg { width: 17px; }
 	.portal-main { padding-bottom: calc(64px + env(safe-area-inset-bottom)); }
 	.portal-topbar { display: none; }
 	.portal-content { padding: 12px 12px 18px; }

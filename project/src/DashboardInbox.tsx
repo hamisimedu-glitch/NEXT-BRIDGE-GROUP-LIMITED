@@ -1,6 +1,6 @@
 import { FormEvent, RefObject, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { ArrowUp, Bell, Check, CircleAlert, MessageCircle, RotateCw, X } from 'lucide-react';
+import { ArrowUp, Bell, Check, CircleAlert, Mail, MessageCircle, RotateCw, X } from 'lucide-react';
 import type { AdminUser } from '@/lib/auth';
 import { supabase } from '@/lib/supabase';
 
@@ -103,7 +103,6 @@ export default function DashboardInbox({ user, mode }: { user: AdminUser; mode: 
   const incomingRole = mode === 'staff' ? 'CLIENT' : 'STAFF';
   const unreadMessageCount = messages.filter((message) => message.sender_role === incomingRole && !message.read_at).length;
   const unreadNotificationCount = notifications.filter((notification) => !notification.read_at).length;
-  const unreadCount = unreadMessageCount + unreadNotificationCount;
   const threadMessages = useMemo(() => {
     if (!threadId) return [];
     return messages.filter((message) => message.client_id === threadId);
@@ -133,11 +132,13 @@ export default function DashboardInbox({ user, mode }: { user: AdminUser; mode: 
 
   useEffect(() => { historyEnd.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); }, [threadMessages]);
 
-  const openInbox = () => {
+  const openInbox = (tab?: ClientInboxTab) => {
     if (isOpen) {
+      if (tab) { setClientTab(tab); return; }
       setIsOpen(false);
       return;
     }
+    if (tab) setClientTab(tab);
     setIsOpen(true);
     void refresh(true);
   };
@@ -177,34 +178,43 @@ export default function DashboardInbox({ user, mode }: { user: AdminUser; mode: 
 
   const formatTime = (value: string) => new Date(value).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
 
-  if (mode === 'client') return createPortal(<ClientInboxDrawer
-    user={user}
-    isOpen={isOpen}
-    onToggle={openInbox}
-    onClose={() => setIsOpen(false)}
-    tab={clientTab}
-    onTabChange={setClientTab}
-    notifications={notifications}
-    unreadNotifications={unreadNotificationCount}
-    messages={threadMessages}
-    unreadMessages={unreadMessageCount}
-    loading={loading}
-    error={error}
-    realtimeConnected={realtimeConnected}
-    onRefresh={() => void refresh(true)}
-    onMarkRead={(id: string) => void markNotificationsRead([id])}
-    onMarkAllRead={() => void markAllNotificationsRead()}
-    draft={draft}
-    onDraftChange={setDraft}
-    sending={sending}
-    onSend={sendMessage}
-    historyEnd={historyEnd}
-  />, document.body);
+  if (mode === 'client') return <>
+    <div className="relative flex items-center gap-2">
+      <button type="button" aria-label={`Open notifications${unreadNotificationCount ? `, ${unreadNotificationCount} unread` : ''}`} aria-expanded={isOpen} onClick={() => openInbox('notifications')} title="Notifications" className="relative grid size-9 shrink-0 place-items-center border border-[#d8e0df] bg-white text-[#123b4b] transition hover:bg-[#eefbf9]"><Bell size={18} />{unreadNotificationCount > 0 && <span className="absolute -right-1 -top-1 grid min-h-4 min-w-4 place-items-center rounded-full bg-[#a55445] px-1 text-[9px] font-bold leading-none text-white">{unreadNotificationCount > 99 ? '99+' : unreadNotificationCount}</span>}</button>
+      <button type="button" aria-label={`Open messages${unreadMessageCount ? `, ${unreadMessageCount} unread` : ''}`} aria-expanded={isOpen} onClick={() => openInbox('messages')} title="Messages" className="relative grid size-9 shrink-0 place-items-center border border-[#d8e0df] bg-white text-[#123b4b] transition hover:bg-[#eefbf9]"><Mail size={18} />{unreadMessageCount > 0 && <span className="absolute -right-1 -top-1 grid min-h-4 min-w-4 place-items-center rounded-full bg-[#a55445] px-1 text-[9px] font-bold leading-none text-white">{unreadMessageCount > 99 ? '99+' : unreadMessageCount}</span>}</button>
+    </div>
+    {isOpen && createPortal(<ClientInboxDrawer
+      user={user}
+      isOpen={isOpen}
+      onClose={() => setIsOpen(false)}
+      tab={clientTab}
+      onTabChange={setClientTab}
+      notifications={notifications}
+      unreadNotifications={unreadNotificationCount}
+      messages={threadMessages}
+      unreadMessages={unreadMessageCount}
+      loading={loading}
+      error={error}
+      realtimeConnected={realtimeConnected}
+      onRefresh={() => void refresh(true)}
+      onMarkRead={(id: string) => void markNotificationsRead([id])}
+      onMarkAllRead={() => void markAllNotificationsRead()}
+      draft={draft}
+      onDraftChange={setDraft}
+      sending={sending}
+      onSend={sendMessage}
+      historyEnd={historyEnd}
+    />, document.body)}
+  </>;
 
-  return <div className="relative">
-    <button type="button" aria-label={`Open messages and notifications${unreadCount ? `, ${unreadCount} unread` : ''}`} aria-expanded={isOpen} onClick={openInbox} className="relative inline-flex h-10 shrink-0 items-center justify-center gap-2 border border-[#0d4055] bg-[#0d4055] px-3 text-white shadow-sm transition hover:bg-[#123b4b]">
-      <Bell size={20} strokeWidth={2.2} /><span className="hidden text-xs font-semibold sm:inline">Inbox</span>
-      {unreadCount > 0 && <span className="absolute -right-1 -top-1 grid min-h-5 min-w-5 place-items-center rounded-full bg-[#a55445] px-1 text-[10px] font-bold leading-none text-white">{unreadCount > 99 ? '99+' : unreadCount}</span>}
+  return <div className="relative flex items-center gap-2">
+    <button type="button" aria-label={`Open notifications${unreadNotificationCount ? `, ${unreadNotificationCount} unread` : ''}`} aria-expanded={isOpen} onClick={() => openInbox('notifications')} title="Notifications" className="relative grid size-9 shrink-0 place-items-center border border-[#d8e0df] bg-white text-[#123b4b] transition hover:bg-[#eefbf9]">
+      <Bell size={18} strokeWidth={2} />
+      {unreadNotificationCount > 0 && <span className="absolute -right-1 -top-1 grid min-h-4 min-w-4 place-items-center rounded-full bg-[#a55445] px-1 text-[9px] font-bold leading-none text-white">{unreadNotificationCount > 99 ? '99+' : unreadNotificationCount}</span>}
+    </button>
+    <button type="button" aria-label={`Open messages${unreadMessageCount ? `, ${unreadMessageCount} unread` : ''}`} aria-expanded={isOpen} onClick={() => openInbox('messages')} title="Messages" className="relative grid size-9 shrink-0 place-items-center border border-[#d8e0df] bg-white text-[#123b4b] transition hover:bg-[#eefbf9]">
+      <Mail size={18} strokeWidth={2} />
+      {unreadMessageCount > 0 && <span className="absolute -right-1 -top-1 grid min-h-4 min-w-4 place-items-center rounded-full bg-[#a55445] px-1 text-[9px] font-bold leading-none text-white">{unreadMessageCount > 99 ? '99+' : unreadMessageCount}</span>}
     </button>
 
     {isOpen && <section aria-label="Messages and notifications" onClick={(event) => handleInboxActionClick(event, 'staff', () => setIsOpen(false))} className="absolute right-0 top-full z-[60] mt-2 flex h-[min(72vh,620px)] w-[min(92vw,440px)] flex-col border border-[#c9c5bd] bg-white text-[#17232b] shadow-2xl">
@@ -236,10 +246,9 @@ export default function DashboardInbox({ user, mode }: { user: AdminUser; mode: 
   </div>;
 }
 
-function ClientInboxDrawer({ user, isOpen, onToggle, onClose, tab, onTabChange, notifications, unreadNotifications, messages, unreadMessages, loading, error, realtimeConnected, onRefresh, onMarkRead, onMarkAllRead, draft, onDraftChange, sending, onSend, historyEnd }: {
+function ClientInboxDrawer({ user, isOpen, onClose, tab, onTabChange, notifications, unreadNotifications, messages, unreadMessages, loading, error, realtimeConnected, onRefresh, onMarkRead, onMarkAllRead, draft, onDraftChange, sending, onSend, historyEnd }: {
   user: AdminUser;
   isOpen: boolean;
-  onToggle: () => void;
   onClose: () => void;
   tab: ClientInboxTab;
   onTabChange: (tab: ClientInboxTab) => void;
@@ -261,7 +270,6 @@ function ClientInboxDrawer({ user, isOpen, onToggle, onClose, tab, onTabChange, 
 }) {
   const formatTime = (value: string) => new Date(value).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
   return <>
-    <button type="button" aria-label={`Open NBG inbox${unreadNotifications + unreadMessages ? `, ${unreadNotifications + unreadMessages} unread` : ''}`} aria-expanded={isOpen} onClick={onToggle} className="relative inline-flex h-10 shrink-0 items-center justify-center gap-2 border border-[#0d4055] bg-[#0d4055] px-3 text-white shadow-sm transition hover:bg-[#123b4b]"><Bell size={19} /><span className="hidden text-xs font-semibold sm:inline">Inbox</span>{unreadNotifications + unreadMessages > 0 && <span className="absolute -right-1 -top-1 grid min-h-5 min-w-5 place-items-center rounded-full bg-[#a55445] px-1 text-[10px] font-bold leading-none text-white">{unreadNotifications + unreadMessages > 99 ? '99+' : unreadNotifications + unreadMessages}</span>}</button>
     {isOpen && <>
       <button type="button" aria-label="Close inbox overlay" onClick={onClose} className="fixed inset-0 z-[70] bg-[#071116]/45" />
       <aside role="dialog" aria-modal="true" aria-label="NBG client inbox" onClick={(event) => handleInboxActionClick(event, 'client', onClose)} className="fixed inset-y-0 right-0 z-[71] flex w-full max-w-[440px] flex-col border-l border-[#c9c5bd] bg-[#f7f6f2] text-[#17232b] shadow-2xl">

@@ -173,6 +173,8 @@ async function generateBrandedPdf(kind: string, title: string, recipient: string
   const right = 194;
   const contentWidth = 178;
   const footerTop = 270;
+  const compactLayout = ['AGREEMENT', 'CLIENT_INVOICE', 'PURCHASE_ORDER', 'FLOOR_PLAN'].includes(kind);
+  const headerTitle = ({ AGREEMENT: 'Sale agreement', CLIENT_INVOICE: 'Invoice', PURCHASE_ORDER: 'Purchase order', FLOOR_PLAN: 'Floor plan' } as Record<string, string>)[kind] || title;
   const snapshotMarker = 'SYSTEM SNAPSHOT\n';
   let readableDetails = details;
   let documentSnapshot: Record<string, unknown> | null = null;
@@ -193,6 +195,15 @@ async function generateBrandedPdf(kind: string, title: string, recipient: string
     }
   }
   const drawHeader = () => {
+    if (compactLayout) {
+      pdf.setTextColor(31, 58, 52); pdf.setFont('times', 'normal'); pdf.setFontSize(12); pdf.text('NEXT BRIDGE GROUP LIMITED', left, 15);
+      pdf.setTextColor(93, 102, 99); pdf.setFont('helvetica', 'normal'); pdf.setFontSize(7); pdf.text('NYALI, MOMBASA, KENYA', left, 21);
+      pdf.setTextColor(31, 58, 52); pdf.setFont('times', 'normal'); pdf.setFontSize(17); pdf.text(headerTitle, right, 16, { align: 'right' });
+      pdf.setTextColor(93, 102, 99); pdf.setFont('helvetica', 'normal'); pdf.setFontSize(7); pdf.text(`Ref ${documentRef}`, right, 23, { align: 'right' });
+      pdf.setDrawColor(31, 58, 52); pdf.setLineWidth(.55); pdf.line(left, 29, right, 29);
+      pdf.setLineWidth(.2); pdf.line(left, 30.5, right, 30.5);
+      return;
+    }
     pdf.addImage(logo, 'PNG', left, 10, 16, 16);
     pdf.setTextColor(31, 58, 52); pdf.setFont('times', 'bold'); pdf.setFontSize(12); pdf.text('NEXT BRIDGE GROUP LIMITED', 36, 16);
     pdf.setTextColor(93, 102, 99); pdf.setFont('helvetica', 'normal'); pdf.setFontSize(6.5); pdf.text('BUILDING HOMES · CREATING LEGACIES', 36, 22);
@@ -221,11 +232,14 @@ async function generateBrandedPdf(kind: string, title: string, recipient: string
   };
   const ensureSpace = (y: number, height: number) => { if (y + height > footerTop - 6) { drawFooter(); pdf.addPage(); drawHeader(); drawWatermark(); return 48; } return y; };
   drawHeader();
-  drawWatermark();
-  pdf.setTextColor(31, 58, 52); pdf.setFont('times', 'bold'); pdf.setFontSize(22); const titleLines = pdf.splitTextToSize(title, contentWidth); pdf.text(titleLines, left, 52);
-  let y = 52 + titleLines.length * 8;
-  pdf.setTextColor(93, 102, 99); pdf.setFont('helvetica', 'normal'); pdf.setFontSize(7); pdf.text(`DOCUMENT NUMBER  ${documentRef}`, left, y); pdf.text(`ISSUED  ${new Date().toLocaleDateString('en-KE')}`, right, y, { align: 'right' }); y += 7;
-  pdf.text(`Prepared for: ${recipient || 'NBG client'}`, left, y); if (amount) pdf.text(`Amount: KSh ${Number(amount).toLocaleString()}`, left + 82, y); y += 12;
+  if (!compactLayout) drawWatermark();
+  let y = 42;
+  if (!compactLayout) {
+    pdf.setTextColor(31, 58, 52); pdf.setFont('times', 'bold'); pdf.setFontSize(22); const titleLines = pdf.splitTextToSize(title, contentWidth); pdf.text(titleLines, left, 52);
+    y = 52 + titleLines.length * 8;
+    pdf.setTextColor(93, 102, 99); pdf.setFont('helvetica', 'normal'); pdf.setFontSize(7); pdf.text(`DOCUMENT NUMBER  ${documentRef}`, left, y); pdf.text(`ISSUED  ${new Date().toLocaleDateString('en-KE')}`, right, y, { align: 'right' }); y += 7;
+    pdf.text(`Prepared for: ${recipient || 'NBG client'}`, left, y); if (amount) pdf.text(`Amount: KSh ${Number(amount).toLocaleString()}`, left + 82, y); y += 12;
+  }
   const sourceData = documentSnapshot?.document_data && typeof documentSnapshot.document_data === 'object' ? documentSnapshot.document_data as Record<string, unknown> : {};
   const getValue = (key: string, fallback = 'Not specified') => String(sourceData[key] ?? fallback);
   const currency = getValue('currency', 'KES');
@@ -308,8 +322,197 @@ async function generateBrandedPdf(kind: string, title: string, recipient: string
     pdf.text(money(rows[rows.length - 1]?.[1] ?? 0), right - 3, y + 6.7, { align: 'right' });
     y += 15;
   };
+  const drawCompactTotals = (rows: [string, number][], totalLabel: string) => {
+    const summaryX = right - 70;
+    rows.slice(0, -1).forEach(([label, value]) => {
+      pdf.setFont('helvetica', 'normal'); pdf.setFontSize(7.5); pdf.setTextColor(45, 55, 60);
+      pdf.text(label, summaryX, y + 4.5); pdf.text(money(value), right - 3, y + 4.5, { align: 'right' }); y += 6.5;
+      pdf.setDrawColor(216, 212, 202); pdf.setLineWidth(.2); pdf.line(left, y, right, y);
+    });
+    const total = rows[rows.length - 1];
+    if (total) {
+      pdf.setFillColor(31, 58, 52); pdf.rect(summaryX - 3, y, right - summaryX + 3, 10, 'F');
+      pdf.setFont('times', 'bold'); pdf.setFontSize(10); pdf.setTextColor(255, 255, 255);
+      pdf.text(totalLabel, summaryX, y + 6.7); pdf.text(money(total[1]), right - 3, y + 6.7, { align: 'right' }); y += 15;
+    }
+  };
+  const drawCompactSignatures = (labels: string[][]) => {
+    const gap = 8;
+    const columnWidth = (contentWidth - gap) / 2;
+    labels.forEach((row) => {
+      row.forEach((label, index) => {
+        const x = left + index * (columnWidth + gap);
+        pdf.setDrawColor(45, 55, 60); pdf.setLineWidth(.25); pdf.line(x, y, x + columnWidth, y);
+        pdf.setFont('helvetica', 'normal'); pdf.setFontSize(6.8); pdf.setTextColor(93, 102, 99); pdf.text(label, x, y + 5.5);
+      });
+      y += 16;
+    });
+  };
+
+  if (kind === 'AGREEMENT') {
+    const buyerName = getValue('buyer_legal_name', recipient);
+    const saleData = documentSnapshot?.sale && typeof documentSnapshot.sale === 'object' ? documentSnapshot.sale as Record<string, unknown> : {};
+    const price = Number(sourceData.total_purchase_price || saleData.sale_price || amount || 0);
+    const schedule = Array.isArray(sourceData.payment_schedule) ? sourceData.payment_schedule as Record<string, unknown>[] : [];
+    const deposit = Number(saleData.deposit_amount || schedule[0]?.amount || 0);
+    pdf.setFont('helvetica', 'normal'); pdf.setFontSize(8); pdf.setTextColor(45, 55, 60);
+    pdf.text(pdf.splitTextToSize(`This agreement is made on ${new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' })} between Next Bridge Group Limited (the Seller) and ${buyerName} (the Buyer).`, contentWidth), left, y); y += 13;
+    pdf.setFont('times', 'normal'); pdf.setFontSize(11); pdf.setTextColor(31, 58, 52); pdf.text('Property', left, y); y += 7;
+    const unitData = documentSnapshot?.unit && typeof documentSnapshot.unit === 'object' ? documentSnapshot.unit as Record<string, unknown> : {};
+    const bedrooms = unitData.bedrooms ? `${unitData.bedrooms} bedrooms, ` : '';
+    const size = sourceData.size ? ` ${sourceData.size},` : '';
+    const parking = unitData.parking ? `, ${unitData.parking}` : '';
+    pdf.setFont('helvetica', 'normal'); pdf.setFontSize(8); pdf.setTextColor(45, 55, 60);
+    pdf.text(pdf.splitTextToSize(`${getValue('property_reference', getValue('unit_number'))}, ${getValue('property_type')}, ${bedrooms}${size}${parking}.`, contentWidth), left, y); y += 13;
+    pdf.setFont('times', 'normal'); pdf.setFontSize(11); pdf.setTextColor(31, 58, 52); pdf.text('Price and payment', left, y); y += 5;
+    const agreementRows: [string, number][] = [['Purchase price', price], ['Deposit due on signing', deposit], ['Balance due on completion', Math.max(0, price - deposit)]];
+    agreementRows.forEach(([label, value]) => {
+      y += 5; pdf.setFont('helvetica', 'normal'); pdf.setFontSize(8); pdf.setTextColor(45, 55, 60); pdf.text(label, left + 2, y);
+      pdf.text(money(value), right - 2, y, { align: 'right' }); pdf.setDrawColor(216, 212, 202); pdf.line(left, y + 4, right, y + 4); y += 4;
+    });
+    y += 5; pdf.setFont('times', 'normal'); pdf.setFontSize(11); pdf.setTextColor(31, 58, 52); pdf.text('Terms', left, y); y += 7;
+    const terms = [
+      getValue('title_legal_information', 'The Seller confirms good title, free of encumbrances.'),
+      'Vacant possession is given on payment of the full balance.',
+      getValue('default_termination', 'If the Buyer defaults, the Seller may retain the deposit after written notice, subject to the executed sale contract.'),
+      'If the Seller defaults, the deposit is refunded in full within 14 days.',
+      getValue('taxes_and_costs', 'Rates and utilities are apportioned to the date of possession.'),
+      getValue('dispute_resolution', 'This agreement is governed by the laws of Kenya.'),
+    ];
+    terms.forEach((term, index) => {
+      const lines = pdf.splitTextToSize(`${index + 1}. ${term}`, contentWidth - 4);
+      pdf.setFont('helvetica', 'normal'); pdf.setFontSize(7.6); pdf.setTextColor(45, 55, 60); pdf.text(lines, left + 2, y); y += Math.max(6, lines.length * 4.2);
+    });
+    y += 3; drawCompactSignatures([['Seller signature, name, date', 'Buyer signature, name, date'], ['Witness 1', 'Witness 2']]);
+  }
+
+  if (kind === 'CLIENT_INVOICE') {
+    const clientData = documentSnapshot?.client && typeof documentSnapshot.client === 'object' ? documentSnapshot.client as Record<string, unknown> : {};
+    const invoiceItems = Array.isArray(sourceData.invoice_items) ? sourceData.invoice_items.filter((item): item is Record<string, unknown> => typeof item === 'object' && item !== null) : [];
+    const currency = String(sourceData.currency || 'KES');
+    const invoiceMoney = (value: unknown) => `${currency} ${Number(value || 0).toLocaleString('en-KE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    const subtotal = Number(sourceData.subtotal || 0);
+    const tax = Number(sourceData.tax_amount || 0);
+    const total = Number(sourceData.grand_total || subtotal + tax || amount || 0);
+    const third = contentWidth / 3;
+    [['Bill to', String(sourceData.client_name || recipient), String(clientData.phone || '')], ['Invoice date', getValue('invoice_date'), String(clientData.email || '')], ['Due date', getValue('due_date'), '']].forEach(([label, value, detail], index) => {
+      const x = left + index * third;
+      pdf.setFont('helvetica', 'normal'); pdf.setFontSize(7); pdf.setTextColor(93, 102, 99); pdf.text(label, x, y);
+      pdf.setFont('helvetica', 'bold'); pdf.setFontSize(8); pdf.setTextColor(28, 35, 33); pdf.text(pdf.splitTextToSize(value, third - 5), x, y + 7);
+      if (detail) { pdf.setFont('helvetica', 'normal'); pdf.setFontSize(7); pdf.text(pdf.splitTextToSize(detail, third - 5), x, y + 13); }
+    });
+    y += 25;
+    const invoiceRows = invoiceItems.map((item) => {
+      const quantity = Number(item.quantity || item.qty || 1);
+      const rate = Number(item.unit_price || item.rate || 0);
+      return [String(item.description || item.name || 'Invoice item'), String(quantity), invoiceMoney(rate), invoiceMoney(item.amount ?? quantity * rate)];
+    });
+    const columnWidth = contentWidth / 4;
+    pdf.setFillColor(31, 58, 52); pdf.rect(left, y, contentWidth, 9, 'F');
+    pdf.setFont('helvetica', 'bold'); pdf.setFontSize(7); pdf.setTextColor(255, 255, 255);
+    ['Description', 'Qty', 'Rate', 'Amount'].forEach((label, index) => pdf.text(label, index === 0 ? left + 3 : left + (index + 1) * columnWidth - 3, y + 5.8, index ? { align: 'right' } : undefined));
+    y += 9;
+    invoiceRows.forEach((row) => {
+      const descriptionLines = pdf.splitTextToSize(row[0], columnWidth - 7);
+      const rowHeight = Math.max(10, descriptionLines.length * 4 + 4);
+      pdf.setFont('helvetica', 'normal'); pdf.setFontSize(7.5); pdf.setTextColor(28, 35, 33); pdf.text(descriptionLines, left + 3, y + 5.5);
+      row.slice(1).forEach((value, index) => pdf.text(value, left + (index + 2) * columnWidth - 3, y + 5.5, { align: 'right' }));
+      pdf.setDrawColor(216, 212, 202); pdf.line(left, y + rowHeight, right, y + rowHeight); y += rowHeight;
+    });
+    y += 2;
+    const drawInvoiceTotal = (label: string, value: number, isTotal = false) => {
+      if (isTotal) { pdf.setFillColor(31, 58, 52); pdf.rect(right - 68, y, 68, 9, 'F'); pdf.setTextColor(255, 255, 255); pdf.setFont('times', 'bold'); pdf.setFontSize(9); }
+      else { pdf.setTextColor(45, 55, 60); pdf.setFont('helvetica', 'normal'); pdf.setFontSize(7.5); }
+      pdf.text(label, right - 64, y + 6); pdf.text(invoiceMoney(value), right - 3, y + 6, { align: 'right' }); y += isTotal ? 11 : 7;
+    };
+    drawInvoiceTotal('Subtotal', subtotal); drawInvoiceTotal(`Tax (${getValue('tax_rate', 'applicable')})`, tax); drawInvoiceTotal('Total due', total, true);
+    y += 5; pdf.setFont('times', 'normal'); pdf.setFontSize(11); pdf.setTextColor(31, 58, 52); pdf.text('Pay to', left, y); y += 6;
+    const paymentText = [sourceData.bank_name, sourceData.account_name, sourceData.account_number ? `Account ${sourceData.account_number}` : '', sourceData.payment_terms].filter(Boolean).join(' · ') || String(sourceData.payment_terms || 'Use the invoice reference when making payment.');
+    pdf.setFont('helvetica', 'normal'); pdf.setFontSize(7); pdf.setTextColor(93, 102, 99); pdf.text(pdf.splitTextToSize(paymentText, contentWidth), left, y);
+  }
+
+  if (kind === 'PURCHASE_ORDER') {
+    const third = contentWidth / 3;
+    const columns: [string, string, string][] = [
+      ['Vendor', getValue('supplier_name', recipient), getValue('supplier_address', '')],
+      ['Ship to', getValue('delivery_location'), getValue('delivery_contact', '')],
+      ['Order date, delivery', `${new Date().toLocaleDateString('en-GB')} · ${getValue('required_delivery_date')}`, documentRef],
+    ];
+    columns.forEach(([label, value, detail], index) => {
+      const x = left + index * third;
+      pdf.setFont('helvetica', 'normal'); pdf.setFontSize(7); pdf.setTextColor(93, 102, 99); pdf.text(label, x, y);
+      pdf.setFont('helvetica', 'bold'); pdf.setFontSize(8); pdf.setTextColor(28, 35, 33); pdf.text(pdf.splitTextToSize(value, third - 5), x, y + 7);
+      if (detail) { pdf.setFont('helvetica', 'normal'); pdf.setFontSize(7); pdf.text(pdf.splitTextToSize(detail, third - 5), x, y + 13); }
+    });
+    y += 25;
+    const ordered = Array.isArray(sourceData.ordered_items) ? sourceData.ordered_items.map((entry) => typeof entry === 'object' && entry !== null ? entry as Record<string, unknown> : { description: String(entry) }) : [];
+    const poRows = ordered.map((item) => {
+      const quantity = Number(item.quantity || item.qty || 1);
+      const rate = Number(item.unit_price || item.rate || 0);
+      return [String(item.description || item.name || 'Item'), String(item.code || ''), String(quantity), money(rate), money(item.amount ?? item.total ?? quantity * rate)];
+    });
+    const widths = [0.39, 0.15, 0.12, 0.15, 0.19];
+    pdf.setFillColor(31, 58, 52); pdf.rect(left, y, contentWidth, 9, 'F'); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(7); pdf.setTextColor(255, 255, 255);
+    ['Item', 'Code', 'Qty', 'Unit', 'Total'].forEach((label, index) => { const x = left + widths.slice(0, index).reduce((sum, width) => sum + width, 0) * contentWidth; pdf.text(label, index === 0 ? x + 3 : x + widths[index] * contentWidth - 3, y + 5.8, index ? { align: 'right' } : undefined); });
+    y += 9;
+    poRows.forEach((row) => {
+      const firstWidth = widths[0] * contentWidth;
+      const lines = pdf.splitTextToSize(row[0], firstWidth - 7);
+      const rowHeight = Math.max(10, lines.length * 4 + 4);
+      pdf.setFont('helvetica', 'normal'); pdf.setFontSize(7.5); pdf.setTextColor(28, 35, 33); pdf.text(lines, left + 3, y + 5.5);
+      let x = left + firstWidth;
+      row.slice(1).forEach((value, index) => { const width = widths[index + 1] * contentWidth; pdf.text(value, x + width - 3, y + 5.5, { align: 'right' }); x += width; });
+      pdf.setDrawColor(216, 212, 202); pdf.line(left, y + rowHeight, right, y + rowHeight); y += rowHeight;
+    });
+    y += 2; drawCompactTotals([['Subtotal', Number(sourceData.subtotal || 0)], ['Delivery', Number(sourceData.delivery_charges || 0)], ['Order total', Number(sourceData.grand_total || Number(sourceData.subtotal || 0) + Number(sourceData.delivery_charges || 0) + Number(sourceData.tax_amount || 0))]], 'Order total');
+    if (y < 222) y = 222;
+    pdf.setFont('helvetica', 'normal'); pdf.setFontSize(7.2); pdf.setTextColor(93, 102, 99);
+    pdf.text(pdf.splitTextToSize(`Payment terms: ${getValue('payment_terms', 'As agreed')}. Goods must match the listed codes. Quote ${documentRef} on delivery notes and invoices.`, contentWidth), left, y); y += 12;
+    drawCompactSignatures([['Prepared by', 'Approved by']]);
+  }
+
+  if (kind === 'FLOOR_PLAN') {
+    const unitData = documentSnapshot?.unit && typeof documentSnapshot.unit === 'object' ? documentSnapshot.unit as Record<string, unknown> : {};
+    pdf.setFont('helvetica', 'normal'); pdf.setFontSize(7); pdf.setTextColor(93, 102, 99);
+    pdf.text(`${getValue('unit_number')} · Scale ${getValue('scale')}`, right, y, { align: 'right' }); y += 5;
+    const planUrl = String(sourceData.approved_plan_url || (documentSnapshot?.project as Record<string, unknown> | undefined)?.floor_plan_url || '');
+    const planTop = y;
+    const planHeight = 158;
+    pdf.setFillColor(244, 241, 234); pdf.setDrawColor(216, 212, 202); pdf.rect(left, planTop, contentWidth, planHeight, 'FD');
+    let embeddedPlan = false;
+    if (planUrl) {
+      try {
+        const response = await fetch(planUrl);
+        const blob = await response.blob();
+        const imageType = blob.type.toLowerCase().includes('jpeg') || /\.jpe?g(?:\?|$)/i.test(planUrl) ? 'JPEG' : blob.type.toLowerCase().includes('png') || /\.png(?:\?|$)/i.test(planUrl) ? 'PNG' : '';
+        if (response.ok && imageType) {
+          const dataUrl = await new Promise<string>((resolve) => { const reader = new FileReader(); reader.onloadend = () => resolve(String(reader.result)); reader.readAsDataURL(blob); });
+          const imageSize = pdf.getImageProperties(dataUrl);
+          const scale = Math.min((contentWidth - 12) / imageSize.width, (planHeight - 12) / imageSize.height);
+          const imageWidth = imageSize.width * scale;
+          const imageHeight = imageSize.height * scale;
+          pdf.addImage(dataUrl, imageType, left + (contentWidth - imageWidth) / 2, planTop + (planHeight - imageHeight) / 2, imageWidth, imageHeight);
+          embeddedPlan = true;
+        }
+      } catch {
+        embeddedPlan = false;
+      }
+    }
+    if (!embeddedPlan) {
+      pdf.setFont('times', 'normal'); pdf.setFontSize(13); pdf.setTextColor(31, 58, 52); pdf.text('Approved architectural drawing', left + 8, planTop + 18);
+      const detail = planUrl ? 'The approved plan is available at the source link below.' : 'No approved plan file was supplied. Attach the verified architectural drawing before issue.';
+      pdf.setFont('helvetica', 'normal'); pdf.setFontSize(8); pdf.setTextColor(93, 102, 99); pdf.text(pdf.splitTextToSize(detail, contentWidth - 16), left + 8, planTop + 27);
+      if (planUrl) { pdf.setTextColor(8, 127, 136); pdf.text('Open approved plan source', left + 8, planTop + 40); pdf.link(left + 8, planTop + 35, 70, 8, { url: planUrl }); }
+    }
+    y = planTop + planHeight + 8;
+    pdf.setFont('helvetica', 'normal'); pdf.setFontSize(7.2); pdf.setTextColor(93, 102, 99);
+    const drawingDetails = `${getValue('property_type')} · ${getValue('size')}${unitData.bedrooms ? ` · ${unitData.bedrooms} bedrooms` : ''} · Drawing ${getValue('drawing_number')} · Rev ${getValue('revision_number')}`;
+    pdf.text(pdf.splitTextToSize(drawingDetails, contentWidth), left, y); y += 7;
+    pdf.text('Dimensions are indicative unless certified by the appointed consultant. Final construction documents take precedence.', left, y);
+  }
+
   const structuredTypes = ['QUOTATION', 'CLIENT_INVOICE', 'RECEIPT', 'PURCHASE_ORDER', 'SUPPLIER_INVOICE', 'DELIVERY_NOTE', 'PAYMENT_VOUCHER', 'BROCHURE', 'FLOOR_PLAN'];
-  if (!structuredTypes.includes(kind)) {
+  if (!compactLayout && !structuredTypes.includes(kind)) {
     const body = productionDocumentBody(kind, readableDetails, amount);
     const blocks = body.split(/\n\n+/);
     blocks.forEach((block) => {
@@ -343,7 +546,7 @@ async function generateBrandedPdf(kind: string, title: string, recipient: string
     });
   }
 
-  if (kind === 'PURCHASE_ORDER') {
+  if (kind === 'PURCHASE_ORDER' && !compactLayout) {
     drawMetadata([
       ['Vendor', getValue('supplier_name', recipient)],
       ['Vendor tax number', getValue('supplier_tax_number')],
@@ -491,7 +694,7 @@ async function generateBrandedPdf(kind: string, title: string, recipient: string
     if (heroTop === y) y += 1;
   }
 
-  if (kind === 'FLOOR_PLAN') {
+  if (kind === 'FLOOR_PLAN' && !compactLayout) {
     drawMetadata([
       ['Project', getValue('project_name', recipient)],
       ['Unit', getValue('unit_number')],
@@ -520,7 +723,7 @@ async function generateBrandedPdf(kind: string, title: string, recipient: string
     y += 20;
   }
 
-  if (kind === 'CLIENT_INVOICE') {
+  if (kind === 'CLIENT_INVOICE' && !compactLayout) {
     const invoiceItems = Array.isArray(sourceData.invoice_items) ? sourceData.invoice_items.filter((item): item is Record<string, unknown> => typeof item === 'object' && item !== null) : [];
     const currency = String(sourceData.currency || 'KES');
     const money = (value: unknown) => `${currency} ${Number(value || 0).toLocaleString('en-KE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -573,7 +776,7 @@ async function generateBrandedPdf(kind: string, title: string, recipient: string
     y += 9; pdf.setTextColor(45, 55, 60); pdf.setFontSize(7.5); const terms = pdf.splitTextToSize(`Payment terms: ${String(sourceData.payment_terms || 'As agreed with NBG.')}`, contentWidth); pdf.text(terms, left, y);
     y = Math.max(y + terms.length * 4, tableTop + 17);
   }
-  if (kind === 'AGREEMENT' && Array.isArray(sourceData.payment_schedule) && sourceData.payment_schedule.length) {
+  if (kind === 'AGREEMENT' && !compactLayout && Array.isArray(sourceData.payment_schedule) && sourceData.payment_schedule.length) {
     y = ensureSpace(y, 22);
     pdf.setTextColor(8, 127, 136); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(8); pdf.text('PAYMENT SCHEDULE', left, y); y += 5;
     pdf.setFillColor(13, 64, 85); pdf.rect(left, y, contentWidth, 7, 'F'); pdf.setTextColor(255, 255, 255); pdf.setFontSize(7); pdf.text('MILESTONE', left + 3, y + 4.8); pdf.text('AMOUNT', right - 3, y + 4.8, { align: 'right' }); y += 7;
@@ -582,8 +785,7 @@ async function generateBrandedPdf(kind: string, title: string, recipient: string
       pdf.setTextColor(45, 55, 60); pdf.setFont('helvetica', 'normal'); pdf.setFontSize(7); pdf.text(String(row.description || `Milestone ${index + 1}`), left + 3, y + 5.3); pdf.text(`KES ${Number(row.amount || 0).toLocaleString()}`, right - 3, y + 5.3, { align: 'right' }); y += 8;
     });
   }
-  if (kind === 'FLOOR_PLAN') { y = ensureSpace(y, 95); pdf.setDrawColor(13, 64, 85); pdf.setLineWidth(.5); pdf.rect(28, y, 68, 45); pdf.rect(96, y, 70, 45); pdf.rect(28, y + 45, 55, 30); pdf.rect(83, y + 45, 83, 30); pdf.setFont('helvetica', 'normal'); pdf.setFontSize(8); pdf.text('Living / dining', 45, y + 25); pdf.text('Primary bedroom', 110, y + 25); pdf.text('Kitchen', 45, y + 63); pdf.text('Bedroom / utility', 103, y + 63); }
-  drawFooter();
+  if (!compactLayout) drawFooter();
   const blob = pdf.output('blob');
   return { blob, documentRef, verificationCode, contentHash: await sha256Blob(blob) };
 }
@@ -597,6 +799,59 @@ function uploadErrorMessage(error: unknown) {
 
 // ─── Shell ───────────────────────────────────────────────
 
+type AdminSessionPresenceRow = { session_id: string; user_email: string; region: string | null; country: string | null; first_seen_at: string; last_seen_at: string };
+
+function AdminSessionPresence({ user }: { user: AdminUser }) {
+  const [sessions, setSessions] = useState<AdminSessionPresenceRow[]>([]);
+  const [open, setOpen] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    const storageKey = 'nbg-admin-presence-session';
+    const sessionId = sessionStorage.getItem(storageKey) || crypto.randomUUID();
+    sessionStorage.setItem(storageKey, sessionId);
+    let active = true;
+
+    const heartbeat = async (isActive = true) => {
+      const { error: presenceError } = await supabase.functions.invoke('admin-session-presence', { body: { session_id: sessionId, active: isActive } });
+      if (active) setError(presenceError?.message || '');
+    };
+    const refresh = async () => {
+      const cutoff = new Date(Date.now() - 2 * 60 * 1000).toISOString();
+      const { data, error: loadError } = await supabase.from('admin_session_presence')
+        .select('session_id,user_email,region,country,first_seen_at,last_seen_at')
+        .gt('last_seen_at', cutoff)
+        .order('first_seen_at', { ascending: true });
+      if (!active) return;
+      if (loadError) setError(loadError.message);
+      else setSessions((data ?? []) as AdminSessionPresenceRow[]);
+    };
+
+    void heartbeat().then(refresh);
+    const heartbeatTimer = window.setInterval(() => { void heartbeat(); }, 60_000);
+    const refreshTimer = window.setInterval(() => { void refresh(); }, 30_000);
+    return () => {
+      active = false;
+      window.clearInterval(heartbeatTimer);
+      window.clearInterval(refreshTimer);
+      void supabase.functions.invoke('admin-session-presence', { body: { session_id: sessionId, active: false } });
+    };
+  }, [user.id]);
+
+  return <div className="relative">
+    <button type="button" onClick={() => setOpen((value) => !value)} aria-expanded={open} aria-label={`${sessions.length} admin sessions currently active`} className="inline-flex h-9 items-center gap-2 border border-[#d8e0df] bg-white px-3 text-xs text-[#123b4b] hover:bg-[#eefbf9]">
+      <Users size={15} /> <span>{sessions.length} online</span>
+    </button>
+    {open && <section aria-label="Active admin sessions" className="absolute right-0 top-full z-50 mt-2 w-[min(340px,calc(100vw-2rem))] border border-[#d8e0df] bg-white p-4 text-[#123b4b] shadow-xl">
+      <div className="flex items-center justify-between border-b border-[#e2ded5] pb-3"><div><p className="eyebrow text-[#087f88]">Admin security</p><h2 className="mt-1 text-sm font-semibold">Active sessions · {sessions.length}</h2></div><button type="button" onClick={() => setOpen(false)} aria-label="Close active sessions" className="grid size-8 place-items-center text-slate-500 hover:bg-[#f4f1eb]"><X size={15} /></button></div>
+      {error && <p role="status" className="mt-3 text-xs leading-5 text-[#a55445]">Session monitoring needs setup: deploy its database migration and Edge Function.</p>}
+      <ol className="mt-2 divide-y divide-[#eeeae2]">{sessions.map((session, index) => <li key={`${session.session_id}-${session.user_email}`} className="flex items-start gap-3 py-3"><span className="grid size-6 shrink-0 place-items-center bg-[#eefbf9] text-xs font-semibold text-[#087f88]">{index + 1}</span><div className="min-w-0 flex-1"><p className="truncate text-xs font-semibold">{session.user_email}</p><p className="mt-1 flex items-center gap-1 text-[10px] text-slate-500"><MapPin size={11} />{[session.region, session.country].filter(Boolean).join(', ') || 'Region unavailable'}</p><p className="mt-1 text-[10px] text-slate-400">Since {new Date(session.first_seen_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p></div></li>)}</ol>
+      {!sessions.length && !error && <p className="py-4 text-xs text-slate-500">No active sessions are currently reported.</p>}
+      <p className="mt-2 border-t border-[#e2ded5] pt-3 text-[10px] leading-4 text-slate-400">Regions are approximate IP-based locations. IP addresses are not stored; inactive sessions expire after two minutes.</p>
+    </section>}
+  </div>;
+}
+
 export default function AdminDashboard({ user, onSignOut }: { user: AdminUser; onSignOut: () => void }) {
   useFinancialPrivacy();
   const [tab, setTab] = useState<AdminTab>(() => {
@@ -607,6 +862,9 @@ export default function AdminDashboard({ user, onSignOut }: { user: AdminUser; o
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [leadAlertCount, setLeadAlertCount] = useState(0);
+  const [navSearch, setNavSearch] = useState('');
+  const [navSearchOpen, setNavSearchOpen] = useState(false);
+  const navSearchRef = useRef<HTMLInputElement>(null);
   const isAdmin = user.role === 'admin' || user.role === 'owner';
 
   const selectAdminTab = useCallback((destination: AdminTab) => {
@@ -651,6 +909,19 @@ export default function AdminDashboard({ user, onSignOut }: { user: AdminUser; o
     return () => window.clearTimeout(timeout);
   }, [toast]);
 
+  useEffect(() => {
+    const focusSearch = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault();
+        setNavSearchOpen(true);
+        navSearchRef.current?.focus();
+      }
+      if (event.key === 'Escape') setNavSearchOpen(false);
+    };
+    window.addEventListener('keydown', focusSearch);
+    return () => window.removeEventListener('keydown', focusSearch);
+  }, []);
+
   const navItems: { id: AdminTab; label: string; icon: typeof LayoutDashboard; group: string }[] = [
     { id: 'overview', label: 'Overview', icon: LayoutDashboard, group: 'main' },
     { id: 'leads', label: 'Leads', icon: Users, group: 'sales' },
@@ -677,6 +948,11 @@ export default function AdminDashboard({ user, onSignOut }: { user: AdminUser; o
     { key: 'agents', label: 'Realtors & Agents' },
     { key: 'ops', label: 'Operations' },
   ];
+
+  const searchResults = navItems.filter(({ id, label }) => {
+    const aliases = id === 'documents' ? 'invoice agreements receipts floor plans' : id === 'payments' ? 'repayments installments transactions' : id === 'units' ? 'homes properties inventory' : '';
+    return `${label} ${id} ${aliases}`.toLowerCase().includes(navSearch.trim().toLowerCase());
+  }).slice(0, 5);
 
   const go = (t: AdminTab) => selectAdminTab(t);
 
@@ -737,7 +1013,13 @@ export default function AdminDashboard({ user, onSignOut }: { user: AdminUser; o
             </button>
             <div className="flex min-w-0 items-center gap-2"><h1 className="break-words font-serif text-xl sm:text-2xl">{navItems.find((n) => n.id === tab)?.label ?? 'Dashboard'}</h1><SectionGuide guide={SECTION_GUIDES[tab]} /></div>
           </div>
-          <div className="flex max-w-full flex-wrap items-center justify-end gap-3"><DashboardInbox user={user} mode="staff" /><FinancialPrivacyToggle /><span className="hidden text-[10px] uppercase tracking-[.12em] text-slate-500 sm:inline">{isAdmin ? 'Owner/admin controls' : 'Staff operations'}</span><a href={`https://wa.me/${WA}`} target="_blank" rel="noreferrer" className="flex items-center gap-2 rounded-md bg-[#1f8a72] px-4 py-2 text-[10px] font-bold uppercase tracking-[.14em] text-white hover:bg-[#176b59]"><Phone size={13} /> WhatsApp</a></div>
+          <label className="relative hidden min-w-0 max-w-[360px] flex-1 lg:block">
+            <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+            <input ref={navSearchRef} value={navSearch} onFocus={() => setNavSearchOpen(true)} onChange={(event) => setNavSearch(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && searchResults[0]) { go(searchResults[0].id); setNavSearch(''); setNavSearchOpen(false); } }} aria-label="Search dashboard sections" placeholder="Search payments, units, invoices..." className="h-9 w-full border border-[#d8e0df] bg-white pl-9 pr-14 text-xs text-[#123b4b] outline-none placeholder:text-slate-400 focus:border-[#087f88]" />
+            <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 border border-[#e2ded5] px-1.5 py-0.5 text-[9px] text-slate-500">Ctrl K</span>
+            {navSearchOpen && navSearch.trim() && <div className="absolute left-0 right-0 top-full z-50 mt-1 border border-[#d8e0df] bg-white p-1 shadow-xl">{searchResults.map(({ id, label, icon: Icon }) => <button key={id} type="button" onClick={() => { go(id); setNavSearch(''); setNavSearchOpen(false); }} className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-[#123b4b] hover:bg-[#eefbf9]"><Icon size={14} />{label}</button>)}{searchResults.length === 0 && <p className="px-3 py-2 text-xs text-slate-500">No matching dashboard section.</p>}</div>}
+          </label>
+          <div className="flex max-w-full flex-wrap items-center justify-end gap-2 sm:gap-3"><DashboardInbox user={user} mode="staff" />{isAdmin && <AdminSessionPresence user={user} />}<FinancialPrivacyToggle /><div className="hidden items-center gap-2 sm:flex"><span className="grid size-8 place-items-center rounded-full bg-[#0d4055] text-[10px] font-semibold text-white">{(user.full_name || user.email).slice(0, 2).toUpperCase()}</span><span className="max-w-[125px] truncate text-xs text-[#123b4b]">{user.full_name || user.email.split('@')[0]}</span></div><a href={`https://wa.me/${WA}`} target="_blank" rel="noreferrer" aria-label="Contact NBG on WhatsApp" className="grid size-9 place-items-center bg-[#1f8a72] text-white hover:bg-[#176b59] sm:h-9 sm:w-auto sm:gap-2 sm:px-3"><MessageCircle size={16} /><span className="hidden text-[10px] font-bold sm:inline">WhatsApp</span></a></div>
         </header>
 
         <div className="px-5 py-8 md:px-10 md:py-10">
@@ -789,16 +1071,16 @@ function PurchasePaymentInstructionsPanel({ user }: { user: AdminUser }) {
   const [error, setError] = useState('');
   const [saved, setSaved] = useState('');
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (preferredId = editingId) => {
     setLoading(true);
     const { data, error: loadError } = await supabase.from('purchase_payment_accounts').select('*').order('display_order').order('created_at');
     if (loadError) setError(`Payment accounts could not be loaded. Apply the multi-bank payment migration: ${loadError.message}`);
     else {
       const rows = (data ?? []) as PurchasePaymentInstructions[];
       setAccounts(rows);
-      const current = rows.find((account) => account.id === editingId) ?? rows[0];
-      if (current && !editingId) { setEditingId(current.id); setDetails(current); }
-      else if (current) setDetails(current);
+      const current = rows.find((account) => account.id === preferredId) ?? rows[0];
+      setEditingId(current?.id ?? '');
+      setDetails(current ?? EMPTY_PAYMENT_ACCOUNT);
     }
     setLoading(false);
   }, [editingId]);
@@ -815,6 +1097,11 @@ function PurchasePaymentInstructionsPanel({ user }: { user: AdminUser }) {
       setSaving(false);
       return;
     }
+    if (details.is_quotation_default && !details.is_published) {
+      setError('Publish this verified bank account before selecting it as the purchase quotation default.');
+      setSaving(false);
+      return;
+    }
     const values = { bank_name: details.bank_name.trim(), bank_branch: details.bank_branch.trim(), account_name: details.account_name.trim(), account_number: details.account_number.trim(), swift_code: details.swift_code.trim(), payment_instructions: details.payment_instructions.trim(), is_published: details.is_published, is_quotation_default: details.is_quotation_default, display_order: details.display_order, updated_by: user.id, updated_at: new Date().toISOString() };
     const { data: savedAccount, error: saveError } = editingId
       ? await supabase.from('purchase_payment_accounts').update(values).eq('id', editingId).select().single()
@@ -823,7 +1110,7 @@ function PurchasePaymentInstructionsPanel({ user }: { user: AdminUser }) {
     if (saveError) { setError(`Payment instructions were not saved: ${saveError.message}`); return; }
     setSaved(details.is_published ? 'Bank account saved and published to client payment instructions.' : 'Bank account saved as a draft and hidden from clients.');
     if (savedAccount) { setEditingId(savedAccount.id); setDetails(savedAccount as PurchasePaymentInstructions); }
-    await load();
+    await load(savedAccount?.id);
   };
 
   const startNewAccount = () => { setEditingId(''); setDetails({ ...EMPTY_PAYMENT_ACCOUNT, display_order: accounts.length }); setSaved(''); setError(''); };
