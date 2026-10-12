@@ -322,12 +322,13 @@ BEGIN
                 requested_at = EXCLUDED.requested_at
   RETURNING * INTO request_row;
 
-  INSERT INTO public.client_notifications (user_id, title, body, kind)
+  INSERT INTO public.client_notifications (user_id, title, body, kind, action_url)
   VALUES (
     p_user_id,
     'Action required: complete your KYC details',
     'Please update your profile with: ' || array_to_string(missing_fields, ', ') || '. Enter your full legal name exactly as printed on your identity document and upload a clear image or PDF in Profile & security.',
-    'KYC_UPDATE_REQUEST'
+    'KYC_UPDATE_REQUEST',
+    '/portal?section=profile'
   );
   RETURN request_row;
 END;

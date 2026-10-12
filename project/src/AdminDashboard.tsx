@@ -1,4 +1,4 @@
-import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertCircle, ArrowRight, Award, BarChart3, Building2, CalendarDays, Calculator, Check, ChevronRight, CircleCheck, ClipboardList, Clock3, Construction, CreditCard, Download, DollarSign, Eye, EyeOff, FileDown, FileText, Info, LayoutDashboard, LogOut, Mail, MapPin, Menu, MessageCircle, Pencil, Phone, Plus, RefreshCw, Search, Send, SlidersHorizontal, TrendingUp, Trash2, Upload, Users, X } from 'lucide-react';
 import { GState, jsPDF } from 'jspdf';
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
@@ -599,16 +599,51 @@ function uploadErrorMessage(error: unknown) {
 
 export default function AdminDashboard({ user, onSignOut }: { user: AdminUser; onSignOut: () => void }) {
   useFinancialPrivacy();
-  const [tab, setTab] = useState<AdminTab>(() => new URLSearchParams(window.location.search).get('tab') === 'leads' ? 'leads' : 'overview');
+  const [tab, setTab] = useState<AdminTab>(() => {
+    const requested = new URLSearchParams(window.location.search).get('tab') as AdminTab | null;
+    const validTabs: AdminTab[] = ['overview', 'leads', 'sales', 'payments', 'units', 'applications', 'realtors', 'commissions', 'investments', 'projects', 'construction', 'updates', 'documents', 'support', 'calculator', 'vault', 'audit'];
+    return requested && validTabs.includes(requested) ? requested : 'overview';
+  });
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  const [leadAlertCount, setLeadAlertCount] = useState(0);
   const isAdmin = user.role === 'admin' || user.role === 'owner';
+
+  const selectAdminTab = useCallback((destination: AdminTab) => {
+    setTab(destination);
+    setSidebarOpen(false);
+    if (destination === 'leads') {
+      setLeadAlertCount(0);
+      void supabase.from('client_notifications').update({ read_at: new Date().toISOString() }).eq('user_id', user.id).eq('kind', 'LEAD_SLA_ALERT').is('read_at', null);
+    }
+  }, [user.id]);
 
   useEffect(() => {
     const handleToast = (event: Event) => setToast((event as CustomEvent<{ message: string; type: 'success' | 'error' }>).detail);
+    const handleInboxNavigation = (event: Event) => {
+      const destination = (event as CustomEvent<AdminTab>).detail;
+      if (['overview', 'leads', 'sales', 'payments', 'units', 'applications', 'realtors', 'commissions', 'investments', 'projects', 'construction', 'updates', 'documents', 'support', 'calculator', 'vault', 'audit'].includes(destination)) {
+        selectAdminTab(destination);
+      }
+    };
     window.addEventListener('nbg-admin-toast', handleToast);
-    return () => window.removeEventListener('nbg-admin-toast', handleToast);
-  }, []);
+    window.addEventListener('nbg-admin-dashboard-navigate', handleInboxNavigation);
+    return () => {
+      window.removeEventListener('nbg-admin-toast', handleToast);
+      window.removeEventListener('nbg-admin-dashboard-navigate', handleInboxNavigation);
+    };
+  }, [selectAdminTab]);
+
+  useEffect(() => {
+    let active = true;
+    const refreshLeadAlertCount = async () => {
+      const { count, error } = await supabase.from('client_notifications').select('id', { count: 'exact', head: true }).eq('user_id', user.id).eq('kind', 'LEAD_SLA_ALERT').is('read_at', null);
+      if (active && !error) setLeadAlertCount(count ?? 0);
+    };
+    void refreshLeadAlertCount();
+    const channel = supabase.channel(`admin-lead-alert-count-${user.id}`).on('postgres_changes', { event: '*', schema: 'public', table: 'client_notifications', filter: `user_id=eq.${user.id}` }, () => { void refreshLeadAlertCount(); }).subscribe();
+    return () => { active = false; void supabase.removeChannel(channel); };
+  }, [user.id]);
 
   useEffect(() => {
     if (!toast || toast.type === 'error') return;
@@ -643,7 +678,7 @@ export default function AdminDashboard({ user, onSignOut }: { user: AdminUser; o
     { key: 'ops', label: 'Operations' },
   ];
 
-  const go = (t: AdminTab) => { setTab(t); setSidebarOpen(false); };
+  const go = (t: AdminTab) => selectAdminTab(t);
 
   return (
     <div className="min-h-screen bg-[#f0ede6] font-sans">
@@ -669,8 +704,9 @@ export default function AdminDashboard({ user, onSignOut }: { user: AdminUser; o
                     className={`mb-0.5 flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-left text-[11px] font-medium tracking-wide transition-all ${tab === id ? 'bg-[#0b8e92] text-white shadow-sm' : 'text-white/75 hover:bg-white/15 hover:text-white'}`}
                   >
                     <Icon size={15} strokeWidth={1.6} />
-                    {l}
-                    {tab === id && <ChevronRight size={12} className="ml-auto" />}
+                    <span className="min-w-0 flex-1">{l}</span>
+                    {id === 'leads' && leadAlertCount > 0 && <span className="grid h-5 min-w-5 place-items-center bg-[#a55445] px-1 text-[9px] font-bold text-white" aria-label={`${leadAlertCount} unread lead alerts`}>{leadAlertCount > 99 ? '99+' : leadAlertCount}</span>}
+                    {tab === id && <ChevronRight size={12} />}
                   </button>
                 ))}
               </div>
@@ -741,10 +777,13 @@ type VaultSale = Pick<Sale, 'id' | 'unit_id' | 'unit_number' | 'sale_price' | 's
 type VaultCommission = Pick<Commission, 'sale_id' | 'amount' | 'status'>;
 type VaultPayment = { sale_id: string; amount: number };
 type VaultDraft = { recorded_price: string; construction_cost: string; additional_costs: string; notes: string };
-type PurchasePaymentInstructions = { bank_name: string; bank_branch: string; account_name: string; account_number: string; swift_code: string; payment_instructions: string; is_published: boolean };
+type PurchasePaymentInstructions = { id: string; bank_name: string; bank_branch: string; account_name: string; account_number: string; swift_code: string; payment_instructions: string; is_published: boolean; is_quotation_default: boolean; display_order: number };
+const EMPTY_PAYMENT_ACCOUNT: PurchasePaymentInstructions = { id: '', bank_name: '', bank_branch: '', account_name: '', account_number: '', swift_code: '', payment_instructions: '', is_published: false, is_quotation_default: false, display_order: 0 };
 
 function PurchasePaymentInstructionsPanel({ user }: { user: AdminUser }) {
-  const [details, setDetails] = useState<PurchasePaymentInstructions>({ bank_name: '', bank_branch: '', account_name: '', account_number: '', swift_code: '', payment_instructions: '', is_published: false });
+  const [accounts, setAccounts] = useState<PurchasePaymentInstructions[]>([]);
+  const [details, setDetails] = useState<PurchasePaymentInstructions>(EMPTY_PAYMENT_ACCOUNT);
+  const [editingId, setEditingId] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -752,11 +791,17 @@ function PurchasePaymentInstructionsPanel({ user }: { user: AdminUser }) {
 
   const load = useCallback(async () => {
     setLoading(true);
-    const { data, error: loadError } = await supabase.from('purchase_payment_instructions').select('bank_name,bank_branch,account_name,account_number,swift_code,payment_instructions,is_published').eq('singleton', true).maybeSingle();
-    if (loadError) setError(`Payment details could not be loaded: ${loadError.message}`);
-    else if (data) setDetails(data as PurchasePaymentInstructions);
+    const { data, error: loadError } = await supabase.from('purchase_payment_accounts').select('*').order('display_order').order('created_at');
+    if (loadError) setError(`Payment accounts could not be loaded. Apply the multi-bank payment migration: ${loadError.message}`);
+    else {
+      const rows = (data ?? []) as PurchasePaymentInstructions[];
+      setAccounts(rows);
+      const current = rows.find((account) => account.id === editingId) ?? rows[0];
+      if (current && !editingId) { setEditingId(current.id); setDetails(current); }
+      else if (current) setDetails(current);
+    }
     setLoading(false);
-  }, []);
+  }, [editingId]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -770,15 +815,33 @@ function PurchasePaymentInstructionsPanel({ user }: { user: AdminUser }) {
       setSaving(false);
       return;
     }
-    const { error: saveError } = await supabase.from('purchase_payment_instructions').upsert({ singleton: true, ...details, updated_by: user.id, updated_at: new Date().toISOString() }, { onConflict: 'singleton' });
+    const values = { bank_name: details.bank_name.trim(), bank_branch: details.bank_branch.trim(), account_name: details.account_name.trim(), account_number: details.account_number.trim(), swift_code: details.swift_code.trim(), payment_instructions: details.payment_instructions.trim(), is_published: details.is_published, is_quotation_default: details.is_quotation_default, display_order: details.display_order, updated_by: user.id, updated_at: new Date().toISOString() };
+    const { data: savedAccount, error: saveError } = editingId
+      ? await supabase.from('purchase_payment_accounts').update(values).eq('id', editingId).select().single()
+      : await supabase.from('purchase_payment_accounts').insert(values).select().single();
     setSaving(false);
     if (saveError) { setError(`Payment instructions were not saved: ${saveError.message}`); return; }
-    setSaved(details.is_published ? 'Payment instructions saved and published to client purchase confirmations.' : 'Payment instructions saved as a draft and are hidden from clients.');
+    setSaved(details.is_published ? 'Bank account saved and published to client payment instructions.' : 'Bank account saved as a draft and hidden from clients.');
+    if (savedAccount) { setEditingId(savedAccount.id); setDetails(savedAccount as PurchasePaymentInstructions); }
+    await load();
   };
 
-  const update = (key: keyof PurchasePaymentInstructions, value: string | boolean) => setDetails((current) => ({ ...current, [key]: value }));
+  const startNewAccount = () => { setEditingId(''); setDetails({ ...EMPTY_PAYMENT_ACCOUNT, display_order: accounts.length }); setSaved(''); setError(''); };
+  const removeAccount = async () => {
+    if (!editingId || !window.confirm(`Remove ${details.bank_name || 'this bank account'}?`)) return;
+    const { error: deleteError } = await supabase.from('purchase_payment_accounts').delete().eq('id', editingId);
+    if (deleteError) { setError(`Bank account could not be removed: ${deleteError.message}`); return; }
+    const remaining = accounts.filter((account) => account.id !== editingId);
+    setAccounts(remaining);
+    setEditingId(remaining[0]?.id || '');
+    setDetails(remaining[0] || EMPTY_PAYMENT_ACCOUNT);
+    setSaved('Bank account removed.');
+  };
 
-  return <section className="border border-[#a9d9d8] bg-white p-5 md:p-7"><div className="flex items-start gap-3"><Building2 className="mt-1 text-[#087f88]" /><div><p className="eyebrow text-[#087f88]">Client payment setup</p><h2 className="mt-2 font-serif text-2xl text-[#123b4b]">Official bank instructions</h2><p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500">Enter the bank-verified remittance details clients should use. Only published instructions appear after a purchase request.</p></div></div>{loading ? <p className="mt-5 text-sm text-slate-500">Loading payment instructions...</p> : <form onSubmit={save} className="mt-5 grid gap-4"><div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3"><label className="grid gap-1.5 text-xs text-slate-500"><span className="eyebrow">Bank name *</span><input required value={details.bank_name} onChange={(event) => update('bank_name', event.target.value)} className="admin-input" placeholder="Enter verified bank name" /></label><label className="grid gap-1.5 text-xs text-slate-500"><span className="eyebrow">Branch</span><input value={details.bank_branch} onChange={(event) => update('bank_branch', event.target.value)} className="admin-input" placeholder="Branch name or location" /></label><label className="grid gap-1.5 text-xs text-slate-500"><span className="eyebrow">Account name *</span><input required value={details.account_name} onChange={(event) => update('account_name', event.target.value)} className="admin-input" placeholder="Verified beneficiary name" /></label><label className="grid gap-1.5 text-xs text-slate-500"><span className="eyebrow">Account number *</span><input required value={details.account_number} onChange={(event) => update('account_number', event.target.value)} className="admin-input font-mono" placeholder="Verified account number" /></label><label className="grid gap-1.5 text-xs text-slate-500"><span className="eyebrow">SWIFT / BIC</span><input value={details.swift_code} onChange={(event) => update('swift_code', event.target.value)} className="admin-input font-mono" placeholder="For international transfers" /></label></div><label className="grid gap-1.5 text-xs text-slate-500"><span className="eyebrow">Payment instructions</span><textarea value={details.payment_instructions} onChange={(event) => update('payment_instructions', event.target.value)} rows={3} className="admin-input resize-y" placeholder="Transfer notes, accepted currency, proof-of-payment channel, or other verified directions" /></label><div className="flex flex-wrap items-center justify-between gap-4 border-t border-[#e2eeec] pt-4"><label className="flex items-center gap-3 text-sm text-[#123b4b]"><input type="checkbox" checked={details.is_published} onChange={(event) => update('is_published', event.target.checked)} className="size-4 accent-[#087f88]" /><span>Publish to client purchase confirmations</span></label><button type="submit" disabled={saving} className="btn-primary disabled:opacity-60">{saving ? 'Saving...' : 'Save payment instructions'} <Check size={15} /></button></div>{error && <p role="alert" className="text-sm text-[#a55445]">{error}</p>}{saved && <p role="status" className="text-sm text-[#2e6b3e]">{saved}</p>}</form>}</section>;
+  const update = (key: keyof PurchasePaymentInstructions, value: string | boolean | number) => setDetails((current) => ({ ...current, [key]: value, ...(key === 'is_published' && value === false ? { is_quotation_default: false } : {}) }));
+  return <section className="border border-[#a9d9a8] bg-white p-5 md:p-7"><div className="flex flex-wrap items-start justify-between gap-4"><div className="flex items-start gap-3"><Building2 className="mt-1 text-[#087f88]" /><div><p className="eyebrow text-[#087f88]">Client payment setup</p><h2 className="mt-2 font-serif text-2xl text-[#123b4b]">Official bank instructions</h2><p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500">Choose which verified accounts clients can see and exactly one account for purchase quotations.</p></div></div><button type="button" onClick={startNewAccount} className="btn-secondary"><Plus size={14} />Add bank account</button></div>{loading ? <p className="mt-5 text-sm text-slate-500">Loading payment accounts...</p> : <div className="mt-5 grid gap-5 lg:grid-cols-[260px_minmax(0,1fr)]"><nav aria-label="Bank accounts" className="grid content-start gap-2">{accounts.map((account) => <button key={account.id} type="button" onClick={() => { setEditingId(account.id); setDetails(account); setError(''); setSaved(''); }} aria-current={editingId === account.id ? 'true' : undefined} className={`border p-3 text-left ${editingId === account.id ? 'border-[#087f88] bg-[#eefbf9]' : 'border-[#e2ded5] bg-white'}`}><span className="block text-xs font-semibold text-[#123b4b]">{account.bank_name}</span><span className="mt-1 block text-[10px] text-slate-500">{account.account_name} · {account.is_published ? 'Published' : 'Draft'}{account.is_quotation_default ? ' · Quotation default' : ''}</span></button>)}{accounts.length === 0 && <p className="border border-dashed border-[#c9c5bd] p-4 text-xs text-slate-500">No bank accounts yet. Add a verified account to show payment instructions to clients.</p>}</nav><form onSubmit={save} className="grid content-start gap-4"><div className="grid gap-4 sm:grid-cols-2"><label className="grid gap-1.5 text-xs text-slate-500"><span className="eyebrow">Bank name *</span><input required value={details.bank_name} onChange={(event) => update('bank_name', event.target.value)} className="admin-input" placeholder="Enter verified bank name" /></label><label className="grid gap-1.5 text-xs text-slate-500"><span className="eyebrow">Branch</span><input value={details.bank_branch} onChange={(event) => update('bank_branch', event.target.value)} className="admin-input" placeholder="Branch name or location" /></label><label className="grid gap-1.5 text-xs text-slate-500"><span className="eyebrow">Account name *</span><input required value={details.account_name} onChange={(event) => update('account_name', event.target.value)} className="admin-input" placeholder="Verified beneficiary name" /></label><label className="grid gap-1.5 text-xs text-slate-500"><span className="eyebrow">Account number *</span><input required value={details.account_number} onChange={(event) => update('account_number', event.target.value)} className="admin-input font-mono" placeholder="Verified account number" /></label><label className="grid gap-1.5 text-xs text-slate-500"><span className="eyebrow">SWIFT / BIC</span><input value={details.swift_code} onChange={(event) => update('swift_code', event.target.value)} className="admin-input font-mono" placeholder="For international transfers" /></label><label className="grid gap-1.5 text-xs text-slate-500"><span className="eyebrow">Display order</span><input type="number" min="0" value={details.display_order} onChange={(event) => update('display_order', Number(event.target.value) || 0)} className="admin-input" /></label></div><label className="grid gap-1.5 text-xs text-slate-500"><span className="eyebrow">Payment instructions</span><textarea value={details.payment_instructions} onChange={(event) => update('payment_instructions', event.target.value)} rows={3} className="admin-input resize-y" placeholder="Transfer notes, accepted currency, or proof-of-payment directions" /></label><div className="flex flex-wrap gap-4 border-t border-[#e2eeec] pt-4"><label className="flex items-start gap-3 text-sm text-[#123b4b]"><input type="checkbox" checked={details.is_published} onChange={(event) => update('is_published', event.target.checked)} className="mt-1 size-4 accent-[#087f88]" /><span><strong className="block">Publish this account to clients</strong><small className="text-xs text-slate-500">Only published verified accounts appear in the portal.</small></span></label><label className="flex items-start gap-3 text-sm text-[#123b4b]"><input type="checkbox" checked={details.is_quotation_default} disabled={!details.is_published} onChange={(event) => update('is_quotation_default', event.target.checked)} className="mt-1 size-4 accent-[#087f88] disabled:opacity-50" /><span><strong className="block">Use for purchase quotations</strong><small className="text-xs text-slate-500">Only one published account can be selected. Saving this replaces the current quotation account.</small></span></label></div><div className="flex flex-wrap items-center justify-end gap-2 border-t border-[#e2eeec] pt-4"><button type="submit" disabled={saving} className="btn-primary disabled:opacity-60">{saving ? 'Saving...' : editingId ? 'Save account changes' : 'Add account'} <Check size={15} /></button>{editingId && <button type="button" onClick={() => void removeAccount()} className="btn-secondary text-[#a55445]">Remove account</button>}</div>{error && <p role="alert" className="text-sm text-[#a55445]">{error}</p>}{saved && <p role="status" className="text-sm text-[#2e6b3e]">{saved}</p>}</form></div>}</section>;
+
+  return <section className="border border-[#a9d9d8] bg-white p-5 md:p-7"><div className="flex flex-wrap items-start justify-between gap-4"><div className="flex items-start gap-3"><Building2 className="mt-1 text-[#087f88]" /><div><p className="eyebrow text-[#087f88]">Client payment setup</p><h2 className="mt-2 font-serif text-2xl text-[#123b4b]">Official bank instructions</h2><p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500">Manage verified accounts separately. Only published accounts appear to clients.</p></div></div><button type="button" onClick={startNewAccount} className="btn-secondary"><Plus size={14} />Add bank account</button></div>{loading ? <p className="mt-5 text-sm text-slate-500">Loading payment accounts...</p> : <div className="mt-5 grid gap-5 lg:grid-cols-[260px_minmax(0,1fr)]"><nav aria-label="Bank accounts" className="grid content-start gap-2">{accounts.map((account) => <button key={account.id} type="button" onClick={() => { setEditingId(account.id); setDetails(account); setError(''); setSaved(''); }} aria-current={editingId === account.id ? 'true' : undefined} className={`border p-3 text-left ${editingId === account.id ? 'border-[#087f88] bg-[#eefbf9]' : 'border-[#e2ded5] bg-white'}`}><span className="block text-xs font-semibold text-[#123b4b]">{account.bank_name}</span><span className="mt-1 block text-[10px] text-slate-500">{account.account_name} · {account.is_published ? 'Published' : 'Draft'}</span></button>)}{accounts.length === 0 && <p className="border border-dashed border-[#c9c5bd] p-4 text-xs text-slate-500">No bank accounts yet. Add a verified account to show payment instructions to clients.</p>}</nav><form onSubmit={save} className="grid content-start gap-4"><div className="grid gap-4 sm:grid-cols-2"><label className="grid gap-1.5 text-xs text-slate-500"><span className="eyebrow">Bank name *</span><input required value={details.bank_name} onChange={(event) => update('bank_name', event.target.value)} className="admin-input" placeholder="Enter verified bank name" /></label><label className="grid gap-1.5 text-xs text-slate-500"><span className="eyebrow">Branch</span><input value={details.bank_branch} onChange={(event) => update('bank_branch', event.target.value)} className="admin-input" placeholder="Branch name or location" /></label><label className="grid gap-1.5 text-xs text-slate-500"><span className="eyebrow">Account name *</span><input required value={details.account_name} onChange={(event) => update('account_name', event.target.value)} className="admin-input" placeholder="Verified beneficiary name" /></label><label className="grid gap-1.5 text-xs text-slate-500"><span className="eyebrow">Account number *</span><input required value={details.account_number} onChange={(event) => update('account_number', event.target.value)} className="admin-input font-mono" placeholder="Verified account number" /></label><label className="grid gap-1.5 text-xs text-slate-500"><span className="eyebrow">SWIFT / BIC</span><input value={details.swift_code} onChange={(event) => update('swift_code', event.target.value)} className="admin-input font-mono" placeholder="For international transfers" /></label><label className="grid gap-1.5 text-xs text-slate-500"><span className="eyebrow">Display order</span><input type="number" min="0" value={details.display_order} onChange={(event) => update('display_order', Number(event.target.value) || 0)} className="admin-input" /></label></div><label className="grid gap-1.5 text-xs text-slate-500"><span className="eyebrow">Payment instructions</span><textarea value={details.payment_instructions} onChange={(event) => update('payment_instructions', event.target.value)} rows={3} className="admin-input resize-y" placeholder="Transfer notes, accepted currency, or proof-of-payment directions" /></label><div className="flex flex-wrap items-center justify-between gap-3 border-t border-[#e2eeec] pt-4"><label className="flex items-center gap-3 text-sm text-[#123b4b]"><input type="checkbox" checked={details.is_published} onChange={(event) => update('is_published', event.target.checked)} className="size-4 accent-[#087f88]" /><span>Publish this account to clients</span></label><div className="flex flex-wrap gap-2"><button type="submit" disabled={saving} className="btn-primary disabled:opacity-60">{saving ? 'Saving...' : editingId ? 'Save account changes' : 'Add account'} <Check size={15} /></button>{editingId && <button type="button" onClick={() => void removeAccount()} className="btn-secondary text-[#a55445]">Remove account</button>}</div></div>{error && <p role="alert" className="text-sm text-[#a55445]">{error}</p>}{saved && <p role="status" className="text-sm text-[#2e6b3e]">{saved}</p>}</form></div>}</section>;
 }
 
 function FinancialVaultTab({ user, goTo }: { user: AdminUser; goTo?: (tab: AdminTab) => void }) {
@@ -889,13 +952,13 @@ function FinancialVaultTab({ user, goTo }: { user: AdminUser; goTo?: (tab: Admin
   if (loading) return <Spinner />;
   if (error && units.length === 0) return <div className="border border-[#e4b8ad] bg-[#fff7f4] p-5 text-sm text-[#7a4e2e]">{error}<button onClick={() => void load()} className="ml-3 font-semibold underline">Retry</button></div>;
 
-  const advice: string[] = [];
-  if (missingCosts) advice.push(`${missingCosts} completed sale${missingCosts === 1 ? ' is' : 's are'} missing a recorded construction cost; enter those costs to improve margin accuracy.`);
-  if (receivables > 0) advice.push(`${fmtKes(receivables)} remains outstanding across active and completed sales; reconcile the payment schedule before approving further commitments.`);
-  if (commissionEarned > commissionPaid) advice.push(`${fmtKes(commissionEarned - commissionPaid)} in earned commissions is not yet marked paid; review the commission queue.`);
-  if (priceGaps) advice.push(`${priceGaps} available unit${priceGaps === 1 ? ' has' : 's have'} no confirmed price; complete pricing before publishing a purchase path.`);
-  if (completedRevenue && marginRate < 20) advice.push(`Estimated completed-sale margin is ${marginRate.toFixed(1)}%; review future pricing and construction budgets.`);
-  if (!advice.length) advice.push('Recorded costs, receivables, and completed-sale margin show no immediate action flags. Keep monthly costs and payments up to date.');
+  const advice: { message: string; action: string; tab?: AdminTab; target?: string }[] = [];
+  if (missingCosts) advice.push({ message: `${missingCosts} completed sale${missingCosts === 1 ? ' is' : 's are'} missing a recorded construction cost. Enter those costs to improve margin accuracy.`, action: 'Open missing unit costs', target: 'vault-unit-cost-book' });
+  if (receivables > 0) advice.push({ message: `${fmtKes(receivables)} remains outstanding across active and completed sales. Match each buyer payment to its scheduled balance.`, action: 'Reconcile buyer payments', tab: 'payments' });
+  if (commissionEarned > commissionPaid) advice.push({ message: `${fmtKes(commissionEarned - commissionPaid)} in earned commissions is not yet marked paid. Confirm the supporting sale and update payout status.`, action: 'Review commission queue', tab: 'commissions' });
+  if (priceGaps) advice.push({ message: `${priceGaps} available unit${priceGaps === 1 ? ' has' : 's have'} no confirmed price. Set pricing before publishing its purchase path.`, action: 'Open unit inventory', tab: 'units' });
+  if (completedRevenue && marginRate < 20) advice.push({ message: `Estimated completed-sale margin is ${marginRate.toFixed(1)}%. Compare unit pricing with recorded construction costs.`, action: 'Review cost book', target: 'vault-unit-cost-book' });
+  if (!advice.length) advice.push({ message: 'Recorded costs, receivables, and completed-sale margin show no immediate flags. Review the latest sales and keep monthly records current.', action: 'Review recent sales', tab: 'sales' });
 
   return <div className="grid gap-7">
     <PurchasePaymentInstructionsPanel user={user} />
@@ -952,11 +1015,11 @@ function FinancialVaultTab({ user, goTo }: { user: AdminUser; goTo?: (tab: Admin
         })}{completedSales.length === 0 && <p className="border-t border-[#e6e2da] pt-5 text-sm text-slate-500">Completed sales will appear here with their recorded cost and commission breakdown.</p>}</div>
         <div className="mt-5 flex flex-wrap gap-4 border-t border-[#e6e2da] pt-4 text-[10px] uppercase tracking-wide text-slate-500"><span><i className="mr-1.5 inline-block h-2.5 w-2.5 bg-[#d1a549]" />Construction + other costs</span><span><i className="mr-1.5 inline-block h-2.5 w-2.5 bg-[#df8068]" />Commission</span><span><i className="mr-1.5 inline-block h-2.5 w-2.5 bg-[#168f87]" />Estimated profit</span></div>
       </div>
-      <div className="border border-[#c9c5bd] bg-[#123b4b] p-5 text-white md:p-7"><p className="eyebrow text-[#8de7e2]">Management signals</p><h2 className="mt-2 font-serif text-2xl">What needs attention.</h2><ul className="mt-5 space-y-4">{advice.map((item) => <li key={item} className="flex gap-3 border-t border-white/15 pt-4 text-sm leading-6 text-white/80"><span className="mt-2 h-2 w-2 shrink-0 bg-[#19c6c9]" />{item}</li>)}</ul><p className="mt-6 border-t border-white/15 pt-4 text-[10px] leading-5 text-white/45">Operational estimate only. Excludes overhead, tax, financing, and expenses not recorded per unit. This is not a bank balance or audited statement.</p></div>
+      <div className="border border-[#c9c5bd] bg-[#123b4b] p-5 text-white md:p-7"><p className="eyebrow text-[#8de7e2]">Management signals</p><h2 className="mt-2 font-serif text-2xl">What needs attention.</h2><ul className="mt-5 space-y-4">{advice.map((item) => <li key={item.action} className="border-t border-white/15 pt-4"><p className="flex gap-3 text-sm leading-6 text-white/85"><span className="mt-2 h-2 w-2 shrink-0 bg-[#19c6c9]" />{item.message}</p><button type="button" onClick={() => item.tab && goTo ? goTo(item.tab) : document.getElementById(item.target || 'vault-unit-cost-book')?.scrollIntoView({ behavior: 'smooth', block: 'center' })} className="ml-5 mt-2 inline-flex items-center gap-2 text-xs font-semibold text-[#8de7e2] underline underline-offset-2">{item.action} <ArrowRight size={13} /></button></li>)}</ul><p className="mt-6 border-t border-white/15 pt-4 text-[10px] leading-5 text-white/45">Operational estimate only. Excludes overhead, tax, financing, and expenses not recorded per unit. This is not a bank balance or audited statement.</p></div>
     </section>
 
     {error && <p className="border border-[#e4b8ad] bg-[#fff7f4] p-3 text-sm text-[#7a4e2e]">{error}</p>}
-    <section className="border border-[#c9c5bd] bg-white">
+    <section id="vault-unit-cost-book" className="border border-[#c9c5bd] bg-white">
       <div className="flex items-center justify-between gap-4 border-b border-[#e6e2da] px-5 py-4"><div><p className="eyebrow text-[#087f88]">Restricted records</p><h2 className="mt-1 font-serif text-2xl text-[#123b4b]">Unit price and cost book.</h2></div><div className="text-right"><p className="text-xs text-slate-500">{units.length} units · {fmtKes(constructionAndOtherCosts)} costs on completed sales</p><span className="mt-2 inline-flex rounded-full border border-[#d4c5a3] bg-[#f9f2df] px-2 py-1 text-[10px] font-semibold uppercase tracking-[.14em] text-[#856b2e]">Immutable after save</span></div></div>
       <div className="overflow-x-auto"><table className="w-full min-w-[900px] text-left text-xs"><thead className="bg-[#f0ede6] text-[9px] uppercase tracking-[.12em] text-slate-500"><tr>{['Unit', 'Status', 'Recorded price', 'Construction cost', 'Other costs', 'Notes', ''].map((label) => <th key={label} className="px-4 py-3">{label}</th>)}</tr></thead><tbody>{units.map((unit) => { const draft = drafts[unit.id] ?? { recorded_price: '', construction_cost: '', additional_costs: '', notes: '' }; const updateDraft = (key: keyof VaultDraft, value: string) => setDrafts((current) => ({ ...current, [unit.id]: { ...draft, [key]: value } })); return <tr key={unit.id} className="border-t border-[#e6e2da]"><td className="px-4 py-3 font-semibold">{unit.unit_number}<span className="block font-normal text-slate-400">{unit.type || 'Residence'}</span></td><td className="px-4 py-3">{unit.status}</td><td className="px-4 py-3"><input aria-label={`Price for unit ${unit.unit_number}`} type="number" min="0" step="0.01" className="admin-input w-36" value={draft.recorded_price} onChange={(event) => updateDraft('recorded_price', event.target.value)} /></td><td className="px-4 py-3"><input aria-label={`Construction cost for unit ${unit.unit_number}`} type="number" min="0" step="0.01" className="admin-input w-36" value={draft.construction_cost} onChange={(event) => updateDraft('construction_cost', event.target.value)} /></td><td className="px-4 py-3"><input aria-label={`Other costs for unit ${unit.unit_number}`} type="number" min="0" step="0.01" className="admin-input w-36" value={draft.additional_costs} onChange={(event) => updateDraft('additional_costs', event.target.value)} /></td><td className="px-4 py-3"><input aria-label={`Notes for unit ${unit.unit_number}`} className="admin-input w-44" value={draft.notes} onChange={(event) => updateDraft('notes', event.target.value)} /></td><td className="px-4 py-3"><button type="button" onClick={() => void saveUnit(unit)} disabled={savingUnit === unit.id} className="btn-secondary !px-3 !py-2 disabled:opacity-50">{savingUnit === unit.id ? 'Saving' : 'Save'}</button></td></tr>; })}{units.length === 0 && <EmptyRow cols={7} text="No units are in the inventory yet." />}</tbody></table></div>
     </section>
@@ -1595,7 +1658,7 @@ function LeadsTab({ user }: { user: AdminUser }) {
 
   return (
     <div>
-      {slaAlerts.length > 0 && <section className="mb-5 border border-[#e4b8ad] bg-[#fff7f4] p-4"><div className="flex items-center gap-2"><AlertCircle size={16} className="text-[#a55445]" /><h3 className="text-sm font-semibold text-[#8d332b]">48-hour follow-ups due</h3></div><div className="mt-3 grid gap-2 sm:grid-cols-2">{slaAlerts.map((alert) => { const leadId = alert.body.match(/Lead ID:\s*([0-9a-f-]{36})/i)?.[1]; const lead = leads.find((item) => item.id === leadId); return <button type="button" key={alert.id} onClick={() => { if (lead) setSelected(lead); }} className="border border-[#efd4ce] bg-white p-3 text-left hover:border-[#d58a7d]"><span className="block text-xs font-semibold text-[#8d332b]">{alert.title}</span><span className="mt-1 block text-[10px] leading-4 text-slate-500">{alert.body.replace(/Lead ID:\s*[0-9a-f-]{36}\.\s*/i, '')}</span><span className="mt-2 block text-[9px] text-slate-400">{fmt(alert.created_at)} · {lead ? 'Open lead' : 'Lead may have been removed'}</span></button>; })}</div></section>}
+      {slaAlerts.length > 0 && <section className="mb-5 border border-[#e4b8ad] bg-[#fff7f4] p-4"><div className="flex items-center gap-2"><AlertCircle size={16} className="text-[#a55445]" /><h3 className="text-sm font-semibold text-[#8d332b]">48-hour follow-ups due</h3></div><p className="mt-2 text-xs leading-5 text-slate-600">Open each lead, review contact history, assign an owner and priority, set the next action and due date, then record the call or message as an activity. Progress one stage at a time.</p><div className="mt-3 grid gap-2 sm:grid-cols-2">{slaAlerts.map((alert) => { const leadId = alert.body.match(/Lead ID:\s*([0-9a-f-]{36})/i)?.[1]; const lead = leads.find((item) => item.id === leadId); return <button type="button" key={alert.id} onClick={() => { if (lead) setSelected(lead); }} className="border border-[#efd4ce] bg-white p-3 text-left hover:border-[#d58a7d]"><span className="block text-xs font-semibold text-[#8d332b]">{alert.title}</span><span className="mt-1 block text-[10px] leading-4 text-slate-500">{alert.body.replace(/Lead ID:\s*[0-9a-f-]{36}\.\s*/i, '')}</span><span className="mt-2 block text-[9px] font-semibold text-[#087f88]">{lead ? 'Review lead and set next action' : 'Lead may have been removed'}</span><span className="mt-1 block text-[9px] text-slate-400">{fmt(alert.created_at)}</span></button>; })}</div></section>}
       <div className="flex flex-wrap gap-3">
         <div className="relative flex-1 min-w-[200px]">
           <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
@@ -3217,6 +3280,7 @@ function DocumentForm({ clients, onDone }: { clients: DocumentClient[]; onDone: 
   const unit = units.find((item) => item.id === unitId);
   const sale = sales.find((item) => item.id === saleId);
   const payment = payments.find((item) => item.id === paymentId);
+  const salePayments = saleId ? payments.filter((item) => item.sale_id === saleId).sort((left, right) => right.payment_date.localeCompare(left.payment_date)) : [];
   const projectUnits = units.filter((item) => item.project_id === projectId);
   const saleInstallments = installments.filter((item) => item.sale_id === saleId);
   const normalizeSaleMatch = (value: string | null | undefined) => (value || '').trim().toLocaleLowerCase().replace(/\s+/g, ' ');
@@ -3269,11 +3333,26 @@ function DocumentForm({ clients, onDone }: { clients: DocumentClient[]; onDone: 
   });
   const saleBuyerMismatchCount = saleOptions.filter((option) => !option.buyerMatchesClient).length;
   const linkedClientSales = clientId ? sales.filter((item) => saleMatchesClient(item, client)) : [];
+  const clientPurchases = linkedClientSales.filter((saleRecord) => ['RESERVED', 'DEPOSIT_PAID', 'COMPLETED'].includes(saleRecord.status));
   const matchingClientSales = !clientId ? [] : category === 'RECEIPT' ? linkedClientSales : ['AGREEMENT', 'CLIENT_INVOICE'].includes(category) ? unitSaleOptions.filter((item) => saleMatchesClient(item, client)) : [];
-  const autoSelectedSaleId = matchingClientSales.length === 1 ? matchingClientSales[0].id : '';
+  const clientPurchasePriority = (saleRecord: Sale) => ['RESERVED', 'DEPOSIT_PAID'].includes(saleRecord.status) ? 0 : saleRecord.status === 'COMPLETED' ? 1 : 2;
+  const preferredClientPurchase = [...clientPurchases].sort((left, right) => clientPurchasePriority(left) - clientPurchasePriority(right) || (right.created_at || '').localeCompare(left.created_at || ''))[0];
+  const autoSelectedSaleId = category === 'AGREEMENT' ? preferredClientPurchase?.id || '' : matchingClientSales.length === 1 ? matchingClientSales[0].id : '';
+  const autoFilledPurchaseKey = useRef('');
   useEffect(() => {
-    if (autoSelectedSaleId && autoSelectedSaleId !== saleId) setSaleId(autoSelectedSaleId);
-  }, [autoSelectedSaleId, saleId]);
+    if (!clientId || !autoSelectedSaleId) return;
+    const selectionKey = `${clientId}:${category}:${autoSelectedSaleId}`;
+    if (autoFilledPurchaseKey.current === selectionKey) return;
+    autoFilledPurchaseKey.current = selectionKey;
+    setSaleId(autoSelectedSaleId);
+    const selectedSale = sales.find((item) => item.id === autoSelectedSaleId);
+    const matchingUnits = units.filter((item) => item.unit_number === selectedSale?.unit_number);
+    const selectedUnit = selectedSale?.unit_id ? units.find((item) => item.id === selectedSale.unit_id) : matchingUnits.length === 1 ? matchingUnits[0] : undefined;
+    if (selectedUnit?.project_id && selectedUnit.project_id !== projectId) setProjectId(selectedUnit.project_id);
+    if (selectedUnit) setUnitId(selectedUnit.id);
+    const latestPayment = payments.filter((item) => item.sale_id === autoSelectedSaleId).sort((left, right) => right.payment_date.localeCompare(left.payment_date))[0];
+    if (latestPayment) setPaymentId(latestPayment.id);
+  }, [autoSelectedSaleId, category, clientId, paymentId, payments, projectId, saleId, sales, unitId, units]);
   const selectedClientSaleIds = new Set(linkedClientSales.map((saleRecord) => saleRecord.id));
   const paymentOptions = payments.filter((item) => !clientId || selectedClientSaleIds.has(item.sale_id)).map((item) => ({ value: item.id, label: `${item.method} · ${item.transaction_ref || item.reference || 'No reference'} · KSh ${Number(item.amount).toLocaleString()}`, search: `${item.sale_id} ${sales.find((saleRecord) => saleRecord.id === item.sale_id)?.unit_number || ''}` }));
   const uniqueMatchingSaleFor = (candidate: DocumentClient | undefined, nextUnitId: string) => {
@@ -3492,6 +3571,13 @@ function DocumentForm({ clients, onDone }: { clients: DocumentClient[]; onDone: 
   const projectMapUrl = project?.map_url || (project?.latitude != null && project.longitude != null
     ? `https://www.google.com/maps/search/?api=1&query=${project.latitude},${project.longitude}`
     : project?.location ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent([project.location, project.locality, project.county].filter(Boolean).join(', '))}` : '');
+  const readableReadinessWarning = (warning: string) => {
+    const field = template.fields.find((candidate) => warning.startsWith(`${candidate.key} `));
+    if (field) return `${field.label}${warning.slice(field.key.length)}`;
+    if (warning.startsWith('At least one payment_schedule')) return 'Payment schedule is empty. Link a sale with installments or add the scheduled payments before generating this agreement.';
+    if (warning.startsWith('Payment schedule total')) return warning;
+    return warning;
+  };
 
   return <form onSubmit={submit} className="document-composer grid min-h-[min(72vh,720px)] grid-rows-[auto_1fr_auto] gap-4">
     <div className="grid gap-4 border-b border-[#e2ded5] pb-4">
@@ -3526,7 +3612,10 @@ function DocumentForm({ clients, onDone }: { clients: DocumentClient[]; onDone: 
           {unit && <ReadOnlySummary title="Selected property" rows={[["Unit", unit.unit_number], ["Type", unit.type], ["Size", unit.size], ["Floor", unit.floor], ["Price", unit.price]]} />}
           {sale && <ReadOnlySummary title="Selected transaction" rows={[["Status", sale.status], ["Price", fmtKes(sale.sale_price)], ["Deposit", fmtKes(sale.deposit_amount)], ["Payment plan", sale.installment_frequency === 'ONE_TIME' ? 'One-time payment' : `${sale.installment_count} ${sale.installment_frequency.toLowerCase()}`]]} />}
           {payment && <ReadOnlySummary title="Verified payment" rows={[["Amount", fmtKes(payment.amount)], ["Method", payment.method], ["Reference", payment.reference], ["Date", payment.payment_date]]} />}
-          {!client && requiresClient && <p className="border border-dashed border-[#c9c5bd] p-4 text-xs leading-5 text-slate-500">Choose a saved client to fetch profile KYC. Project, unit, and payment information will be sourced from existing records.</p>}
+          {category === 'AGREEMENT' && sale && !payment && (paymentLoadError ? <p role="alert" className="border border-[#e4b8ad] bg-[#fff7f4] p-3 text-xs leading-5 text-[#8d332b]">Recorded payments could not be fetched: {paymentLoadError}. Retry loading the payment data before relying on a payment summary.</p> : <p className="border border-[#e7d3a8] bg-[#fff8e6] p-3 text-xs leading-5 text-[#765d2b]">{salePayments.length ? 'A payment exists for this sale but is not selected. The latest payment should be prefilled; select it in the source step to include it.' : 'No recorded buyer payment is linked to this sale yet. The agreement can still be prepared from the sale and installment schedule.'}</p>)}
+          {category === 'AGREEMENT' && client && clientPurchases.length === 0 && <p role="status" className="border border-dashed border-[#e4b8ad] bg-[#fff7f4] p-4 text-xs leading-5 text-[#8d332b]">No active or completed purchase is linked to {client.full_name || client.email}. Create or link the sale in the Sales section before preparing an Agreement for Sale.</p>}
+          {category === 'AGREEMENT' && clientPurchases.length > 1 && sale && <p role="status" className="border border-[#d6efee] bg-[#f6fbfc] p-3 text-xs leading-5 text-slate-600">Prefilled from the most recent active purchase. You can select a different matching sale above.</p>}
+          {!client && requiresClient && <p className="border border-dashed border-[#c9c5bd] p-4 text-xs leading-5 text-slate-500">Choose a saved client to fetch profile KYC. Their purchase, unit, project, and payments will be filled from linked records.</p>}
         </section>
       </div>}
 
@@ -3538,7 +3627,7 @@ function DocumentForm({ clients, onDone }: { clients: DocumentClient[]; onDone: 
 
       {step === 'review' && <div className="grid gap-4 lg:grid-cols-[1.1fr_.9fr]">
         <section className="grid content-start gap-4"><ReadOnlySummary title="Document source" rows={[["Type", template.label], ["Client", client?.full_name || 'NBG operations'], ["Project", project?.name], ["Unit", unit?.unit_number], ["Sale", sale?.id], ["Payment", payment?.reference]]} />{category === 'CLIENT_INVOICE' && <div className="overflow-x-auto border border-[#c9c5bd] bg-white"><table className="w-full min-w-[420px] text-left text-xs"><thead className="bg-[#f0ede6] text-[10px] uppercase tracking-wide text-slate-500"><tr><th className="p-3">Description</th><th className="p-3 text-right">Qty</th><th className="p-3 text-right">Unit</th><th className="p-3 text-right">Total</th></tr></thead><tbody>{invoiceItems.filter((item) => item.description.trim()).map((item, index) => <tr key={index} className="border-t border-[#e6e2da]"><td className="p-3">{item.description}</td><td className="p-3 text-right">{item.quantity}</td><td className="p-3 text-right">{fmtKes(item.unit_price)}</td><td className="p-3 text-right font-semibold">{fmtKes(item.quantity * item.unit_price)}</td></tr>)}</tbody></table></div>}</section>
-        <section className="grid content-start gap-3"><div className="border border-[#c9c5bd] bg-white p-4"><p className="eyebrow text-[#087f88]">Readiness</p><p className="mt-2 text-sm text-[#123b4b]">{requiredWarnings.length ? `${requiredWarnings.length} required detail${requiredWarnings.length === 1 ? '' : 's'} need attention.` : 'Required template fields are ready for draft generation.'}</p>{requiredWarnings.length > 0 && <ul className="mt-3 space-y-1 text-xs text-[#856b2e]">{requiredWarnings.slice(0, 6).map((warning) => <li key={warning}>· {warning}</li>)}</ul>}</div>{category === 'CLIENT_INVOICE' && <div className="border border-[#c9c5bd] bg-white p-4"><div className="flex justify-between text-xs"><span>Subtotal</span><strong>{fmtKes(invoiceSubtotal)}</strong></div><div className="mt-2 flex justify-between text-xs"><span>Tax</span><strong>{fmtKes(invoiceTax)}</strong></div><div className="mt-3 border-t border-[#e6e2da] pt-3"><div className="flex justify-between"><span className="text-sm font-semibold">Total due</span><strong className="font-serif text-xl text-[#087f88]">{fmtKes(invoiceTotal)}</strong></div><div className="mt-3 h-2 overflow-hidden bg-[#e6e2da]"><div className="h-full bg-[#19a69c]" style={{ width: `${invoiceTotal ? Math.min(100, invoiceSubtotal / invoiceTotal * 100) : 0}%` }} /></div><p className="mt-1 text-[10px] text-slate-400">Subtotal and tax composition</p></div></div>}{projectMapUrl && <a href={projectMapUrl} target="_blank" rel="noreferrer" className="btn-secondary justify-center"><MapPin size={14} /> Verify site location</a>}</section>
+        <section className="grid content-start gap-3"><div className={`border p-4 ${requiredWarnings.length ? 'border-[#e4b8ad] bg-[#fff7f4]' : 'border-[#c9c5bd] bg-white'}`}><p className="eyebrow text-[#087f88]">Readiness</p><p className="mt-2 text-sm font-semibold text-[#123b4b]">{requiredWarnings.length ? `${requiredWarnings.length} required detail${requiredWarnings.length === 1 ? '' : 's'} need attention.` : 'Required template fields are ready for draft generation.'}</p>{requiredWarnings.length > 0 && <ul role="alert" className="mt-3 grid gap-2 text-xs leading-5 text-[#8d332b]">{requiredWarnings.slice(0, 6).map((warning) => <li key={warning} className="border-l-2 border-[#d58a7d] pl-2">{readableReadinessWarning(warning)}</li>)}</ul>}{requiredWarnings.some((warning) => /buyer_id_passport|buyer_legal_name/.test(warning)) && <button type="button" onClick={() => { setError(''); setStep('source'); }} className="mt-3 text-xs font-semibold text-[#087f88] underline">Return to client KYC details</button>}</div>{category === 'CLIENT_INVOICE' && <div className="border border-[#c9c5bd] bg-white p-4"><div className="flex justify-between text-xs"><span>Subtotal</span><strong>{fmtKes(invoiceSubtotal)}</strong></div><div className="mt-2 flex justify-between text-xs"><span>Tax</span><strong>{fmtKes(invoiceTax)}</strong></div><div className="mt-3 border-t border-[#e6e2da] pt-3"><div className="flex justify-between"><span className="text-sm font-semibold">Total due</span><strong className="font-serif text-xl text-[#087f88]">{fmtKes(invoiceTotal)}</strong></div><div className="mt-3 h-2 overflow-hidden bg-[#e6e2da]"><div className="h-full bg-[#19a69c]" style={{ width: `${invoiceTotal ? Math.min(100, invoiceSubtotal / invoiceTotal * 100) : 0}%` }} /></div><p className="mt-1 text-[10px] text-slate-400">Subtotal and tax composition</p></div></div>}{projectMapUrl && <a href={projectMapUrl} target="_blank" rel="noreferrer" className="btn-secondary justify-center"><MapPin size={14} /> Open verified project map</a>}</section>
       </div>}
     </div>
 
