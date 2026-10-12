@@ -1,4 +1,5 @@
 import { FormEvent, RefObject, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { ArrowUp, Bell, Check, CircleAlert, MessageCircle, RotateCw, X } from 'lucide-react';
 import type { AdminUser } from '@/lib/auth';
 import { supabase } from '@/lib/supabase';
@@ -176,7 +177,7 @@ export default function DashboardInbox({ user, mode }: { user: AdminUser; mode: 
 
   const formatTime = (value: string) => new Date(value).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
 
-  if (mode === 'client') return <ClientInboxDrawer
+  if (mode === 'client') return createPortal(<ClientInboxDrawer
     user={user}
     isOpen={isOpen}
     onToggle={openInbox}
@@ -198,7 +199,7 @@ export default function DashboardInbox({ user, mode }: { user: AdminUser; mode: 
     sending={sending}
     onSend={sendMessage}
     historyEnd={historyEnd}
-  />;
+  />, document.body);
 
   return <div className="relative">
     <button type="button" aria-label={`Open messages and notifications${unreadCount ? `, ${unreadCount} unread` : ''}`} aria-expanded={isOpen} onClick={openInbox} className="relative inline-flex h-10 shrink-0 items-center justify-center gap-2 border border-[#0d4055] bg-[#0d4055] px-3 text-white shadow-sm transition hover:bg-[#123b4b]">

@@ -3245,6 +3245,8 @@ function DocumentForm({ clients, onDone }: { clients: DocumentClient[]; onDone: 
   const [invoiceItems, setInvoiceItems] = useState<{ description: string; quantity: number; unit_price: number }[]>([{ description: '', quantity: 1, unit_price: 0 }]);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
+  const [overrideAcknowledged, setOverrideAcknowledged] = useState(false);
+  const [overrideReason, setOverrideReason] = useState('');
 
   useEffect(() => { void Promise.all([
     supabase.from('projects').select('*').order('name'),
@@ -3500,7 +3502,6 @@ function DocumentForm({ clients, onDone }: { clients: DocumentClient[]; onDone: 
     if (category === 'AGREEMENT' && (!project || !client || !unit || !sale)) return 'Select a project, client, property/unit, and matching sale before generating an Agreement for Sale.';
     if (category === 'AGREEMENT' && sale && client && !saleMatchesClient(sale, client)) return `The selected sale belongs to ${sale.buyer_name}. Select that buyer profile before generating the agreement.`;
     if (category === 'AGREEMENT' && clientDocumentsLoading) return 'Wait for the selected client’s identity documents to finish loading.';
-    if (category === 'AGREEMENT' && missingKycFields.length) return `The selected client is missing ${missingKycFields.join(', ')}. Request an update before generating the agreement.`;
     if (category === 'RECEIPT' && !client) return 'Select the registered client before looking up their sale and verified payments.';
     if (category === 'RECEIPT' && paymentLoadError) return `Verified payments could not be loaded: ${paymentLoadError}`;
     if (category === 'RECEIPT' && linkedClientSales.length === 0) return 'This client has no recorded sale yet. Select the buyer who owns the sale before creating a receipt.';
@@ -3526,16 +3527,19 @@ function DocumentForm({ clients, onDone }: { clients: DocumentClient[]; onDone: 
     event.preventDefault();
     const sourceError = primaryError();
     if (sourceError) { setError(sourceError); return; }
-    const validationErrors = template.validate(documentData);
-    if (validationErrors.length) { setError(validationErrors.join(' ')); return; }
+    if (requiredWarnings.length && (!overrideAcknowledged || overrideReason.trim().length < 12)) {
+      setError('Review each readiness warning, acknowledge the draft-only override, and enter a reason of at least 12 characters.');
+      return;
+    }
     setSaving(true); setError('');
     try {
       const numberResult = await supabase.rpc('next_document_number', { document_kind: category });
       const documentNumber = String(numberResult.data || documentIdentity(category).documentRef);
       const verificationCode = await allocateDocumentVerificationCode();
       const title = `${template.label} · ${project?.name || client?.full_name || 'NBG record'}`;
-      const snapshot = { generated_at: new Date().toISOString(), document_type: category, project, client, unit, sale, payment, entered_fields: manual, document_data: documentData };
-      const detailText = `${template.label}\n\nSYSTEM SNAPSHOT\n${JSON.stringify({ ...snapshot, document_data: documentData }, null, 2)}`;
+      const readinessOverride = requiredWarnings.length ? { acknowledged: true, reason: overrideReason.trim(), warnings: requiredWarnings } : null;
+      const snapshot = { generated_at: new Date().toISOString(), document_type: category, project, client, unit, sale, payment, entered_fields: manual, document_data: documentData, readiness_override: readinessOverride };
+      const detailText = `${template.label}\n\nSYSTEM SNAPSHOT\n${JSON.stringify({ ...snapshot, document_data: documentData }, null, 2)}${readinessOverride ? `\n\nDRAFT READINESS OVERRIDE\n${JSON.stringify(readinessOverride, null, 2)}` : ''}`;
       const recipient = client?.full_name || project?.name || 'NBG operations';
       const generatedAmount = category === 'CLIENT_INVOICE' ? invoiceTotal : sale?.sale_price || payment?.amount || Number(manual.amount) || 0;
       const generated = await generateBrandedPdf(category, title, recipient, detailText, String(generatedAmount || ''), documentNumber, verificationCode);
@@ -3543,7 +3547,7 @@ function DocumentForm({ clients, onDone }: { clients: DocumentClient[]; onDone: 
       const record = { user_id: clientId || null, is_global: shareWithAllClients, recipient_name: recipient, title, category, file_url: fileUrl, document_ref: documentNumber, document_number: documentNumber, document_type: category, version_number: 1, status: 'DRAFT', approval_status: template.workflow.some((step) => ['LEGAL_REVIEW', 'APPROVAL', 'TECHNICAL_REVIEW'].includes(step)) ? 'PENDING' : 'NOT_REQUIRED', signature_status: template.workflow.includes('SIGNED') ? 'PENDING' : 'NOT_REQUIRED', project_id: projectId || null, unit_id: unitId || null, source_record_id: saleId || paymentId || unitId || projectId || null, content_summary: detailText, form_data: snapshot, content_hash: generated.contentHash, verification_code: generated.verificationCode, generated_at: new Date().toISOString(), source_type: 'GENERATED' };
       const { data: saved, error: saveError } = await supabase.from('client_documents').insert(record).select().single();
       if (saveError || !saved) throw new Error(saveError?.message || 'Could not save generated document. Apply the NBG document engine migration first.');
-      await supabase.from('document_workflow_events').insert({ document_id: saved.id, action: 'CREATED', to_status: 'DRAFT', comment: `${template.label} generated from linked source records` });
+      await supabase.from('document_workflow_events').insert({ document_id: saved.id, action: 'CREATED', to_status: 'DRAFT', comment: readinessOverride ? `Draft generated with readiness override: ${overrideReason.trim()}` : `${template.label} generated from linked source records` });
       onDone(saved as AdminDocument);
     } catch (generationError) { setError(uploadErrorMessage(generationError)); } finally { setSaving(false); }
   };
@@ -3567,7 +3571,9 @@ function DocumentForm({ clients, onDone }: { clients: DocumentClient[]; onDone: 
   };
   const agreementExtras = formTemplate.fields.filter((field) => ['completion_date', 'fixtures_schedule', 'title_legal_information', 'specifications', 'taxes_and_costs', 'default_termination', 'dispute_resolution'].includes(field.key));
   const visibleTemplate = { ...formTemplate, fields: formTemplate.fields.filter((field) => !agreementExtras.some((extra) => extra.key === field.key)) };
-  const requiredWarnings = template.validate(documentData);
+  const templateWarnings = template.validate(documentData);
+  const kycWarnings = category === 'AGREEMENT' ? missingKycFields.map((field) => `Client KYC: ${field} is missing.`) : [];
+  const requiredWarnings = [...new Set([...templateWarnings, ...kycWarnings])];
   const projectMapUrl = project?.map_url || (project?.latitude != null && project.longitude != null
     ? `https://www.google.com/maps/search/?api=1&query=${project.latitude},${project.longitude}`
     : project?.location ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent([project.location, project.locality, project.county].filter(Boolean).join(', '))}` : '');
@@ -3629,10 +3635,11 @@ function DocumentForm({ clients, onDone }: { clients: DocumentClient[]; onDone: 
         <section className="grid content-start gap-4"><ReadOnlySummary title="Document source" rows={[["Type", template.label], ["Client", client?.full_name || 'NBG operations'], ["Project", project?.name], ["Unit", unit?.unit_number], ["Sale", sale?.id], ["Payment", payment?.reference]]} />{category === 'CLIENT_INVOICE' && <div className="overflow-x-auto border border-[#c9c5bd] bg-white"><table className="w-full min-w-[420px] text-left text-xs"><thead className="bg-[#f0ede6] text-[10px] uppercase tracking-wide text-slate-500"><tr><th className="p-3">Description</th><th className="p-3 text-right">Qty</th><th className="p-3 text-right">Unit</th><th className="p-3 text-right">Total</th></tr></thead><tbody>{invoiceItems.filter((item) => item.description.trim()).map((item, index) => <tr key={index} className="border-t border-[#e6e2da]"><td className="p-3">{item.description}</td><td className="p-3 text-right">{item.quantity}</td><td className="p-3 text-right">{fmtKes(item.unit_price)}</td><td className="p-3 text-right font-semibold">{fmtKes(item.quantity * item.unit_price)}</td></tr>)}</tbody></table></div>}</section>
         <section className="grid content-start gap-3"><div className={`border p-4 ${requiredWarnings.length ? 'border-[#e4b8ad] bg-[#fff7f4]' : 'border-[#c9c5bd] bg-white'}`}><p className="eyebrow text-[#087f88]">Readiness</p><p className="mt-2 text-sm font-semibold text-[#123b4b]">{requiredWarnings.length ? `${requiredWarnings.length} required detail${requiredWarnings.length === 1 ? '' : 's'} need attention.` : 'Required template fields are ready for draft generation.'}</p>{requiredWarnings.length > 0 && <ul role="alert" className="mt-3 grid gap-2 text-xs leading-5 text-[#8d332b]">{requiredWarnings.slice(0, 6).map((warning) => <li key={warning} className="border-l-2 border-[#d58a7d] pl-2">{readableReadinessWarning(warning)}</li>)}</ul>}{requiredWarnings.some((warning) => /buyer_id_passport|buyer_legal_name/.test(warning)) && <button type="button" onClick={() => { setError(''); setStep('source'); }} className="mt-3 text-xs font-semibold text-[#087f88] underline">Return to client KYC details</button>}</div>{category === 'CLIENT_INVOICE' && <div className="border border-[#c9c5bd] bg-white p-4"><div className="flex justify-between text-xs"><span>Subtotal</span><strong>{fmtKes(invoiceSubtotal)}</strong></div><div className="mt-2 flex justify-between text-xs"><span>Tax</span><strong>{fmtKes(invoiceTax)}</strong></div><div className="mt-3 border-t border-[#e6e2da] pt-3"><div className="flex justify-between"><span className="text-sm font-semibold">Total due</span><strong className="font-serif text-xl text-[#087f88]">{fmtKes(invoiceTotal)}</strong></div><div className="mt-3 h-2 overflow-hidden bg-[#e6e2da]"><div className="h-full bg-[#19a69c]" style={{ width: `${invoiceTotal ? Math.min(100, invoiceSubtotal / invoiceTotal * 100) : 0}%` }} /></div><p className="mt-1 text-[10px] text-slate-400">Subtotal and tax composition</p></div></div>}{projectMapUrl && <a href={projectMapUrl} target="_blank" rel="noreferrer" className="btn-secondary justify-center"><MapPin size={14} /> Open verified project map</a>}</section>
       </div>}
+      {step === 'review' && requiredWarnings.length > 0 && <section className="border border-[#e7d3a8] bg-[#fff8e6] p-4"><p className="eyebrow text-[#856b2e]">Draft-only override</p><p className="mt-1 text-xs leading-5 text-slate-600">You may generate a DRAFT for review with missing details. This will not mark the document approved, signed, or complete. Resolve the items above before release.</p><label className="mt-3 flex items-start gap-2 text-xs leading-5 text-[#123b4b]"><input type="checkbox" checked={overrideAcknowledged} onChange={(event) => setOverrideAcknowledged(event.target.checked)} className="mt-1" /><span>I reviewed the listed gaps and understand this document is incomplete and remains a draft.</span></label><label className="mt-3 grid gap-1.5 text-xs text-slate-600"><span className="eyebrow">Reason for generating this incomplete draft (12 characters minimum) *</span><textarea value={overrideReason} onChange={(event) => setOverrideReason(event.target.value)} disabled={!overrideAcknowledged} minLength={12} maxLength={1000} rows={2} className="admin-input resize-y disabled:bg-slate-100" placeholder="For example: Client ID scan pending; sending draft to legal for review only." /></label></section>}
     </div>
 
     {error && <p role="alert" className="border border-[#e4b8ad] bg-[#fff7f4] p-3 text-sm text-[#a55445]">{error}</p>}
-    <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[#e2ded5] pt-4"><button type="button" onClick={() => stepIndex > 0 && moveStep(steps[stepIndex - 1].id)} disabled={stepIndex === 0 || saving} className="btn-secondary disabled:opacity-40">Back</button><div className="flex gap-2">{stepIndex < steps.length - 1 ? <button type="button" onClick={() => moveStep(steps[stepIndex + 1].id)} className="btn-primary">Continue <ArrowRight size={15} /></button> : <button type="submit" disabled={saving || requiredWarnings.length > 0} className="btn-primary disabled:opacity-50">{saving ? 'Generating and recording...' : `Generate ${template.label}`} <FileDown size={15} /></button>}</div></div>
+    <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[#e2ded5] pt-4"><button type="button" onClick={() => stepIndex > 0 && moveStep(steps[stepIndex - 1].id)} disabled={stepIndex === 0 || saving} className="btn-secondary disabled:opacity-40">Back</button><div className="flex gap-2">{stepIndex < steps.length - 1 ? <button type="button" onClick={() => moveStep(steps[stepIndex + 1].id)} className="btn-primary">Continue <ArrowRight size={15} /></button> : <button type="submit" disabled={saving || (requiredWarnings.length > 0 && (!overrideAcknowledged || overrideReason.trim().length < 12))} className="btn-primary disabled:opacity-50">{saving ? 'Generating and recording...' : requiredWarnings.length ? 'Generate incomplete draft' : `Generate ${template.label}`} <FileDown size={15} /></button>}</div></div>
   </form>;
 }
 
