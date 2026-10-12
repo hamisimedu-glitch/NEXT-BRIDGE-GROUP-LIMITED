@@ -29,11 +29,17 @@ type PurchaseRequestReceipt = { sale_id: string; unit: ProjectUnit; payment_mode
 type ClientUnitReservation = { sale_id: string; unit_id: string; project_id: string | null; unit_number: string; expires_at: string; reservation_source: string };
 type ClientPurchaseStatus = { sale_id: string; unit_id: string; project_id: string | null; unit_number: string; sale_price: number; paid_amount: number; status: string; reservation_expires_at: string | null; purchase_locked: boolean };
 type ClientProfile = { id: string; full_name: string; phone: string; preferred_location: string; investment_budget: string; notes: string; identity_document_type: string; identity_document_number: string; residential_address: string };
+type ClientInvestmentTransaction = { id: string; investment_id: string; transaction_ref: string; transaction_type: string; amount: number; currency: string; transaction_date: string; period_start: string | null; months_covered: number | null; reference: string | null; notes: string | null };
 
 function kenyaCalendarDate() {
   const parts = new Intl.DateTimeFormat('en-CA', { timeZone: 'Africa/Nairobi', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date());
   const part = (type: string) => parts.find((item) => item.type === type)?.value ?? '';
   return `${part('year')}-${part('month')}-${part('day')}`;
+}
+
+function kenyaGreeting() {
+  const hour = Number(new Intl.DateTimeFormat('en-GB', { timeZone: 'Africa/Nairobi', hour: '2-digit', hourCycle: 'h23' }).format(new Date()));
+  return hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
 }
 
 function parseIdentityDocumentText(rawText: string) {
@@ -49,10 +55,33 @@ function parseIdentityDocumentText(rawText: string) {
   return { fullName, identityNumber, address, documentType };
 }
 
+async function prepareIdentityImage(file: File): Promise<Blob> {
+  const bitmap = await createImageBitmap(file);
+  const scale = Math.min(2.5, 2800 / Math.max(bitmap.width, bitmap.height));
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+  canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+  const context = canvas.getContext('2d');
+  if (!context) throw new Error('Image processing is unavailable.');
+  context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  bitmap.close();
+  const image = context.getImageData(0, 0, canvas.width, canvas.height);
+  for (let index = 0; index < image.data.length; index += 4) {
+    const gray = ((image.data[index] * 0.299 + image.data[index + 1] * 0.587 + image.data[index + 2] * 0.114) - 128) * 1.45 + 128;
+    const level = Math.max(0, Math.min(255, gray));
+    image.data[index] = level;
+    image.data[index + 1] = level;
+    image.data[index + 2] = level;
+  }
+  context.putImageData(image, 0, 0);
+  return new Promise((resolve, reject) => canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error('The image could not be prepared.')), 'image/png'));
+}
+
 export function ClientPortalSignIn() {
-  const [mode, setMode] = useState<'signin' | 'magic' | 'signup' | 'reset' | 'created'>(() => localStorage.getItem('nbg_pending_purchase') || new URLSearchParams(window.location.search).get('mode') === 'signup' ? 'signup' : 'signin');
-  const [email, setEmail] = useState('');
-  const [fullName, setFullName] = useState('');
+  const signInParams = new URLSearchParams(window.location.search);
+  const [mode, setMode] = useState<'signin' | 'magic' | 'signup' | 'reset' | 'created'>(() => localStorage.getItem('nbg_pending_purchase') || signInParams.get('mode') === 'signup' ? 'signup' : 'signin');
+  const [email, setEmail] = useState(signInParams.get('investor_email') || '');
+  const [fullName, setFullName] = useState(signInParams.get('investor_name') || '');
   const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -198,6 +227,7 @@ function ClientPortal({ user, onSignOut, navigate }: { user: AdminUser; onSignOu
   const [publishedProgress, setPublishedProgress] = useState<PublishedConstructionProgress[]>([]);
   const [units, setUnits] = useState<ProjectUnit[]>([]);
   const [investments, setInvestments] = useState<Investment[]>([]);
+  const [investmentTransactions, setInvestmentTransactions] = useState<ClientInvestmentTransaction[]>([]);
   const [realtor, setRealtor] = useState<Realtor | null>(null);
   const [stages, setStages] = useState<ReservationStage[]>([]);
   const [unitReservations, setUnitReservations] = useState<ClientUnitReservation[]>([]);
@@ -232,7 +262,7 @@ function ClientPortal({ user, onSignOut, navigate }: { user: AdminUser; onSignOu
       supabase.from('published_construction_progress').select('*').order('published_at', { ascending: false }),
     ]);
 
-    const [stageResult, documentResult, projectDocumentResult, paymentResult, ticketResult, notificationResult, instructionsResult] = await Promise.all([
+    const [stageResult, documentResult, projectDocumentResult, paymentResult, ticketResult, notificationResult, instructionsResult, investmentTransactionResult] = await Promise.all([
       supabase.from('client_reservation_stages').select('*').eq('user_id', user.id).order('created_at'),
       supabase.from('client_documents').select('id,title,category,file_url,created_at,project_id,unit_id,is_global,document_ref,verification_code,content_hash,content_summary,source_type').or(`user_id.eq.${user.id},is_global.eq.true`).order('created_at', { ascending: false }).limit(100),
       supabase.from('project_investment_documents').select('id,project_id,title,category,storage_path,created_at,is_public,document_ref,verification_code,content_hash').eq('is_published', true).order('created_at', { ascending: false }).limit(100),
@@ -240,9 +270,10 @@ function ClientPortal({ user, onSignOut, navigate }: { user: AdminUser; onSignOu
       supabase.from('client_support_tickets').select('*').eq('user_id', user.id).order('created_at', { ascending: false }),
       supabase.from('client_notifications').select('*').eq('user_id', user.id).order('created_at', { ascending: false }),
       supabase.from('purchase_payment_instructions').select('bank_name,bank_branch,account_name,account_number,swift_code,payment_instructions,is_published').eq('singleton', true).eq('is_published', true).maybeSingle(),
+      supabase.from('investment_transactions').select('id,investment_id,transaction_ref,transaction_type,amount,currency,transaction_date,period_start,months_covered,reference,notes').order('transaction_date', { ascending: false }),
     ]);
 
-    if ([projectResult, updateResult, unitResult, investmentResult, realtorResult, profileResult, reservationResult, progressResult, stageResult, documentResult, projectDocumentResult, paymentResult, ticketResult, notificationResult, instructionsResult].some((result) => result.error)) {
+    if ([projectResult, updateResult, unitResult, investmentResult, realtorResult, profileResult, reservationResult, progressResult, stageResult, documentResult, projectDocumentResult, paymentResult, ticketResult, notificationResult, instructionsResult, investmentTransactionResult].some((result) => result.error)) {
       setPortalError('Some workspace data could not be loaded. You can still browse the available sections and retry.');
     }
 
@@ -251,6 +282,7 @@ function ClientPortal({ user, onSignOut, navigate }: { user: AdminUser; onSignOu
     setPublishedProgress((progressResult.data ?? []) as PublishedConstructionProgress[]);
     setUnits((unitResult.data ?? []) as ProjectUnit[]);
     setInvestments((investmentResult.data ?? []) as Investment[]);
+    setInvestmentTransactions((investmentTransactionResult.data ?? []) as ClientInvestmentTransaction[]);
     setRealtor((realtorResult.data ?? null) as Realtor | null);
     setProfile((profileResult.data ?? null) as ClientProfile | null);
     setUnitReservations((reservationResult.data ?? []) as ClientUnitReservation[]);
@@ -264,7 +296,7 @@ function ClientPortal({ user, onSignOut, navigate }: { user: AdminUser; onSignOu
     setLoading(false);
   }, [user.id]);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => { void (async () => { await supabase.rpc('link_my_investor_enquiries'); await load(); })(); }, [load]);
 
   const refreshDocuments = useCallback(async () => {
     const [documentResult, projectDocumentResult] = await Promise.all([
@@ -350,9 +382,11 @@ function ClientPortal({ user, onSignOut, navigate }: { user: AdminUser; onSignOu
     return () => window.removeEventListener('nbg-client-portal-navigate', handlePortalNavigation);
   }, []);
 
-  const submitInvestment = async (event: FormEvent) => {
+  const submitInvestment = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    const { data, error } = await supabase.from('investments').insert({ investor_user_id: user.id, investor_name: user.email.split('@')[0], investor_email: user.email, project_id: projectId || null, amount_interested: parseMoney(amount) || null, currency: 'KES', status: 'INQUIRY', notes: `Plan: ${plan}` }).select('tracking_code').single();
+    const form = new FormData(event.currentTarget);
+    if (form.get('investor_consent') !== 'on') { setPortalError('Consent to be contacted is required before submitting an investment plan.'); return; }
+    const { data, error } = await supabase.from('investments').insert({ investor_user_id: user.id, investor_name: profile?.full_name?.trim() || user.full_name?.trim() || user.email.split('@')[0], investor_email: user.email, investor_phone: profile?.phone || user.phone || null, project_id: projectId || null, amount_interested: parseMoney(amount) || null, investment_range: amount.trim() || null, investment_structure: plan, investor_message: `Investor portal plan request: ${plan}.`, consent_to_contact: true, consent_at: new Date().toISOString(), currency: 'KES', status: 'INQUIRY', notes: `Plan: ${plan}` }).select('tracking_code').single();
     if (error || !data?.tracking_code) { setPortalError(error?.message || 'The enquiry was saved but its tracking code could not be loaded.'); return; }
     setShowInvestment(false);
     setAmount('');
@@ -389,7 +423,7 @@ function ClientPortal({ user, onSignOut, navigate }: { user: AdminUser; onSignOu
   const active = sidebarItems.find((item) => item.id === section) ?? sidebarItems[0];
   const mobileNavItems: { id: PortalSection; label: string; icon: typeof Home }[] = [{ id: 'overview', label: 'Home', icon: Home }, { id: 'progress', label: 'Project', icon: Building2 }, { id: 'payments', label: 'Payments', icon: Receipt }, { id: 'resources', label: 'Docs', icon: FileText }, { id: 'availability', label: 'More', icon: Menu }];
 
-  const content = section === 'overview' ? <OverviewContent user={user} profile={profile} projects={projects} updates={updates} units={units} reservations={unitReservations} investments={investments} stages={stages} payments={payments} notifications={notifications} documents={documents} setSection={selectSection} /> : section === 'progress' ? <ClientProjectProgress projects={projects} units={units} updates={updates} progressRows={publishedProgress} stages={stages} reservations={unitReservations} onBack={() => selectSection('overview')} onContact={() => selectSection('resources')} onSelectUnit={(unit) => { localStorage.setItem('nbg_pending_purchase', unit.id); setPendingPurchaseUnitId(unit.id); setHomeSearch(''); selectSection('availability'); }} /> : section === 'payments' ? <ClientPaymentsView user={user} payments={payments} purchaseReceipt={purchaseReceipt} paymentInstructions={purchasePaymentInstructions} onDismissPurchase={() => setPurchaseReceipt(null)} /> : section === 'investments' ? <InvestmentContent projects={projects} investments={investments} showInvestment={showInvestment} setShowInvestment={setShowInvestment} projectId={projectId} setProjectId={setProjectId} amount={amount} setAmount={setAmount} plan={plan} setPlan={setPlan} submitInvestment={submitInvestment} realtor={realtor} setRealtor={setRealtor} user={user} /> : section === 'availability' ? <AvailabilityContent units={units} projects={projects} pendingUnitId={pendingPurchaseUnitId} search={homeSearch} onSearchChange={setHomeSearch} onPurchaseComplete={async (receipt) => { localStorage.removeItem('nbg_pending_purchase'); setPendingPurchaseUnitId(''); setPurchaseReceipt(receipt); setSection('payments'); await load(); }} /> : section === 'resources' ? <ResourcesContent navigate={navigate} documents={documents} projectDocuments={projectDocuments} projects={projects} tickets={tickets} setTickets={setTickets} user={user} /> : <ProfileContent user={user} recovery={recovery} profile={profile} onSaveProfile={saveProfile} onSignOut={onSignOut} />;
+  const content = section === 'overview' ? <OverviewContent user={user} profile={profile} projects={projects} updates={updates} units={units} reservations={unitReservations} investments={investments} stages={stages} payments={payments} notifications={notifications} documents={documents} setSection={selectSection} /> : section === 'progress' ? <ClientProjectProgress projects={projects} units={units} updates={updates} progressRows={publishedProgress} stages={stages} reservations={unitReservations} onBack={() => selectSection('overview')} onContact={() => selectSection('resources')} onSelectUnit={(unit) => { localStorage.setItem('nbg_pending_purchase', unit.id); setPendingPurchaseUnitId(unit.id); setHomeSearch(''); selectSection('availability'); }} /> : section === 'payments' ? <ClientPaymentsView user={user} payments={payments} purchaseReceipt={purchaseReceipt} paymentInstructions={purchasePaymentInstructions} onDismissPurchase={() => setPurchaseReceipt(null)} /> : section === 'investments' ? <InvestmentContent projects={projects} investments={investments} transactions={investmentTransactions} setSection={selectSection} showInvestment={showInvestment} setShowInvestment={setShowInvestment} projectId={projectId} setProjectId={setProjectId} amount={amount} setAmount={setAmount} plan={plan} setPlan={setPlan} submitInvestment={submitInvestment} realtor={realtor} setRealtor={setRealtor} user={user} /> : section === 'availability' ? <AvailabilityContent units={units} projects={projects} pendingUnitId={pendingPurchaseUnitId} search={homeSearch} onSearchChange={setHomeSearch} onPurchaseComplete={async (receipt) => { localStorage.removeItem('nbg_pending_purchase'); setPendingPurchaseUnitId(''); setPurchaseReceipt(receipt); setSection('payments'); await load(); }} /> : section === 'resources' ? <ResourcesContent navigate={navigate} documents={documents} projectDocuments={projectDocuments} projects={projects} tickets={tickets} setTickets={setTickets} user={user} /> : <ProfileContent user={user} recovery={recovery} profile={profile} documents={documents} onDocumentsUploaded={load} onSaveProfile={saveProfile} onSignOut={onSignOut} />;
 
   return <div className="portal-shell"><aside className={`portal-sidebar ${sidebarOpen ? 'portal-sidebar-open' : ''}`}><div className="portal-brand"><span className="brand-mark brand-mark-inverse"><img src="/NBG_LOGO-removebg-preview.png" alt="Next Bridge Group" /></span><div><p className="text-[10px] font-bold tracking-[.2em]">NBG CLIENT</p><p className="text-[8px] tracking-[.16em] text-white/45">PRIVATE WORKSPACE</p></div><button onClick={() => setSidebarOpen(false)} className="portal-close md:hidden" aria-label="Close portal menu"><X size={18} /></button></div><nav className="portal-nav">{['Workspace', 'Plan', 'Connect'].map((group) => <div key={group} className="portal-nav-group"><p>{group}</p>{sidebarItems.filter((item) => item.group === group).map(({ id, label, icon: Icon }) => <button key={id} onClick={() => selectSection(id)} className={section === id ? 'portal-nav-active' : ''}><Icon size={16} /><span>{label}</span>{section === id && <ArrowRight size={13} className="ml-auto" />}</button>)}</div>)}</nav><button onClick={onSignOut} className="portal-signout">Sign out</button></aside><div className="client-mobile-header md:hidden"><button type="button" onClick={() => setSidebarOpen(true)} aria-label="Open portal menu"><Menu size={19} /></button><div className="client-mobile-brand"><img src="/NBG_LOGO-removebg-preview.png" alt="" /><span>NBG</span></div><DashboardInbox user={user} mode="client" /></div><div className="portal-main"><header className={`portal-topbar ${section === 'availability' ? 'portal-topbar-homes' : ''}`}>{section === 'availability' ? <label className="homes-search homes-header-search"><Search size={15} /><input aria-label="Search homes, locations, or projects" value={homeSearch} onChange={(event) => setHomeSearch(event.target.value)} placeholder="Search for a home, location or project..." /></label> : <div><p className="eyebrow text-[#8de7e2]">{active.group}</p><h1>{active.label}</h1></div>}<div className="flex items-center gap-3"><DashboardInbox user={user} mode="client" /><div className="hidden items-center gap-3 sm:flex"><span className="portal-user-dot" /> <span className="text-xs text-slate-500">{user.full_name || user.email.split('@')[0]}</span><button onClick={() => navigate('contact')} className="btn-primary !px-4 !py-3">Speak with the team</button></div></div></header><main className={`portal-content ${section === 'availability' ? 'portal-content-homes' : ''}`}>{portalError && <div className="mb-6 flex items-start justify-between gap-4 border border-[#e4b8ad] bg-[#fff7f4] p-4 text-sm text-[#7a4e2e]"><span className="flex items-center gap-2"><AlertCircle size={17} />{portalError}</span><button onClick={() => void load()} className="font-semibold underline">Retry</button></div>}{recovery && <PasswordSetup onDone={() => window.history.replaceState({}, '', '/portal')} />}{loading ? <div className="portal-loading"><span /> Loading your private workspace...</div> : <div className="portal-reveal">{content}</div>}</main></div><nav className="client-mobile-nav md:hidden" aria-label="Client portal navigation">{mobileNavItems.map(({ id, label, icon: Icon }) => <button key={id} type="button" onClick={() => selectSection(id)} aria-current={section === id ? 'page' : undefined} className={section === id ? 'is-active' : ''}><Icon size={18} /><span>{label}</span></button>)}</nav></div>;
 }
@@ -423,7 +457,7 @@ function OverviewContent({ user, profile, projects, updates, units, reservations
   return <section className="client-dashboard">
     {activeReservation && <section className="mb-5 flex flex-wrap items-center justify-between gap-4 border border-[#dfbd72] bg-[#fff8e6] p-4" role="status"><div><p className="client-dashboard-eyebrow">Reservation held for you</p><p className="mt-1 text-sm font-semibold text-[#123b4b]">Unit {activeReservation.unit_number} · payment required by {new Date(activeReservation.expires_at).toLocaleString()}</p><p className="mt-1 text-xs leading-5 text-slate-600">If no payment is recorded by this deadline, the reservation expires and the unit becomes available to other buyers.</p></div><button type="button" onClick={() => setSection('payments')} className="client-aside-primary">View payment details <ArrowRight size={14} /></button></section>}
     <div className="client-dashboard-primary">
-      <div className="client-mobile-greeting"><strong>Good morning, {displayName}</strong><p>Your NBG investment, at your fingertips.</p></div>
+      <div className="client-mobile-greeting"><strong>{kenyaGreeting()}, {displayName}</strong><p>Your NBG investment, at your fingertips.</p></div>
       <section className="client-property-hero" style={{ backgroundImage: `linear-gradient(90deg, rgba(6,47,65,.88), rgba(6,47,65,.48) 48%, rgba(6,47,65,.04)), url("${propertyImage || '/NBG HERO.png'}")` }}>
         <div className="client-property-copy"><p className="client-dashboard-eyebrow">Your home</p><h2>{selectedProject?.name || 'Your NBG journey'}</h2><p className="client-property-unit">{selectedUnit ? `Unit ${selectedUnit.unit_number}` : `Welcome back, ${displayName}`}</p><span className="client-unit-status"><span />{selectedUnit?.status === 'SOLD' ? 'Owned' : selectedUnit?.status === 'RESERVED' ? 'Reserved' : 'Client workspace'}</span><p className="client-property-location"><MapPin size={13} />{selectedProject?.locality || selectedProject?.location || 'Nyali, Mombasa, Kenya'}</p><button type="button" onClick={() => setSection('availability')} className="client-hero-button">View property <ArrowRight size={14} /></button></div>
       </section>
@@ -999,7 +1033,7 @@ function ResourcesContent({ navigate, documents, projectDocuments, projects, tic
     <ClientLeadProjectShares user={user} />
   </section>;
 }
-function ProfileContent({ user, recovery, profile, onSaveProfile, onSignOut }: { user: AdminUser; recovery: boolean; profile: ClientProfile | null; onSaveProfile: (values: Omit<ClientProfile, 'id'>) => Promise<void>; onSignOut: () => void }) {
+function ProfileContent({ user, recovery, profile, documents, onDocumentsUploaded, onSaveProfile, onSignOut }: { user: AdminUser; recovery: boolean; profile: ClientProfile | null; documents: ClientDocument[]; onDocumentsUploaded: () => Promise<void>; onSaveProfile: (values: Omit<ClientProfile, 'id'>) => Promise<void>; onSignOut: () => void }) {
   const completingInvite = new URLSearchParams(window.location.search).get('complete_profile') === '1';
   const [fullName, setFullName] = useState(profile?.full_name ?? user.full_name ?? '');
   const [phone, setPhone] = useState(profile?.phone ?? user.phone ?? '');
@@ -1011,6 +1045,8 @@ function ProfileContent({ user, recovery, profile, onSaveProfile, onSignOut }: {
   const [residentialAddress, setResidentialAddress] = useState(profile?.residential_address ?? '');
   const [kycScanStatus, setKycScanStatus] = useState('');
   const [kycScanFile, setKycScanFile] = useState<File | null>(null);
+  const [kycUploadStatus, setKycUploadStatus] = useState('');
+  const [kycUploading, setKycUploading] = useState(false);
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [saving, setSaving] = useState(false);
@@ -1034,10 +1070,13 @@ function ProfileContent({ user, recovery, profile, onSaveProfile, onSignOut }: {
 
   const scanIdentityDocument = async (file: File | null) => {
     if (!file) return;
-    if (!file.type.startsWith('image/')) { setKycScanStatus('Choose a clear image of your ID or passport. PDF scanning is not supported yet.'); return; }
+    if (file.type === 'application/pdf') { setKycScanStatus('PDF saved for manual review. Enter the identity details below; OCR is available for image files.'); return; }
+    if (!file.type.startsWith('image/')) { setKycScanStatus('Use a PDF or a clear image of your ID or passport.'); return; }
     setKycScanStatus('Scanning identity document...');
     try {
-      const result = await Tesseract.recognize(file, 'eng', { logger: (progress: { status?: string; progress?: number }) => {
+      let scanImage: Blob = file;
+      try { scanImage = await prepareIdentityImage(file); } catch { /* Use the original image when preprocessing is unavailable. */ }
+      const result = await Tesseract.recognize(scanImage, 'eng', { logger: (progress: { status?: string; progress?: number }) => {
         if (progress.status === 'recognizing text') setKycScanStatus(`Scanning identity document... ${Math.round((progress.progress ?? 0) * 100)}%`);
       } });
       const parsed = parseIdentityDocumentText(result.data.text || '');
@@ -1051,8 +1090,35 @@ function ProfileContent({ user, recovery, profile, onSaveProfile, onSignOut }: {
     }
   };
 
+  const uploadIdentityDocument = async () => {
+    if (!kycScanFile || kycUploading) return;
+    if (!['application/pdf', 'image/jpeg', 'image/png', 'image/webp'].includes(kycScanFile.type)) { setKycUploadStatus('Upload a PDF, JPG, PNG, or WEBP file.'); return; }
+    if (kycScanFile.size > 10 * 1024 * 1024) { setKycUploadStatus('The identity document must be 10 MB or smaller.'); return; }
+    setKycUploading(true);
+    setKycUploadStatus('Uploading securely...');
+    const extension = kycScanFile.type === 'application/pdf' ? 'pdf' : kycScanFile.type.split('/')[1].replace('jpeg', 'jpg');
+    const path = `client-kyc/${user.id}/${crypto.randomUUID()}.${extension}`;
+    const { error: uploadError } = await supabase.storage.from('client-documents').upload(path, kycScanFile, { upsert: false, contentType: kycScanFile.type });
+    if (uploadError) {
+      setKycUploadStatus(`Upload failed: ${uploadError.message}`);
+      setKycUploading(false);
+      return;
+    }
+    const { error: recordError } = await supabase.from('client_documents').insert({ user_id: user.id, title: `${identityDocumentType || 'Identity'} document`, category: 'IDENTITY_DOCUMENT', file_url: path, source_type: 'CLIENT_UPLOAD', content_summary: `Client-provided identity document · ${identityDocumentType || 'type not entered'}` });
+    if (recordError) {
+      await supabase.storage.from('client-documents').remove([path]);
+      setKycUploadStatus(`The document record could not be saved: ${recordError.message}`);
+    } else {
+      setKycScanFile(null);
+      await onDocumentsUploaded();
+      setKycUploadStatus('Identity document uploaded securely. NBG can now review it in your client record.');
+    }
+    setKycUploading(false);
+  };
+
   const submit = async (event: FormEvent) => {
     event.preventDefault();
+    if (fullName.trim().length < 2) { setSaveError('Enter your full legal name exactly as shown on your identity document.'); return; }
     if (completingInvite && (newPassword.length < 8 || newPassword !== confirmPassword)) {
       setSaveError(newPassword.length < 8 ? 'Choose a password with at least 8 characters.' : 'The passwords do not match.');
       return;
@@ -1083,9 +1149,9 @@ function ProfileContent({ user, recovery, profile, onSaveProfile, onSignOut }: {
     <div className="mt-6 flex items-center justify-between gap-3"><div><p className="eyebrow text-[#087f88]">Your saved details</p><p className="mt-1 text-sm text-slate-500">Review your profile without re-entering it each visit.</p></div>{!editing && <button type="button" onClick={() => setEditing(true)} className="btn-secondary">Edit profile</button>}</div>
     <form onSubmit={submit} className="mt-3 grid gap-4 rounded-xl border border-[#d6efee] bg-white p-5">
       {completingInvite && <div className="grid gap-4 border-b border-[#e2eeec] pb-4 sm:grid-cols-2"><label className="grid gap-2 text-sm text-slate-600"><span className="eyebrow text-slate-500">Create password</span><input type="password" required minLength={8} autoComplete="new-password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} className="admin-input" /></label><label className="grid gap-2 text-sm text-slate-600"><span className="eyebrow text-slate-500">Confirm password</span><input type="password" required minLength={8} autoComplete="new-password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} className="admin-input" /></label></div>}
-      <section className="border border-[#d6efee] bg-[#f6fbfc] p-4"><p className="eyebrow text-[#087f88]">Identity document scan</p><p className="mt-1 text-xs leading-5 text-slate-600">OCR can suggest profile values, but NBG must verify the original document before approving identity.</p><div className="mt-3 grid gap-2 sm:grid-cols-[1fr_auto]"><label className="flex min-w-0 cursor-pointer items-center gap-2 border border-dashed border-[#20afd1] bg-white px-3 py-3 text-xs text-[#247b85]"><Upload size={15} /><span className="truncate">{kycScanFile?.name || 'Choose ID / passport image'}</span><input type="file" accept="image/*" disabled={!editing} className="hidden" onChange={(event) => { const file = event.target.files?.[0] ?? null; setKycScanFile(file); void scanIdentityDocument(file); event.currentTarget.value = ''; }} /></label><button type="button" disabled={!editing || !kycScanFile} onClick={() => void scanIdentityDocument(kycScanFile)} className="btn-secondary disabled:opacity-50">Scan and autofill</button></div>{kycScanStatus && <p role="status" className="mt-2 text-xs text-slate-600">{kycScanStatus}</p>}</section>
+      <section className="border border-[#d6efee] bg-[#f6fbfc] p-4"><p className="eyebrow text-[#087f88]">Identity document scan and upload</p><p className="mt-1 text-xs leading-5 text-slate-600">OCR may suggest details but can fail on glare, fonts, or document layouts. Upload the original PDF or image anyway and enter your official details manually if needed.</p><div className="mt-3 grid gap-2 sm:grid-cols-[1fr_auto_auto]"><label className="flex min-w-0 cursor-pointer items-center gap-2 border border-dashed border-[#20afd1] bg-white px-3 py-3 text-xs text-[#247b85]"><Upload size={15} /><span className="truncate">{kycScanFile?.name || 'Choose ID / passport file'}</span><input type="file" accept="image/jpeg,image/png,image/webp,application/pdf" disabled={!editing} className="hidden" onChange={(event) => { const file = event.target.files?.[0] ?? null; setKycScanFile(file); setKycUploadStatus(''); void scanIdentityDocument(file); event.currentTarget.value = ''; }} /></label><button type="button" disabled={!editing || !kycScanFile || kycScanFile.type === 'application/pdf'} onClick={() => void scanIdentityDocument(kycScanFile)} className="btn-secondary disabled:opacity-50">Scan and autofill</button><button type="button" disabled={!editing || !kycScanFile || kycUploading} onClick={() => void uploadIdentityDocument()} className="btn-primary disabled:opacity-50">{kycUploading ? 'Uploading…' : 'Upload document'}</button></div>{kycScanStatus && <p role="status" className="mt-2 text-xs text-slate-600">{kycScanStatus}</p>}{kycUploadStatus && <p role={kycUploadStatus.startsWith('Upload failed') || kycUploadStatus.startsWith('The document record') ? 'alert' : 'status'} className="mt-2 text-xs text-slate-600">{kycUploadStatus}</p>}<p className="mt-2 text-xs text-slate-500">{documents.filter((document) => document.category === 'IDENTITY_DOCUMENT').length} identity document{documents.filter((document) => document.category === 'IDENTITY_DOCUMENT').length === 1 ? '' : 's'} on file</p></section>
       <div className="grid gap-4 md:grid-cols-2">
-        <label className="grid gap-2 text-sm text-slate-600"><span className="eyebrow text-slate-500">Full name</span><input disabled={!editing} value={fullName} onChange={(event) => setFullName(event.target.value)} className="admin-input disabled:bg-[#f4f1eb]" placeholder="Your full name" /></label>
+        <label className="grid gap-2 text-sm text-slate-600"><span className="eyebrow text-slate-500">Full legal name (exactly as shown on ID) *</span><input disabled={!editing} required minLength={2} value={fullName} onChange={(event) => setFullName(event.target.value)} className="admin-input disabled:bg-[#f4f1eb]" placeholder="Enter your official name as printed" autoComplete="name" /></label>
         <label className="grid gap-2 text-sm text-slate-600"><span className="eyebrow text-slate-500">Phone</span><input disabled={!editing} value={phone} onChange={(event) => setPhone(event.target.value)} className="admin-input disabled:bg-[#f4f1eb]" placeholder="+254..." /></label>
       </div>
       <div className="grid gap-4 md:grid-cols-2">
@@ -1104,10 +1170,24 @@ function ProfileContent({ user, recovery, profile, onSaveProfile, onSignOut }: {
       </div>
     </form>
     <div className="mt-6 flex flex-wrap items-center gap-4 border-t border-[#d6efee] pt-5"><button type="button" onClick={() => void requestPasswordReset()} className="btn-secondary"><LockKeyhole size={15} /> Email password reset link</button>{resetNotice && <p className="text-sm text-[#087f88]">{resetNotice}</p>}</div>{!recovery && <p className="mt-3 text-xs text-slate-500">Password changes use Supabase’s secure recovery flow. We never display or store your password.</p>}</section>; }
-function InvestmentContent({ projects, investments, showInvestment, setShowInvestment, projectId, setProjectId, amount, setAmount, plan, setPlan, submitInvestment, realtor, setRealtor, user }: { projects: Project[]; investments: Investment[]; showInvestment: boolean; setShowInvestment: (value: boolean) => void; projectId: string; setProjectId: (value: string) => void; amount: string; setAmount: (value: string) => void; plan: string; setPlan: (value: string) => void; submitInvestment: (event: FormEvent) => void; realtor: Realtor | null; setRealtor: (value: Realtor) => void; user: AdminUser }) {
+function InvestmentContent({ projects, investments, transactions, setSection, showInvestment, setShowInvestment, projectId, setProjectId, amount, setAmount, plan, setPlan, submitInvestment, realtor, setRealtor, user }: { projects: Project[]; investments: Investment[]; transactions: ClientInvestmentTransaction[]; setSection: (section: PortalSection) => void; showInvestment: boolean; setShowInvestment: (value: boolean) => void; projectId: string; setProjectId: (value: string) => void; amount: string; setAmount: (value: string) => void; plan: string; setPlan: (value: string) => void; submitInvestment: (event: FormEvent<HTMLFormElement>) => void; realtor: Realtor | null; setRealtor: (value: Realtor) => void; user: AdminUser }) {
   const [name, setName] = useState(realtor?.name ?? '');
   const [phone, setPhone] = useState(realtor?.phone ?? '');
-  return <section><div className="portal-section-heading"><div><p className="eyebrow text-[#087f88]">Plan & grow</p><h2>Make the next move<br /><em>with clarity.</em></h2></div></div><div className="grid gap-6 xl:grid-cols-[1.1fr_.9fr]"><InvestmentCalculator /><div className="portal-panel"><div className="flex items-center gap-3"><UserRound className="text-[#087f88]" /><div><p className="eyebrow text-[#087f88]">Realtor pathway</p><h3 className="mt-2 font-serif text-3xl text-[#123b4b]">{realtor ? `Application: ${realtor.status}` : 'Represent NBG.'}</h3></div></div>{realtor ? <p className="mt-4 text-sm leading-6 text-slate-600">Your application is with the NBG team. Status updates and commission details will appear here.</p> : <form onSubmit={async (event) => { event.preventDefault(); const { data } = await supabase.from('realtors').insert({ user_id: user.id, name, email: user.email, phone: phone || null, status: 'PENDING' }).select().single(); if (data) setRealtor(data as Realtor); }} className="mt-5 grid gap-3"><input value={name} onChange={(event) => setName(event.target.value)} required className="admin-input" placeholder="Full name" /><input value={phone} onChange={(event) => setPhone(event.target.value)} className="admin-input" placeholder="Phone number" /><button className="btn-primary">Apply to become a realtor <ArrowRight size={15} /></button></form>}</div></div><div className="mt-8 portal-panel"><div className="flex items-center justify-between"><div><p className="eyebrow text-[#087f88]">Saved investment plans</p><h3 className="mt-2 font-serif text-3xl text-[#123b4b]">Your plans</h3></div><button onClick={() => setShowInvestment(!showInvestment)} className="btn-primary">{showInvestment ? 'Close' : 'Create plan'}</button></div>{showInvestment && <form onSubmit={submitInvestment} className="mt-6 grid gap-4 border-t border-[#a9d9d8] pt-6 md:grid-cols-4"><select value={projectId} onChange={(event) => setProjectId(event.target.value)} className="admin-input"><option value="">Choose a project</option>{projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}</select><select value={plan} onChange={(event) => setPlan(event.target.value)} className="admin-input"><option>Coastal starter</option><option>Family residence</option><option>Long-term investment</option><option>Premium ocean address</option></select><CurrencyInput value={amount} onChange={setAmount} className="admin-input" placeholder="Target amount (KSh)" /><button className="btn-primary">Send plan <ArrowRight size={15} /></button></form>}{investments.map((investment) => <div key={investment.id} className="flex items-center justify-between gap-4 border-b border-[#e2eeec] py-4"><div><p className="text-sm font-semibold text-[#123b4b]">{investment.notes || 'Investment enquiry'}</p><p className="mt-1 text-xs text-slate-500">{investment.amount_interested == null ? 'Amount to discuss' : investment.currency === 'KES' ? formatKes(investment.amount_interested) : `${investment.currency} ${new Intl.NumberFormat('en-KE').format(investment.amount_interested)}`}</p></div><span className="portal-status">{investment.status}</span></div>)}{investments.length === 0 && <p className="mt-5 text-sm text-slate-500">No plans yet. Create one when you are ready.</p>}</div></section>;
+  const statusLabel = (status: string) => ({ INQUIRY: 'Pending', SOFT_COMMIT: 'In review', COMMITTED: 'Committed', WITHDRAWN: 'Withdrawn' }[status] || status.replace(/_/g, ' '));
+  return <section>
+    <div className="portal-section-heading flex flex-wrap items-end justify-between gap-4"><div><p className="eyebrow text-[#087f88]">Investor account</p><h2>Make the next move<br /><em>with clarity.</em></h2></div><button type="button" onClick={() => setSection('overview')} className="btn-secondary">Switch to client workspace <ArrowRight size={14} /></button></div>
+    <div className="grid gap-6 xl:grid-cols-[1.1fr_.9fr]">
+      <InvestmentCalculator />
+      <div className="portal-panel"><div className="flex items-center gap-3"><UserRound className="text-[#087f88]" /><div><p className="eyebrow text-[#087f88]">Realtor pathway</p><h3 className="mt-2 font-serif text-3xl text-[#123b4b]">{realtor ? `Application: ${realtor.status}` : 'Represent NBG.'}</h3></div></div>{realtor ? <p className="mt-4 text-sm leading-6 text-slate-600">Your application is with the NBG team. Status updates and commission details will appear here.</p> : <form onSubmit={async (event) => { event.preventDefault(); const { data } = await supabase.from('realtors').insert({ user_id: user.id, name, email: user.email, phone: phone || null, status: 'PENDING' }).select().single(); if (data) setRealtor(data as Realtor); }} className="mt-5 grid gap-3"><input value={name} onChange={(event) => setName(event.target.value)} required className="admin-input" placeholder="Full name" /><input value={phone} onChange={(event) => setPhone(event.target.value)} className="admin-input" placeholder="Phone number" /><button className="btn-primary">Apply to become a realtor <ArrowRight size={15} /></button></form>}</div>
+    </div>
+    <div className="mt-8 portal-panel">
+      <div className="flex flex-wrap items-center justify-between gap-3"><div><p className="eyebrow text-[#087f88]">Portfolio</p><h3 className="mt-2 font-serif text-3xl text-[#123b4b]">Your investment interests</h3></div><button type="button" onClick={() => setShowInvestment(!showInvestment)} className="btn-primary">{showInvestment ? 'Close' : 'Create plan'}</button></div>
+      {showInvestment && <form onSubmit={submitInvestment} className="mt-6 grid gap-4 border-t border-[#a9d9d8] pt-6 md:grid-cols-3"><select value={projectId} onChange={(event) => setProjectId(event.target.value)} className="admin-input"><option value="">Choose a project</option>{projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}</select><select value={plan} onChange={(event) => setPlan(event.target.value)} className="admin-input"><option>Coastal starter</option><option>Family residence</option><option>Long-term investment</option><option>Premium ocean address</option></select><CurrencyInput value={amount} onChange={setAmount} className="admin-input" placeholder="Target amount (KSh)" /><label className="flex items-start gap-2 text-xs leading-5 text-slate-600 md:col-span-2"><input type="checkbox" name="investor_consent" required className="mt-1" /><span>I agree that NBG may contact me about this investment enquiry. This is an enquiry only, not an offer or commitment.</span></label><button className="btn-primary justify-center">Submit investment enquiry <ArrowRight size={15} /></button></form>}
+      {investments.map((investment) => <article key={investment.id} className="grid gap-3 border-b border-[#e2eeec] py-4 sm:grid-cols-[1fr_auto] sm:items-center"><div><p className="text-sm font-semibold text-[#123b4b]">{projects.find((project) => project.id === investment.project_id)?.name || investment.investment_structure || 'Investment enquiry'}</p><p className="mt-1 text-xs text-slate-500">{investment.amount_interested == null ? investment.investment_range || 'Amount to discuss' : investment.currency === 'KES' ? formatKes(investment.amount_interested) : `${investment.currency} ${new Intl.NumberFormat('en-KE').format(investment.amount_interested)}`}</p><p className="mt-1 font-mono text-[10px] text-slate-400">{investment.reference_code || 'Reference pending'}</p></div><span className="portal-status">{statusLabel(investment.status)}</span></article>)}
+      {investments.length === 0 && <p className="mt-5 text-sm text-slate-500">No investor enquiries are linked to this account yet.</p>}
+      <section className="mt-6 border-t border-[#e2eeec] pt-5"><div className="flex flex-wrap items-end justify-between gap-3"><div><p className="eyebrow text-[#087f88]">Account activity</p><h4 className="mt-1 text-sm font-semibold text-[#123b4b]">Investment transactions</h4></div><span className="text-xs text-slate-500">{transactions.length} recorded</span></div>{transactions.length ? <div className="mt-3 divide-y divide-[#e2eeec]">{transactions.map((transaction) => <article key={transaction.id} className="flex flex-wrap items-center justify-between gap-3 py-3"><div><p className="text-xs font-semibold text-[#123b4b]">{transaction.transaction_type.replace(/_/g, ' ')} · {investments.find((investment) => investment.id === transaction.investment_id)?.investor_name || 'Investment'}</p><p className="mt-1 text-[10px] text-slate-500">{new Date(`${transaction.transaction_date}T00:00:00`).toLocaleDateString('en-KE')} · {transaction.transaction_ref}{transaction.reference ? ` · ${transaction.reference}` : ''}</p></div><strong className="text-sm text-[#087f88]">{transaction.currency} {Number(transaction.amount).toLocaleString('en-KE')}</strong></article>)}</div> : <p className="mt-3 text-xs leading-5 text-slate-500">Verified contributions and distributions will appear here when recorded by NBG.</p>}</section>
+    </div>
+  </section>;
 }
 
 export default ClientPortal;

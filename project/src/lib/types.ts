@@ -180,6 +180,8 @@ export type Investment = {
   project_id: string | null;
   amount_interested: number | null;
   amount_committed?: number | null;
+  reviewed_by?: string | null;
+  reviewed_at?: string | null;
   currency: string;
   status: string;
   notes: string | null;

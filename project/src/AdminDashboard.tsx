@@ -1,6 +1,7 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import { AlertCircle, ArrowRight, Award, BarChart3, Building2, CalendarDays, Calculator, Check, ChevronRight, CircleCheck, ClipboardList, Clock3, Construction, CreditCard, Download, DollarSign, Eye, EyeOff, FileDown, FileText, Info, LayoutDashboard, LogOut, Mail, MapPin, Menu, MessageCircle, Pencil, Phone, Plus, RefreshCw, Search, Send, SlidersHorizontal, TrendingUp, Trash2, Upload, Users, X } from 'lucide-react';
 import { GState, jsPDF } from 'jspdf';
+import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import QRCode from 'qrcode';
 import { supabase } from '@/lib/supabase';
 import { resetPassword, signIn, signUp, type AdminUser } from '@/lib/auth';
@@ -33,6 +34,7 @@ type ApplicationRow = {
   createdAt: string;
   notes: string | null;
 };
+type InvestmentReviewHistory = { id: string; investment_id: string; from_status: string; to_status: string; decision_notes: string; amount_committed: number | null; actor_id: string | null; actor_email: string | null; created_at: string };
 const LEAD_PRIORITIES = ['LOW', 'NORMAL', 'HIGH', 'URGENT'] as const;
 const LEAD_ACTIONS = ['Call lead', 'Send project details', 'Schedule viewing', 'Send quotation', 'Follow up', 'No action'];
 const UNIT_TYPES = ['1 Bedroom', '2 Bedroom', '3 Bedroom', '3 Bedroom + DSQ', '4 Bedroom', 'Penthouse', 'Commercial'];
@@ -692,14 +694,14 @@ export default function AdminDashboard({ user, onSignOut }: { user: AdminUser; o
 
       {/* Content */}
       <div className="md:pl-64">
-        <header className="sticky top-0 z-20 flex h-[72px] items-center justify-between border-b border-[#c9c5bd] bg-[#f0ede6] px-5 md:px-10">
-          <div className="flex items-center gap-3">
+        <header className="sticky top-0 z-20 flex min-h-[72px] flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-[#c9c5bd] bg-[#f0ede6] px-4 py-3 sm:px-5 md:px-10">
+          <div className="flex min-w-0 items-center gap-3">
             <button className="md:hidden" onClick={() => setSidebarOpen(!sidebarOpen)} aria-label="Toggle menu">
               <Menu size={22} />
             </button>
-            <div className="flex items-center gap-2"><h1 className="font-serif text-2xl">{navItems.find((n) => n.id === tab)?.label ?? 'Dashboard'}</h1><SectionGuide guide={SECTION_GUIDES[tab]} /></div>
+            <div className="flex min-w-0 items-center gap-2"><h1 className="break-words font-serif text-xl sm:text-2xl">{navItems.find((n) => n.id === tab)?.label ?? 'Dashboard'}</h1><SectionGuide guide={SECTION_GUIDES[tab]} /></div>
           </div>
-          <div className="flex items-center gap-3"><DashboardInbox user={user} mode="staff" /><FinancialPrivacyToggle /><span className="hidden text-[10px] uppercase tracking-[.12em] text-slate-500 sm:inline">{isAdmin ? 'Owner/admin controls' : 'Staff operations'}</span><a href={`https://wa.me/${WA}`} target="_blank" rel="noreferrer" className="flex items-center gap-2 rounded-md bg-[#1f8a72] px-4 py-2 text-[10px] font-bold uppercase tracking-[.14em] text-white hover:bg-[#176b59]"><Phone size={13} /> WhatsApp</a></div>
+          <div className="flex max-w-full flex-wrap items-center justify-end gap-3"><DashboardInbox user={user} mode="staff" /><FinancialPrivacyToggle /><span className="hidden text-[10px] uppercase tracking-[.12em] text-slate-500 sm:inline">{isAdmin ? 'Owner/admin controls' : 'Staff operations'}</span><a href={`https://wa.me/${WA}`} target="_blank" rel="noreferrer" className="flex items-center gap-2 rounded-md bg-[#1f8a72] px-4 py-2 text-[10px] font-bold uppercase tracking-[.14em] text-white hover:bg-[#176b59]"><Phone size={13} /> WhatsApp</a></div>
         </header>
 
         <div className="px-5 py-8 md:px-10 md:py-10">
@@ -709,7 +711,7 @@ export default function AdminDashboard({ user, onSignOut }: { user: AdminUser; o
           {tab === 'payments' && <BuyerPaymentsTab goTo={go} />}
           {tab === 'units' && <UnitsTab canReserve={isAdmin} />}
           {tab === 'applications' && <ApplicationsTab />}
-          {tab === 'investments' && <InvestmentsTab canManageFinancials={isAdmin} />}
+          {tab === 'investments' && <InvestmentsTab canManageFinancials={isAdmin} onReview={() => go('applications')} />}
           {tab === 'realtors' && <RealtorsTab />}
           {tab === 'commissions' && <CommissionsTab />}
           {tab === 'projects' && <ProjectsTab canDelete={isAdmin} />}
@@ -978,6 +980,11 @@ function ApplicationsTab() {
   const [filtersOpen, setFiltersOpen] = useState(true);
   const [page, setPage] = useState(1);
   const [selectedApplication, setSelectedApplication] = useState<ApplicationRow | null>(null);
+  const [investmentReviewDraft, setInvestmentReviewDraft] = useState({ amount: '', notes: '' });
+  const [investorDetailsDraft, setInvestorDetailsDraft] = useState({ email: '', phone: '', project_id: '', investment_range: '', investment_structure: '', investor_message: '', consent_to_contact: false });
+  const [investmentHistory, setInvestmentHistory] = useState<InvestmentReviewHistory[]>([]);
+  const [transitioningInvestment, setTransitioningInvestment] = useState(false);
+  const [savingInvestorDetails, setSavingInvestorDetails] = useState(false);
   const pageSize = 10;
 
   const statusPresentation: Record<ApplicationStatus, { label: string; tone: string }> = {
@@ -1063,17 +1070,25 @@ function ApplicationsTab() {
     await load();
   };
 
-  const updateInvestmentStatus = async (id: string, status: string) => {
+  const updateInvestmentStatus = async (id: string, status: string, saveDecision = false) => {
     const target = investments.find((item) => item.id === id);
-    await supabase.from('investments').update({ status }).eq('id', id);
+    const amount_committed = investmentReviewDraft.amount.trim() ? parseMoney(investmentReviewDraft.amount) : target?.amount_committed ?? null;
+    const { error } = await supabase.rpc('advance_investment_application', {
+      p_investment_id: id,
+      p_status: status,
+      p_amount_committed: saveDecision && status === 'COMMITTED' ? amount_committed : null,
+      p_decision_notes: saveDecision ? investmentReviewDraft.notes.trim() : '',
+    });
+    if (error) return error.message;
     if (target) {
       await sendClientStatusNotification(target.investor_user_id ?? null, 'investment', target.investor_name, status);
       setActionStatus((current) => ({ ...current, [id]: {
-        title: status === 'COMMITTED' ? 'Committed and notified' : status === 'WITHDRAWN' ? 'Withdrawal saved' : 'Status saved',
-        message: status === 'COMMITTED' ? 'The investor has been informed of the next agreement steps.' : status === 'WITHDRAWN' ? 'The investor inbox has been updated with alternative options.' : 'The client inbox was updated with the next action.',
+        title: status === 'COMMITTED' ? 'Committed and notified' : status === 'WITHDRAWN' ? 'Withdrawal saved' : 'Review started',
+        message: status === 'COMMITTED' ? 'The investor has been informed of the next agreement steps.' : status === 'WITHDRAWN' ? 'The investor inbox has been updated with alternative options.' : 'The request is now in review and the change is recorded in the audit history.',
       } }));
     }
     await load();
+    return '';
   };
 
   const applications: ApplicationRow[] = useMemo(() => {
@@ -1163,10 +1178,75 @@ function ApplicationsTab() {
     );
   };
 
+  const openApplication = async (application: ApplicationRow) => {
+    setSelectedApplication(application);
+    const investment = investments.find((item) => item.id === application.id);
+    setInvestmentReviewDraft({ amount: investment?.amount_committed?.toString() ?? '', notes: '' });
+    setInvestorDetailsDraft({ email: investment?.investor_email ?? '', phone: investment?.investor_phone ?? '', project_id: investment?.project_id ?? '', investment_range: investment?.investment_range ?? '', investment_structure: investment?.investment_structure ?? '', investor_message: investment?.investor_message ?? '', consent_to_contact: Boolean(investment?.consent_to_contact) });
+    setInvestmentHistory([]);
+    if (application.kind !== 'investment') return;
+    const { data } = await supabase.from('investment_application_reviews').select('*').eq('investment_id', application.id).order('created_at', { ascending: false }).limit(10);
+    setInvestmentHistory((data ?? []) as InvestmentReviewHistory[]);
+    if (application.rawStatus !== 'INQUIRY') return;
+    setTransitioningInvestment(true);
+    const error = await updateInvestmentStatus(application.id, 'SOFT_COMMIT');
+    setTransitioningInvestment(false);
+    if (error) {
+      setActionStatus((current) => ({ ...current, [application.id]: { title: 'Review not started', message: error } }));
+      return;
+    }
+    setSelectedApplication((current) => current?.id === application.id ? { ...current, rawStatus: 'SOFT_COMMIT', status: 'IN_REVIEW' } : current);
+    const { data: reviewRows } = await supabase.from('investment_application_reviews').select('*').eq('investment_id', application.id).order('created_at', { ascending: false }).limit(10);
+    setInvestmentHistory((reviewRows ?? []) as InvestmentReviewHistory[]);
+  };
+
+  const saveInvestorDetails = async () => {
+    if (!selectedApplication || selectedApplication.kind !== 'investment') return;
+    setSavingInvestorDetails(true);
+    const changes = {
+      investor_email: investorDetailsDraft.email.trim().toLowerCase() || null,
+      investor_phone: investorDetailsDraft.phone.trim() || null,
+      project_id: investorDetailsDraft.project_id || null,
+      investment_range: investorDetailsDraft.investment_range.trim() || null,
+      investment_structure: investorDetailsDraft.investment_structure.trim() || null,
+      investor_message: investorDetailsDraft.investor_message.trim() || null,
+      consent_to_contact: investorDetailsDraft.consent_to_contact,
+      consent_at: investorDetailsDraft.consent_to_contact ? new Date().toISOString() : null,
+    };
+    const { error } = await supabase.from('investments').update(changes).eq('id', selectedApplication.id);
+    setSavingInvestorDetails(false);
+    if (error) {
+      setActionStatus((current) => ({ ...current, [selectedApplication.id]: { title: 'Investor details were not saved', message: error.message } }));
+      return;
+    }
+    setInvestments((current) => current.map((investment) => investment.id === selectedApplication.id ? { ...investment, ...changes } : investment));
+    setActionStatus((current) => ({ ...current, [selectedApplication.id]: { title: 'Investor details saved', message: 'The updated contact and investment basis is now part of the audit history.' } }));
+    const { data } = await supabase.from('investment_application_reviews').select('*').eq('investment_id', selectedApplication.id).order('created_at', { ascending: false }).limit(10);
+    setInvestmentHistory((data ?? []) as InvestmentReviewHistory[]);
+  };
+
   const applySelectedStatus = async (status: string) => {
     if (!selectedApplication) return;
     if (selectedApplication.kind === 'realtor') await updateRealtorStatus(selectedApplication.id, status);
-    else await updateInvestmentStatus(selectedApplication.id, status);
+    else {
+      if (status === 'COMMITTED' && (parseMoney(investmentReviewDraft.amount) <= 0 || investmentReviewDraft.notes.trim().length < 12)) {
+        setActionStatus((current) => ({ ...current, [selectedApplication.id]: { title: 'Review details required', message: 'Enter a committed amount and at least 12 characters of decision notes before committing.' } }));
+        return;
+      }
+      if (status === 'WITHDRAWN' && investmentReviewDraft.notes.trim().length < 12) {
+        setActionStatus((current) => ({ ...current, [selectedApplication.id]: { title: 'Withdrawal reason required', message: 'Enter at least 12 characters explaining this decision before withdrawing.' } }));
+        return;
+      }
+      setTransitioningInvestment(true);
+      const error = await updateInvestmentStatus(selectedApplication.id, status, status === 'COMMITTED' || status === 'WITHDRAWN');
+      setTransitioningInvestment(false);
+      if (error) {
+        setActionStatus((current) => ({ ...current, [selectedApplication.id]: { title: 'Status was not changed', message: error } }));
+        return;
+      }
+      const { data } = await supabase.from('investment_application_reviews').select('*').eq('investment_id', selectedApplication.id).order('created_at', { ascending: false }).limit(10);
+      setInvestmentHistory((data ?? []) as InvestmentReviewHistory[]);
+    }
     setSelectedApplication((current) => current ? {
       ...current,
       rawStatus: status,
@@ -1245,7 +1325,7 @@ function ApplicationsTab() {
                   <td className="px-3 py-3"><p className="max-w-[190px] truncate font-medium text-slate-700">{application.interest}</p><p className="mt-1 text-[10px] text-slate-500">{application.detail}{application.region !== 'Not specified' ? ` · ${application.region}` : ''}</p></td>
                   <td className="px-3 py-3"><span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-1 text-[9px] font-semibold uppercase ${presentation.tone}`}><span className="h-1.5 w-1.5 rounded-full bg-current" />{presentation.label}</span></td>
                   <td className="px-3 py-3"><p className="whitespace-nowrap text-slate-700">{new Date(application.createdAt).toLocaleDateString('en-KE', { day: '2-digit', month: 'short', year: 'numeric' })}</p><p className="mt-1 whitespace-nowrap text-[10px] text-slate-500">{new Date(application.createdAt).toLocaleTimeString('en-KE', { hour: '2-digit', minute: '2-digit' })}</p></td>
-                  <td className="px-3 py-3 text-right"><button type="button" onClick={() => setSelectedApplication(application)} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2.5 text-[10px] font-semibold text-slate-700 hover:border-sky-300 hover:text-sky-800"><Eye size={13} />View</button></td>
+                  <td className="px-3 py-3 text-right"><button type="button" onClick={() => void openApplication(application)} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2.5 text-[10px] font-semibold text-slate-700 hover:border-sky-300 hover:text-sky-800"><Eye size={13} />View</button></td>
                 </tr>;
               })}
               {visibleApplications.length === 0 && <tr><td colSpan={7} className="px-4 py-14 text-center"><p className="font-medium text-slate-700">No applications match these filters.</p><p className="mt-1 text-xs text-slate-500">Try changing your search or filters.</p></td></tr>}
@@ -1274,9 +1354,32 @@ function ApplicationsTab() {
             <div className="sm:col-span-2"><p className="text-[9px] font-semibold uppercase text-slate-400">Submitted</p><p className="mt-1 text-sm text-slate-700">{new Date(selectedApplication.createdAt).toLocaleString('en-KE')}</p></div>
             {selectedApplication.notes && <div className="sm:col-span-2"><p className="text-[9px] font-semibold uppercase text-slate-400">Notes</p><p className="mt-1 whitespace-pre-wrap text-sm leading-6 text-slate-700">{selectedApplication.notes}</p></div>}
             {actionStatus[selectedApplication.id] && <div className="sm:col-span-2 rounded-md border border-emerald-100 bg-emerald-50 p-3"><p className="text-xs font-semibold text-emerald-800">{actionStatus[selectedApplication.id].title}</p><p className="mt-1 text-xs text-slate-600">{actionStatus[selectedApplication.id].message}</p></div>}
+            {selectedApplication.kind === 'investment' && (() => {
+              const investment = investments.find((item) => item.id === selectedApplication.id);
+              const projectLabel = projects.find((project) => project.id === investorDetailsDraft.project_id)?.name || 'No project selected';
+              return <div className="sm:col-span-2 rounded-md border border-slate-200 bg-slate-50 p-4">
+                <div className="flex flex-wrap items-start justify-between gap-2"><div><p className="text-xs font-semibold text-slate-800">Investor review basis</p><p className="mt-1 text-[10px] text-slate-500">Complete the enquiry details before starting review. Commit and withdrawal decisions require a recorded rationale.</p></div><span className="rounded-full bg-white px-2 py-1 text-[10px] font-semibold text-slate-600">{projectLabel}</span></div>
+                <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                  <label className="grid gap-1 text-[10px] text-slate-500">Investor email<input type="email" value={investorDetailsDraft.email} onChange={(event) => setInvestorDetailsDraft((draft) => ({ ...draft, email: event.target.value }))} className="admin-input !py-2 text-xs" /></label>
+                  <label className="grid gap-1 text-[10px] text-slate-500">Phone<input value={investorDetailsDraft.phone} onChange={(event) => setInvestorDetailsDraft((draft) => ({ ...draft, phone: event.target.value }))} className="admin-input !py-2 text-xs" /></label>
+                  <label className="grid gap-1 text-[10px] text-slate-500">Project<select value={investorDetailsDraft.project_id} onChange={(event) => setInvestorDetailsDraft((draft) => ({ ...draft, project_id: event.target.value }))} className="admin-input !py-2 text-xs"><option value="">General interest / not selected</option>{projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}</select></label>
+                  <label className="grid gap-1 text-[10px] text-slate-500">Investment range<input value={investorDetailsDraft.investment_range} onChange={(event) => setInvestorDetailsDraft((draft) => ({ ...draft, investment_range: event.target.value }))} className="admin-input !py-2 text-xs" placeholder="For example, KSh 5–10 million" /></label>
+                  <label className="grid gap-1 text-[10px] text-slate-500 sm:col-span-2">Investment structure<input value={investorDetailsDraft.investment_structure} onChange={(event) => setInvestorDetailsDraft((draft) => ({ ...draft, investment_structure: event.target.value }))} className="admin-input !py-2 text-xs" placeholder="Participation or structure discussed" /></label>
+                  <label className="grid gap-1 text-[10px] text-slate-500 sm:col-span-2">Investor objectives / enquiry notes<textarea value={investorDetailsDraft.investor_message} onChange={(event) => setInvestorDetailsDraft((draft) => ({ ...draft, investor_message: event.target.value }))} rows={2} className="admin-input resize-y text-xs" /></label>
+                  <label className="flex items-start gap-2 text-[10px] leading-4 text-slate-600 sm:col-span-2"><input type="checkbox" checked={investorDetailsDraft.consent_to_contact} onChange={(event) => setInvestorDetailsDraft((draft) => ({ ...draft, consent_to_contact: event.target.checked }))} className="mt-0.5" /><span>Investor consent to be contacted is recorded. Confirm only after consent is actually received.</span></label>
+                </div>
+                <div className="mt-3 flex flex-wrap items-end gap-3 border-t border-slate-200 pt-3">
+                  <label className="grid min-w-40 flex-1 gap-1 text-[10px] text-slate-500">Committed amount (KES)<input type="number" min="0" step="0.01" value={investmentReviewDraft.amount} onChange={(event) => setInvestmentReviewDraft((draft) => ({ ...draft, amount: event.target.value }))} className="admin-input !py-2 text-xs" /></label>
+                  <label className="grid min-w-52 flex-[2] gap-1 text-[10px] text-slate-500">Review / decision rationale<textarea value={investmentReviewDraft.notes} onChange={(event) => setInvestmentReviewDraft((draft) => ({ ...draft, notes: event.target.value }))} rows={2} maxLength={1200} className="admin-input resize-y text-xs" placeholder="Record the evidence and decision basis (at least 12 characters for final decisions)." /></label>
+                  <button type="button" onClick={() => void saveInvestorDetails()} disabled={savingInvestorDetails} className="btn-secondary !px-3 !py-2 disabled:opacity-50">{savingInvestorDetails ? 'Saving…' : 'Save review details'}</button>
+                  {investment && <p className="w-full text-[10px] text-slate-500">Account {investment.investor_user_id ? 'linked' : 'not yet linked'} · Consent {investment.consent_to_contact ? 'recorded' : 'missing'} · Amount interested {investment.amount_interested == null ? 'not recorded' : fmtKes(investment.amount_interested)}</p>}
+                </div>
+                <div className="mt-4 border-t border-slate-200 pt-3"><p className="text-[10px] font-semibold uppercase text-slate-500">Status history</p>{investmentHistory.length ? <ol className="mt-2 grid gap-2">{investmentHistory.map((entry) => <li key={entry.id} className="flex flex-wrap justify-between gap-x-4 gap-y-1 text-[10px] text-slate-600"><span><strong>{entry.from_status.replace(/_/g, ' ')} → {entry.to_status.replace(/_/g, ' ')}</strong> · {entry.actor_email || 'Staff account'}{entry.amount_committed ? ` · ${fmtKes(entry.amount_committed)}` : ''}{entry.decision_notes ? ` · ${entry.decision_notes}` : ''}</span><time>{new Date(entry.created_at).toLocaleString('en-KE')}</time></li>)}</ol> : <p className="mt-2 text-[10px] text-slate-500">No status changes recorded yet.</p>}</div>
+              </div>;
+            })()}
           </div>
           <footer className="flex flex-wrap justify-end gap-2 border-t border-slate-200 bg-slate-50 p-4">
-            {selectedApplication.kind === 'realtor' ? <><button type="button" onClick={() => void applySelectedStatus('PENDING')} className="rounded-md border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700">Mark pending</button><button type="button" onClick={() => void applySelectedStatus('SUSPENDED')} className="rounded-md border border-rose-200 bg-white px-3 py-2 text-xs font-semibold text-rose-700">Place on hold</button><button type="button" onClick={() => void applySelectedStatus('ACTIVE')} className="rounded-md bg-emerald-600 px-3 py-2 text-xs font-semibold text-white">Approve</button></> : <><button type="button" onClick={() => void applySelectedStatus('INQUIRY')} className="rounded-md border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700">Mark pending</button><button type="button" onClick={() => void applySelectedStatus('SOFT_COMMIT')} className="rounded-md border border-sky-200 bg-white px-3 py-2 text-xs font-semibold text-sky-700">In review</button><button type="button" onClick={() => void applySelectedStatus('WITHDRAWN')} className="rounded-md border border-rose-200 bg-white px-3 py-2 text-xs font-semibold text-rose-700">Withdraw</button><button type="button" onClick={() => void applySelectedStatus('COMMITTED')} className="rounded-md bg-emerald-600 px-3 py-2 text-xs font-semibold text-white">Commit</button></>}
+            {selectedApplication.kind === 'realtor' ? <><button type="button" onClick={() => void applySelectedStatus('PENDING')} className="rounded-md border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700">Mark pending</button><button type="button" onClick={() => void applySelectedStatus('SUSPENDED')} className="rounded-md border border-rose-200 bg-white px-3 py-2 text-xs font-semibold text-rose-700">Place on hold</button><button type="button" onClick={() => void applySelectedStatus('ACTIVE')} className="rounded-md bg-emerald-600 px-3 py-2 text-xs font-semibold text-white">Approve</button></> : <>{selectedApplication.rawStatus === 'INQUIRY' && <button type="button" disabled={transitioningInvestment} onClick={() => void applySelectedStatus('SOFT_COMMIT')} className="rounded-md border border-sky-200 bg-white px-3 py-2 text-xs font-semibold text-sky-700 disabled:opacity-50">Start review</button>}{selectedApplication.rawStatus === 'SOFT_COMMIT' && <><button type="button" disabled={transitioningInvestment} onClick={() => void applySelectedStatus('WITHDRAWN')} className="rounded-md border border-rose-200 bg-white px-3 py-2 text-xs font-semibold text-rose-700 disabled:opacity-50">Withdraw</button><button type="button" disabled={transitioningInvestment} onClick={() => void applySelectedStatus('COMMITTED')} className="rounded-md bg-emerald-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50">Commit</button></>}</>}
           </footer>
         </section>
       </div>}
@@ -2032,6 +2135,7 @@ function PaymentForm({ saleId, installment, amountDue, oneTime, onDone }: { sale
 function UnitsTab({ canReserve }: { canReserve: boolean }) {
   const [units, setUnits] = useState<ProjectUnit[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
+  const [projectLoadError, setProjectLoadError] = useState('');
   const [reservations, setReservations] = useState<{ unit_id: string; buyer_name: string; reservation_expires_at: string | null; reservation_source: string; reservation_reason: string | null }[]>([]);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState('ALL');
@@ -2045,13 +2149,21 @@ function UnitsTab({ canReserve }: { canReserve: boolean }) {
   const [reservationUnit, setReservationUnit] = useState<ProjectUnit | null>(null);
 
   const load = useCallback(async () => {
-    const [ur, pr, sr] = await Promise.all([
+    const [ur, projectResult, sr] = await Promise.all([
       supabase.from('project_units').select('*').order('unit_number'),
-      supabase.from('projects').select('id,name,payment_policy'),
+      supabase.from('projects').select('id,name,payment_policy').order('name'),
       supabase.from('sales').select('unit_id,buyer_name,reservation_expires_at,reservation_source,reservation_reason').eq('status', 'RESERVED').not('unit_id', 'is', null).order('created_at', { ascending: false }),
     ]);
+    let projectData = projectResult.data;
+    let projectError = projectResult.error;
+    if (projectError && /payment_policy|column/i.test(projectError.message)) {
+      const fallbackResult = await supabase.from('projects').select('id,name').order('name');
+      projectData = fallbackResult.data?.map((project) => ({ ...project, payment_policy: 'INSTALLMENTS_OPTIONAL' })) ?? null;
+      projectError = fallbackResult.error;
+    }
+    setProjectLoadError(projectError ? `Projects could not be loaded: ${projectError.message}` : '');
     setUnits((ur.data ?? []) as ProjectUnit[]);
-    setProjects((pr.data ?? []) as Project[]);
+    setProjects((projectData ?? []) as Project[]);
     setReservations((sr.data ?? []) as { unit_id: string; buyer_name: string; reservation_expires_at: string | null; reservation_source: string; reservation_reason: string | null }[]);
     setLoading(false);
   }, []);
@@ -2099,13 +2211,13 @@ function UnitsTab({ canReserve }: { canReserve: boolean }) {
       <div className="mb-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">{[{ label: 'Total units', value: units.length, tone: 'text-[#123b4b]', icon: Building2 }, { label: 'Available', value: counts.AVAILABLE || 0, tone: 'text-[#2e6b3e]', icon: Eye }, { label: 'Reserved', value: counts.RESERVED || 0, tone: 'text-[#856b2e]', icon: CalendarDays }, { label: 'Sold', value: counts.SOLD || 0, tone: 'text-[#a55445]', icon: Check }].map(({ label, value, tone, icon: Icon }) => <article key={label} className="flex items-center justify-between border border-[#d6efee] bg-white p-4"><div><p className="eyebrow text-slate-500">{label}</p><p className={`mt-2 text-2xl font-semibold ${tone}`}>{value}</p></div><span className="grid size-10 place-items-center bg-[#eefbf9] text-[#087f88]"><Icon size={18} /></span></article>)}</div>
       <div className="mb-4 grid gap-2 lg:grid-cols-[minmax(220px,1fr)_repeat(4,minmax(110px,auto))]"><label className="relative"><Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" /><input value={search} onChange={(event) => setSearch(event.target.value)} className="admin-input w-full pl-9" placeholder="Search unit, type, floor or project" aria-label="Search units" /></label><select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} className="admin-input"><option value="ALL">All statuses</option>{UNIT_STATUSES.map((status) => <option key={status}>{status}</option>)}</select><select value={typeFilter} onChange={(event) => setTypeFilter(event.target.value)} className="admin-input"><option value="ALL">All unit types</option>{UNIT_TYPES.map((type) => <option key={type}>{type}</option>)}</select><select value={floorFilter} onChange={(event) => setFloorFilter(event.target.value)} className="admin-input"><option value="ALL">All floors</option>{[...new Set(units.map((unit) => unit.floor).filter(Boolean))].sort((a, b) => Number(a) - Number(b)).map((floor) => <option key={floor ?? 'unknown'} value={floor ?? ''}>Floor {floor}</option>)}</select><select value={visibilityFilter} onChange={(event) => setVisibilityFilter(event.target.value)} className="admin-input"><option value="ALL">Any visibility</option><option value="true">Public</option><option value="false">Hidden</option></select></div>
       <div className="overflow-hidden border border-[#c9c5bd] bg-white"><div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#e6e2da] bg-[#f8f7f3] px-4 py-3"><p className="text-xs text-slate-500">Showing {filtered.length} of {units.length} homes</p><label className="flex items-center gap-2 text-xs text-slate-500">Sort<select value={sortOrder} onChange={(event) => setSortOrder(event.target.value as typeof sortOrder)} className="admin-input !py-1.5"><option value="UNIT">Unit number</option><option value="PRICE_ASC">Price: low to high</option><option value="PRICE_DESC">Price: high to low</option></select></label></div><div className="overflow-x-auto"><table className="w-full min-w-[850px] text-left text-sm"><thead className="bg-[#f4f3ef] text-[10px] uppercase tracking-[.1em] text-[#55777d]"><tr>{['Unit', 'Unit type', 'Floor', 'Beds', 'Area (m²)', 'Price (KES)', 'View', 'Status', 'Payment', 'Public', 'Actions'].map((heading) => <th key={heading} className="px-3 py-3 font-semibold">{heading}</th>)}</tr></thead><tbody>{filtered.map((unit) => { const reservation = reservations.find((item) => item.unit_id === unit.id && item.reservation_expires_at && new Date(item.reservation_expires_at).getTime() > Date.now()); return <tr key={unit.id} className="border-t border-[#e6e2da] hover:bg-[#f8fbfa]"><td className="px-3 py-3"><div className="flex items-center gap-2.5">{unit.image_url ? <img src={unit.image_url} alt="" className="size-11 object-cover" /> : <span className="grid size-11 place-items-center bg-[#eefbf9] text-[#087f88]"><Building2 size={17} /></span>}<span><strong className="block text-xs text-[#123b4b]">{unit.unit_number}</strong><small className="text-[10px] text-slate-400">{projects.find((project) => project.id === unit.project_id)?.name || 'Project pending'}</small></span></div></td><td className="px-3 py-3 text-xs">{unit.type || '—'}</td><td className="px-3 py-3 text-xs">{unit.floor ? `Floor ${unit.floor}` : '—'}</td><td className="px-3 py-3 text-xs">{unit.bedrooms ?? '—'}</td><td className="px-3 py-3 text-xs">{unit.size || '—'}</td><td className="px-3 py-3 text-xs font-semibold">{unit.price ? `KSh ${parseMoney(unit.price).toLocaleString('en-KE')}` : 'Price pending'}</td><td className="px-3 py-3 text-xs">{unit.view || '—'}</td><td className="px-3 py-3"><span className={`inline-flex px-2 py-1 text-[10px] font-semibold ${unit.status === 'AVAILABLE' ? 'bg-[#e3f4e6] text-[#2e6b3e]' : unit.status === 'RESERVED' ? 'bg-[#fff2d8] text-[#856b2e]' : 'bg-[#fae4e2] text-[#a55445]'}`}>{unit.status}</span>{reservation && <small className="mt-1 block max-w-[110px] truncate text-[9px] text-slate-400" title={reservation.buyer_name}>{reservation.buyer_name}</small>}</td><td className="px-3 py-3 text-[10px] text-slate-500">{unit.payment_mode === 'ONE_TIME' ? 'One-time' : 'Installments'}</td><td className="px-3 py-3"><button type="button" onClick={() => void togglePublished(unit)} aria-label={`${unit.is_published ? 'Hide' : 'Publish'} ${unit.unit_number}`} className={`text-xs font-semibold ${unit.is_published ? 'text-[#2e6b3e]' : 'text-slate-400'}`}>{unit.is_published ? '● Live' : '○ Hidden'}</button></td><td className="px-3 py-3"><div className="flex items-center gap-2"><button type="button" onClick={() => setEditing(unit)} aria-label={`Edit ${unit.unit_number}`} className="grid size-8 place-items-center border border-[#d6efee] text-[#087f88]"><Pencil size={14} /></button><button type="button" onClick={() => void remove(unit.id)} aria-label={`Delete ${unit.unit_number}`} className="grid size-8 place-items-center border border-[#f0ddda] text-[#a55445]"><Trash2 size={14} /></button>{canReserve && unit.status === 'AVAILABLE' && <button type="button" onClick={() => setReservationUnit(unit)} className="text-[10px] font-semibold text-[#087f88]">Reserve</button>}</div></td></tr>; })}{filtered.length === 0 && <EmptyRow cols={11} text="No homes match these filters." />}</tbody></table></div></div>
-      {(showForm || editing) && <div className="fixed inset-0 z-50 flex justify-end bg-[#071116]/55" role="dialog" aria-modal="true" aria-label={editing ? `Edit unit ${editing.unit_number}` : 'Add unit'}><button type="button" className="absolute inset-0 cursor-default" onClick={() => { setShowForm(false); setEditing(null); }} aria-label="Close unit editor" /><aside className="relative z-10 h-full w-full max-w-[560px] overflow-y-auto border-l border-[#c9c5bd] bg-[#faf9f6] shadow-2xl"><div className="sticky top-0 z-10 flex items-center justify-between border-b border-[#e6e2da] bg-white px-5 py-4"><div><p className="eyebrow text-[#087f88]">{editing ? 'Inventory record' : 'New inventory'}</p><h3 className="mt-1 font-serif text-2xl text-[#123b4b]">{editing ? `Edit ${editing.unit_number}` : 'Add a unit'}</h3></div><button type="button" onClick={() => { setShowForm(false); setEditing(null); }} aria-label="Close unit editor" className="grid size-9 place-items-center border border-[#d6efee]"><X size={17} /></button></div><div className="p-5"><UnitForm key={editing?.id || 'new-unit'} projects={projects} initial={editing ?? undefined} onDone={(unit) => { setUnits((previous) => editing ? previous.map((item) => item.id === unit.id ? unit : item) : [unit, ...previous]); setShowForm(false); setEditing(null); }} /></div></aside></div>}
+      {(showForm || editing) && <div className="fixed inset-0 z-50 flex justify-end bg-[#071116]/55" role="dialog" aria-modal="true" aria-label={editing ? `Edit unit ${editing.unit_number}` : 'Add unit'}><button type="button" className="absolute inset-0 cursor-default" onClick={() => { setShowForm(false); setEditing(null); }} aria-label="Close unit editor" /><aside className="relative z-10 h-full w-full max-w-[560px] overflow-y-auto border-l border-[#c9c5bd] bg-[#faf9f6] shadow-2xl"><div className="sticky top-0 z-10 flex items-center justify-between border-b border-[#e6e2da] bg-white px-5 py-4"><div><p className="eyebrow text-[#087f88]">{editing ? 'Inventory record' : 'New inventory'}</p><h3 className="mt-1 font-serif text-2xl text-[#123b4b]">{editing ? `Edit ${editing.unit_number}` : 'Add a unit'}</h3></div><button type="button" onClick={() => { setShowForm(false); setEditing(null); }} aria-label="Close unit editor" className="grid size-9 place-items-center border border-[#d6efee]"><X size={17} /></button></div><div className="p-5"><UnitForm key={editing?.id || 'new-unit'} projects={projects} projectLoadError={projectLoadError} initial={editing ?? undefined} onDone={(unit) => { setUnits((previous) => editing ? previous.map((item) => item.id === unit.id ? unit : item) : [unit, ...previous]); setShowForm(false); setEditing(null); }} /></div></aside></div>}
       {reservationUnit && <Modal title={`Reserve ${reservationUnit.unit_number}`} onClose={() => setReservationUnit(null)}><AdminUnitReservationForm unit={reservationUnit} onDone={() => { setReservationUnit(null); void load(); }} /></Modal>}
     </div>
   );
 }
 
-function UnitForm({ projects, initial, onDone }: { projects: Project[]; initial?: ProjectUnit; onDone: (u: ProjectUnit) => void }) {
+function UnitForm({ projects, projectLoadError, initial, onDone }: { projects: Project[]; projectLoadError: string; initial?: ProjectUnit; onDone: (u: ProjectUnit) => void }) {
   const initialProject = projects.find((project) => project.id === initial?.project_id);
   const initialMode = initialProject?.payment_policy === 'ONE_TIME_ONLY' ? 'ONE_TIME' : initial?.payment_mode ?? '';
   const [f, setF] = useState({ unit_number: initial?.unit_number ?? '', project_id: initial?.project_id ?? '', type: initial?.type ?? '', bedrooms: initial?.bedrooms?.toString() ?? '', bathrooms: initial?.bathrooms?.toString() ?? '', size: initial?.size ?? '', floor: initial?.floor ?? '', parking: initial?.parking ?? '', view: initial?.view ?? '', description: initial?.description ?? '', price: initial?.price ?? '', payment_mode: initialMode as 'ONE_TIME' | 'INSTALLMENTS', is_published: initial?.is_published ?? false });
@@ -2140,8 +2252,10 @@ function UnitForm({ projects, initial, onDone }: { projects: Project[]; initial?
         <div className="rounded border border-[#c9c5bd] bg-[#f0ede6] px-3 py-2"><span className="eyebrow block text-slate-400">Unit Number</span><p className="mt-1 text-sm font-semibold text-[#17232b]">{f.unit_number || `F${(parseInt(f.floor) || 1).toString().padStart(2, '0')}-next`}</p><p className="mt-1 text-[10px] text-slate-500">Generated automatically from the floor</p></div>
         <label className="block">
           <span className="eyebrow mb-1.5 block text-slate-400">Project</span>
+          {projectLoadError && <span role="alert" className="mb-2 block text-xs text-[#a55445]">{projectLoadError}</span>}
           <select value={f.project_id} onChange={(e) => { const project = projects.find((item) => item.id === e.target.value); setF({ ...f, project_id: e.target.value, payment_mode: project?.payment_policy === 'ONE_TIME_ONLY' ? 'ONE_TIME' : f.payment_mode }); }} className="admin-input w-full">
             <option value="">— No project —</option>
+            {projects.length === 0 && <option value="" disabled>No projects available</option>}
             {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
           </select>
         </label>
@@ -2230,7 +2344,7 @@ function AdminUnitReservationForm({ unit, onDone }: { unit: ProjectUnit; onDone:
 type InvestmentTransaction = { id: string; transaction_ref: string; investment_id: string; project_id: string | null; transaction_type: string; amount: number; currency: string; transaction_date: string; period_start?: string | null; months_covered?: number; covers_full_balance?: boolean; reference: string | null; notes: string | null; created_at: string };
 type InvestmentAccount = { user_id: string; full_name: string | null; phone: string | null; email: string | null };
 
-function InvestmentsTab({ canManageFinancials }: { canManageFinancials: boolean }) {
+function InvestmentsTab({ canManageFinancials, onReview }: { canManageFinancials: boolean; onReview: () => void }) {
   const [investments, setInvestments] = useState<Investment[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [transactions, setTransactions] = useState<InvestmentTransaction[]>([]);
@@ -2273,11 +2387,6 @@ function InvestmentsTab({ canManageFinancials }: { canManageFinancials: boolean 
     }
   };
 
-  const updateStatus = async (id: string, status: string) => {
-    setInvestments((p) => p.map((i) => i.id === id ? { ...i, status } : i));
-    await supabase.from('investments').update({ status }).eq('id', id);
-  };
-
   if (loading) return <Spinner />;
 
   return (
@@ -2314,7 +2423,7 @@ function InvestmentsTab({ canManageFinancials }: { canManageFinancials: boolean 
                 {canManageFinancials && <td className="px-4 py-3"><input aria-label={`Committed amount for ${inv.investor_name}`} type="number" min="0" step="0.01" value={commitmentDrafts[inv.id] ?? inv.amount_committed?.toString() ?? ''} onChange={(event) => setCommitmentDrafts((current) => ({ ...current, [inv.id]: event.target.value }))} onBlur={(event) => { void updateCommitment(inv, event.target.value); }} className="admin-input w-36" placeholder="Not recorded" /></td>}
                 <td className="px-4 py-3 text-xs text-slate-500">{inv.currency}</td>
                 <td className="px-4 py-3">
-                  <StatusSelect value={inv.status} options={INVESTMENT_STATUSES} colors={INVESTMENT_STATUS_COLORS} onChange={(v) => updateStatus(inv.id, v)} />
+                  <span className={`inline-flex rounded-full px-2 py-1 text-[10px] font-semibold ${INVESTMENT_STATUS_COLORS[inv.status] || 'bg-slate-100 text-slate-700'}`}>{inv.status.replace(/_/g, ' ')}</span><button type="button" onClick={onReview} className="mt-2 block whitespace-nowrap text-[10px] font-semibold text-[#087f88] underline">Open review queue</button>
                 </td>
                 <td className="px-4 py-3 text-xs text-slate-400">{fmt(inv.created_at)}</td>
               </tr>
@@ -3058,6 +3167,11 @@ function DocumentForm({ clients, onDone }: { clients: DocumentClient[]; onDone: 
   const [clientId, setClientId] = useState('');
   const [createdClient, setCreatedClient] = useState<DocumentClient | null>(null);
   const [clientSearch, setClientSearch] = useState('');
+  const [clientDocuments, setClientDocuments] = useState<AdminDocument[]>([]);
+  const [clientDocumentsLoading, setClientDocumentsLoading] = useState(false);
+  const [buildingCompliancePacket, setBuildingCompliancePacket] = useState(false);
+  const [compliancePacketUrl, setCompliancePacketUrl] = useState('');
+  const [compliancePacketError, setCompliancePacketError] = useState('');
   const [showInviteForm, setShowInviteForm] = useState(false);
   const [inviteNotice, setInviteNotice] = useState('');
   const [shareWithAllClients, setShareWithAllClients] = useState(false);
@@ -3076,6 +3190,25 @@ function DocumentForm({ clients, onDone }: { clients: DocumentClient[]; onDone: 
     supabase.from('buyer_installments').select('id,sale_id,installment_number,due_date,amount,paid_amount,status').order('due_date'),
     supabase.from('buyer_payments').select('id,sale_id,installment_id,amount,payment_date,method,reference,transaction_ref').order('payment_date', { ascending: false }),
   ]).then(([projectResult, unitResult, saleResult, installmentResult, paymentResult]) => { setProjects((projectResult.data ?? []) as Project[]); setUnits((unitResult.data ?? []) as ProjectUnit[]); setSales((saleResult.data ?? []) as Sale[]); setSaleLoadError(saleResult.error?.message || ''); setInstallments((installmentResult.data ?? []) as DocumentInstallment[]); setPayments((paymentResult.data ?? []) as DocumentPayment[]); setPaymentLoadError(paymentResult.error?.message || ''); }); }, []);
+
+  useEffect(() => {
+    let active = true;
+    if (!clientId) {
+      setClientDocuments([]);
+      setClientDocumentsLoading(false);
+      return () => { active = false; };
+    }
+    setClientDocumentsLoading(true);
+    void supabase.from('client_documents').select('id,user_id,title,category,file_url,created_at,is_global,recipient_name,recipient_email,source_record_id,document_ref,verification_code,content_hash,content_summary,source_type').eq('user_id', clientId).order('created_at', { ascending: false }).then(({ data, error: documentsError }) => {
+      if (!active) return;
+      setClientDocuments((data ?? []) as AdminDocument[]);
+      if (documentsError) setError(`Client documents could not be loaded: ${documentsError.message}`);
+      setClientDocumentsLoading(false);
+    });
+    return () => { active = false; };
+  }, [clientId]);
+
+  useEffect(() => () => { if (compliancePacketUrl) URL.revokeObjectURL(compliancePacketUrl); }, [compliancePacketUrl]);
 
   const template = DOCUMENT_TEMPLATES[category];
   const project = projects.find((item) => item.id === projectId);
@@ -3205,12 +3338,89 @@ function DocumentForm({ clients, onDone }: { clients: DocumentClient[]; onDone: 
     payment_schedule: paymentSchedule,
   };
   const documentData = { ...sourceFields, invoice_items: invoiceItems.filter((item) => item.description.trim()).map((item) => ({ ...item, amount: item.quantity * item.unit_price })), subtotal: invoiceSubtotal, tax_amount: invoiceTax, grand_total: invoiceTotal };
-  const missingKycFields = client ? [!client.identity_document_type ? 'identity document type' : '', !client.identity_document_number ? 'ID / passport number' : '', !client.residential_address ? 'residential address' : ''].filter(Boolean) : [];
+  const missingKycFields = client ? [!client.full_name ? 'full legal name as shown on ID' : '', !client.identity_document_type ? 'identity document type' : '', !client.identity_document_number ? 'ID / passport number' : '', !client.residential_address ? 'residential address' : '', !clientDocuments.some((document) => document.category === 'IDENTITY_DOCUMENT') ? 'identity document upload' : ''].filter(Boolean) : [];
+  const generateCompliancePacket = async () => {
+    if (!client || buildingCompliancePacket) return;
+    setBuildingCompliancePacket(true);
+    setCompliancePacketError('');
+    try {
+      const packet = await PDFDocument.create();
+      const font = await packet.embedFont(StandardFonts.Helvetica);
+      const boldFont = await packet.embedFont(StandardFonts.HelveticaBold);
+      const safePdfText = (value: string) => value.replace(/[^\x20-\x7E]/g, ' ');
+      const cover = packet.addPage();
+      cover.drawText('CLIENT COMPLIANCE PACKET', { x: 48, y: 750, size: 18, font: boldFont, color: rgb(0.05, 0.3, 0.34) });
+      cover.drawText(safePdfText(`Client: ${client.full_name || 'Legal name missing'}`), { x: 48, y: 710, size: 12, font: boldFont });
+      cover.drawText(safePdfText(`Email: ${client.email || 'Not recorded'}`), { x: 48, y: 690, size: 10, font });
+      cover.drawText(safePdfText(`Phone: ${client.phone || 'Not recorded'}`), { x: 48, y: 674, size: 10, font });
+      cover.drawText(safePdfText(`ID type: ${client.identity_document_type || 'Missing'} / Number: ${client.identity_document_number || 'Missing'}`), { x: 48, y: 658, size: 10, font });
+      cover.drawText(safePdfText(`Residential address: ${client.residential_address || 'Missing'}`), { x: 48, y: 642, size: 10, font, maxWidth: 500 });
+      cover.drawText(`Generated: ${new Date().toLocaleString('en-KE')}`, { x: 48, y: 616, size: 9, font });
+      cover.drawText('Missing requirements', { x: 48, y: 580, size: 11, font: boldFont, color: rgb(0.56, 0.2, 0.16) });
+      const missing = missingKycFields.length ? missingKycFields : ['None identified'];
+      missing.forEach((field, index) => cover.drawText(`- ${safePdfText(field)}`, { x: 58, y: 560 - index * 16, size: 9, font }));
+      if (!clientDocuments.length) cover.drawText('No client documents are on file.', { x: 48, y: 500, size: 10, font, color: rgb(0.56, 0.2, 0.16) });
+
+      for (const clientDocument of clientDocuments) {
+        try {
+        const fileResult = await supabase.storage.from('client-documents').download(clientDocument.file_url);
+        if (fileResult.error || !fileResult.data) {
+          const page = packet.addPage();
+          page.drawText(safePdfText(clientDocument.title), { x: 36, y: page.getHeight() - 40, size: 11, font: boldFont, maxWidth: page.getWidth() - 72 });
+          page.drawText(`File unavailable: ${safePdfText(fileResult.error?.message || 'Private file could not be downloaded')}`, { x: 36, y: page.getHeight() - 64, size: 9, font, maxWidth: page.getWidth() - 72 });
+          continue;
+        }
+        const bytes = await fileResult.data.arrayBuffer();
+        const path = clientDocument.file_url.toLowerCase();
+        const contentType = fileResult.data.type.toLowerCase();
+        if (path.endsWith('.pdf') || contentType.includes('pdf')) {
+          const source = await PDFDocument.load(bytes);
+          const pages = await packet.copyPages(source, source.getPageIndices());
+          pages.forEach((page) => packet.addPage(page));
+        } else if (contentType.startsWith('image/') || /\.(jpe?g|png|webp)$/i.test(path)) {
+          const bitmap = await createImageBitmap(fileResult.data);
+          const scale = Math.min(1, 1600 / Math.max(bitmap.width, bitmap.height));
+          const canvas = document.createElement('canvas');
+          canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+          canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+          const context = canvas.getContext('2d');
+          if (!context) throw new Error(`${clientDocument.title}: image conversion is unavailable`);
+          context.fillStyle = '#ffffff';
+          context.fillRect(0, 0, canvas.width, canvas.height);
+          context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+          bitmap.close();
+          const imageBlob = await new Promise<Blob>((resolve, reject) => canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error(`${clientDocument.title}: image conversion failed`)), 'image/jpeg', 0.9));
+          const image = await packet.embedJpg(await imageBlob.arrayBuffer());
+          const page = packet.addPage();
+          page.drawText(safePdfText(clientDocument.title), { x: 36, y: page.getHeight() - 30, size: 9, font: boldFont, maxWidth: page.getWidth() - 72 });
+          const size = image.scale(Math.min((page.getWidth() - 72) / image.width, (page.getHeight() - 72) / image.height));
+          page.drawImage(image, { x: (page.getWidth() - size.width) / 2, y: (page.getHeight() - size.height) / 2 - 10, width: size.width, height: size.height });
+        } else {
+          const page = packet.addPage();
+          page.drawText(safePdfText(clientDocument.title), { x: 36, y: page.getHeight() - 40, size: 11, font: boldFont, maxWidth: page.getWidth() - 72 });
+          page.drawText('This legacy file format could not be embedded. Open the original document from the client document register.', { x: 36, y: page.getHeight() - 64, size: 9, font, maxWidth: page.getWidth() - 72 });
+        }
+        } catch (documentError) {
+          const page = packet.addPage();
+          const reason = documentError instanceof Error ? documentError.message : 'Document could not be embedded';
+          page.drawText(safePdfText(clientDocument.title), { x: 36, y: page.getHeight() - 40, size: 11, font: boldFont, maxWidth: page.getWidth() - 72 });
+          page.drawText(safePdfText(`Document could not be embedded: ${reason}`), { x: 36, y: page.getHeight() - 64, size: 9, font, maxWidth: page.getWidth() - 72 });
+        }
+      }
+      const blob = new Blob([await packet.save()], { type: 'application/pdf' });
+      setCompliancePacketUrl(URL.createObjectURL(blob));
+    } catch (error) {
+      setCompliancePacketError(error instanceof Error ? error.message : 'The compliance packet could not be assembled.');
+    } finally {
+      setBuildingCompliancePacket(false);
+    }
+  };
   const primaryError = () => {
     if (requiresClient && !client && !shareWithAllClients) return 'Select an existing client account or explicitly share this public brochure/floor plan with all clients.';
     if (shareWithAllClients && !['BROCHURE', 'FLOOR_PLAN'].includes(category)) return 'Only public brochures and floor plans can be shared with all client accounts.';
     if (category === 'AGREEMENT' && (!project || !client || !unit || !sale)) return 'Select a project, client, property/unit, and matching sale before generating an Agreement for Sale.';
     if (category === 'AGREEMENT' && sale && client && !saleMatchesClient(sale, client)) return `The selected sale belongs to ${sale.buyer_name}. Select that buyer profile before generating the agreement.`;
+    if (category === 'AGREEMENT' && clientDocumentsLoading) return 'Wait for the selected client’s identity documents to finish loading.';
     if (category === 'AGREEMENT' && missingKycFields.length) return `The selected client is missing ${missingKycFields.join(', ')}. Request an update before generating the agreement.`;
     if (category === 'RECEIPT' && !client) return 'Select the registered client before looking up their sale and verified payments.';
     if (category === 'RECEIPT' && paymentLoadError) return `Verified payments could not be loaded: ${paymentLoadError}`;
@@ -3310,7 +3520,8 @@ function DocumentForm({ clients, onDone }: { clients: DocumentClient[]; onDone: 
           {category === 'RECEIPT' && <><DocumentSelect label="Verified payment" value={paymentId} onChange={(value) => { const nextPayment = payments.find((item) => item.id === value); const linkedSale = nextPayment ? sales.find((item) => item.id === nextPayment.sale_id) : undefined; const linkedClient = linkedSale ? clientForSale(linkedSale) : undefined; setPaymentId(value); if (linkedSale) setSaleId(linkedSale.id); if (linkedClient && linkedClient.id !== clientId) setClientId(linkedClient.id); }} required><option value="">Select a payment for this client...</option>{paymentOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</DocumentSelect>{paymentLoadError && <p role="alert" className="text-xs text-[#a55445]">Payments failed to load: {paymentLoadError}</p>}{clientId && linkedClientSales.length === 0 && <p className="text-xs text-[#a55445]">No sale is linked to {client?.full_name || client?.email || 'this client'}.</p>}{clientId && linkedClientSales.length > 0 && paymentOptions.length === 0 && !paymentLoadError && <p className="text-xs text-[#856b2e]">Sale found, but no payment has been recorded for this client yet.</p>}</>}
         </section>
         <section className="grid content-start gap-3">
-          {client && <div className="border border-[#a9d9d8] bg-[#eefbf9] p-4"><div className="flex items-start justify-between gap-2"><div><p className="eyebrow text-[#087f88]">Fetched client KYC</p><p className="mt-1 text-sm font-semibold text-[#123b4b]">{client.full_name || client.email || 'Client record'}</p></div><span className="text-[10px] font-semibold uppercase text-[#087f88]">Profile source</span></div><div className="mt-3 grid gap-x-4 gap-y-2 text-xs sm:grid-cols-2"><p><span className="text-slate-400">ID / passport</span><br />{client.identity_document_number || 'Not on file'}</p><p><span className="text-slate-400">Document type</span><br />{client.identity_document_type?.replace('_', ' ') || 'Not on file'}</p><p><span className="text-slate-400">Email / phone</span><br />{[client.email, client.phone].filter(Boolean).join(' · ') || 'Not on file'}</p><p><span className="text-slate-400">Residential address</span><br />{client.residential_address || 'Not on file'}</p></div><ClientKycStatus client={client} missingFields={missingKycFields} /></div>}
+          {client && <div className="border border-[#a9d9a8] bg-[#eefbf9] p-4"><div className="flex items-start justify-between gap-2"><div><p className="eyebrow text-[#087f88]">Fetched client KYC</p><p className="mt-1 text-sm font-semibold text-[#123b4b]">{client.full_name || client.email || 'Client record'}</p></div><span className="text-[10px] font-semibold uppercase text-[#087f88]">Profile source</span></div><div className="mt-3 grid gap-x-4 gap-y-2 text-xs sm:grid-cols-2"><p><span className="text-slate-400">ID / passport</span><br />{client.identity_document_number || 'Not on file'}</p><p><span className="text-slate-400">Document type</span><br />{client.identity_document_type?.replace('_', ' ') || 'Not on file'}</p><p><span className="text-slate-400">Email / phone</span><br />{[client.email, client.phone].filter(Boolean).join(' · ') || 'Not on file'}</p><p><span className="text-slate-400">Residential address</span><br />{client.residential_address || 'Not on file'}</p></div><ClientKycStatus client={client} missingFields={missingKycFields} /></div>}
+          {client && <section className="border border-slate-200 bg-white p-4"><div className="flex flex-wrap items-center justify-between gap-3"><div><p className="eyebrow text-[#087f88]">Compliance files</p><h4 className="mt-1 text-sm font-semibold text-[#123b4b]">{clientDocumentsLoading ? 'Loading client files…' : `${clientDocuments.length} documents on file`}</h4></div><button type="button" disabled={clientDocumentsLoading || buildingCompliancePacket} onClick={() => void generateCompliancePacket()} className="btn-secondary !px-3 !py-2 disabled:opacity-50">{buildingCompliancePacket ? 'Preparing PDF…' : 'Preview combined PDF'}</button></div>{clientDocuments.length > 0 && <ul className="mt-3 grid gap-2">{clientDocuments.map((clientDocument) => <li key={clientDocument.id} className="flex flex-wrap justify-between gap-2 border-t border-slate-100 pt-2 text-[10px] text-slate-600"><span>{clientDocument.title} · {clientDocument.category.replace(/_/g, ' ')}</span><span>{new Date(clientDocument.created_at).toLocaleDateString('en-KE')}</span></li>)}</ul>}{missingKycFields.length > 0 && <p className="mt-3 text-xs font-medium text-[#8d332b]">Missing: {missingKycFields.join(', ')}. Request the client’s update above before continuing.</p>}{compliancePacketError && <p role="alert" className="mt-3 text-xs text-[#a55445]">{compliancePacketError}</p>}{compliancePacketUrl && <div className="fixed inset-0 z-[120] grid place-items-center bg-slate-950/60 p-3 sm:p-6"><section role="dialog" aria-modal="true" aria-label="Client compliance packet preview" className="grid h-[min(94vh,1000px)] w-full max-w-5xl grid-rows-[auto_1fr] bg-white shadow-2xl"><header className="flex items-center justify-between gap-3 border-b border-slate-200 px-4 py-3"><div><p className="text-xs font-semibold text-[#123b4b]">Client compliance packet</p><p className="mt-1 text-[10px] text-slate-500">{client.full_name || client.email} · {clientDocuments.length} source documents</p></div><button type="button" onClick={() => setCompliancePacketUrl('')} className="btn-secondary !px-3 !py-2">Close preview</button></header><iframe title="Combined client compliance documents" src={compliancePacketUrl} className="h-full min-h-0 w-full" /></section></div>}</section>}
           {project && <div className="border border-[#c9c5bd] bg-white p-4"><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="eyebrow text-[#087f88]">Verified site source</p><p className="mt-1 text-sm font-semibold text-[#123b4b]">{project.name}</p><p className="mt-1 text-xs text-slate-500">{[project.location, project.locality, project.county, project.country].filter(Boolean).join(', ') || 'Location not recorded'}</p></div>{projectMapUrl && <a href={projectMapUrl} target="_blank" rel="noreferrer" className="btn-secondary !px-3 !py-2"><MapPin size={14} /> Map</a>}</div><div className="mt-3 grid grid-cols-2 gap-3 text-xs text-slate-500"><p>County<br /><strong className="text-[#123b4b]">{project.county || 'Not recorded'}</strong></p><p>Coordinates<br /><strong className="text-[#123b4b]">{project.latitude != null && project.longitude != null ? `${project.latitude}, ${project.longitude}` : 'Not recorded'}</strong></p></div></div>}
           {unit && <ReadOnlySummary title="Selected property" rows={[["Unit", unit.unit_number], ["Type", unit.type], ["Size", unit.size], ["Floor", unit.floor], ["Price", unit.price]]} />}
           {sale && <ReadOnlySummary title="Selected transaction" rows={[["Status", sale.status], ["Price", fmtKes(sale.sale_price)], ["Deposit", fmtKes(sale.deposit_amount)], ["Payment plan", sale.installment_frequency === 'ONE_TIME' ? 'One-time payment' : `${sale.installment_count} ${sale.installment_frequency.toLowerCase()}`]]} />}
