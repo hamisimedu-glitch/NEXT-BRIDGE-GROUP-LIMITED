@@ -710,7 +710,7 @@ export default function AdminDashboard({ user, onSignOut }: { user: AdminUser; o
           {tab === 'sales' && <SalesTab goTo={go} />}
           {tab === 'payments' && <BuyerPaymentsTab goTo={go} />}
           {tab === 'units' && <UnitsTab canReserve={isAdmin} />}
-          {tab === 'applications' && <ApplicationsTab />}
+          {tab === 'applications' && <ApplicationsTab canManageFinancials={isAdmin} />}
           {tab === 'investments' && <InvestmentsTab canManageFinancials={isAdmin} onReview={() => go('applications')} />}
           {tab === 'realtors' && <RealtorsTab />}
           {tab === 'commissions' && <CommissionsTab />}
@@ -965,7 +965,7 @@ function FinancialVaultTab({ user, goTo }: { user: AdminUser; goTo?: (tab: Admin
 
 // ─── Applications workflow ───────────────────────────────
 
-function ApplicationsTab() {
+function ApplicationsTab({ canManageFinancials }: { canManageFinancials: boolean }) {
   const [realtorApps, setRealtorApps] = useState<Realtor[]>([]);
   const [investments, setInvestments] = useState<Investment[]>([]);
   const [projects, setProjects] = useState<Pick<Project, 'id' | 'name' | 'location'>[]>([]);
@@ -1369,7 +1369,7 @@ function ApplicationsTab() {
                   <label className="flex items-start gap-2 text-[10px] leading-4 text-slate-600 sm:col-span-2"><input type="checkbox" checked={investorDetailsDraft.consent_to_contact} onChange={(event) => setInvestorDetailsDraft((draft) => ({ ...draft, consent_to_contact: event.target.checked }))} className="mt-0.5" /><span>Investor consent to be contacted is recorded. Confirm only after consent is actually received.</span></label>
                 </div>
                 <div className="mt-3 flex flex-wrap items-end gap-3 border-t border-slate-200 pt-3">
-                  <label className="grid min-w-40 flex-1 gap-1 text-[10px] text-slate-500">Committed amount (KES)<input type="number" min="0" step="0.01" value={investmentReviewDraft.amount} onChange={(event) => setInvestmentReviewDraft((draft) => ({ ...draft, amount: event.target.value }))} className="admin-input !py-2 text-xs" /></label>
+                  <label className="grid min-w-40 flex-1 gap-1 text-[10px] text-slate-500">Committed amount (KES)<input type="number" min="0" step="0.01" disabled={!canManageFinancials} value={investmentReviewDraft.amount} onChange={(event) => setInvestmentReviewDraft((draft) => ({ ...draft, amount: event.target.value }))} className="admin-input !py-2 text-xs disabled:bg-slate-100" />{!canManageFinancials && <span>Admin approval is required to record a commitment.</span>}</label>
                   <label className="grid min-w-52 flex-[2] gap-1 text-[10px] text-slate-500">Review / decision rationale<textarea value={investmentReviewDraft.notes} onChange={(event) => setInvestmentReviewDraft((draft) => ({ ...draft, notes: event.target.value }))} rows={2} maxLength={1200} className="admin-input resize-y text-xs" placeholder="Record the evidence and decision basis (at least 12 characters for final decisions)." /></label>
                   <button type="button" onClick={() => void saveInvestorDetails()} disabled={savingInvestorDetails} className="btn-secondary !px-3 !py-2 disabled:opacity-50">{savingInvestorDetails ? 'Saving…' : 'Save review details'}</button>
                   {investment && <p className="w-full text-[10px] text-slate-500">Account {investment.investor_user_id ? 'linked' : 'not yet linked'} · Consent {investment.consent_to_contact ? 'recorded' : 'missing'} · Amount interested {investment.amount_interested == null ? 'not recorded' : fmtKes(investment.amount_interested)}</p>}
@@ -1379,7 +1379,7 @@ function ApplicationsTab() {
             })()}
           </div>
           <footer className="flex flex-wrap justify-end gap-2 border-t border-slate-200 bg-slate-50 p-4">
-            {selectedApplication.kind === 'realtor' ? <><button type="button" onClick={() => void applySelectedStatus('PENDING')} className="rounded-md border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700">Mark pending</button><button type="button" onClick={() => void applySelectedStatus('SUSPENDED')} className="rounded-md border border-rose-200 bg-white px-3 py-2 text-xs font-semibold text-rose-700">Place on hold</button><button type="button" onClick={() => void applySelectedStatus('ACTIVE')} className="rounded-md bg-emerald-600 px-3 py-2 text-xs font-semibold text-white">Approve</button></> : <>{selectedApplication.rawStatus === 'INQUIRY' && <button type="button" disabled={transitioningInvestment} onClick={() => void applySelectedStatus('SOFT_COMMIT')} className="rounded-md border border-sky-200 bg-white px-3 py-2 text-xs font-semibold text-sky-700 disabled:opacity-50">Start review</button>}{selectedApplication.rawStatus === 'SOFT_COMMIT' && <><button type="button" disabled={transitioningInvestment} onClick={() => void applySelectedStatus('WITHDRAWN')} className="rounded-md border border-rose-200 bg-white px-3 py-2 text-xs font-semibold text-rose-700 disabled:opacity-50">Withdraw</button><button type="button" disabled={transitioningInvestment} onClick={() => void applySelectedStatus('COMMITTED')} className="rounded-md bg-emerald-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50">Commit</button></>}</>}
+            {selectedApplication.kind === 'realtor' ? <><button type="button" onClick={() => void applySelectedStatus('PENDING')} className="rounded-md border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700">Mark pending</button><button type="button" onClick={() => void applySelectedStatus('SUSPENDED')} className="rounded-md border border-rose-200 bg-white px-3 py-2 text-xs font-semibold text-rose-700">Place on hold</button><button type="button" onClick={() => void applySelectedStatus('ACTIVE')} className="rounded-md bg-emerald-600 px-3 py-2 text-xs font-semibold text-white">Approve</button></> : <>{selectedApplication.rawStatus === 'INQUIRY' && <button type="button" disabled={transitioningInvestment} onClick={() => void applySelectedStatus('SOFT_COMMIT')} className="rounded-md border border-sky-200 bg-white px-3 py-2 text-xs font-semibold text-sky-700 disabled:opacity-50">Start review</button>}{selectedApplication.rawStatus === 'SOFT_COMMIT' && <><button type="button" disabled={transitioningInvestment} onClick={() => void applySelectedStatus('WITHDRAWN')} className="rounded-md border border-rose-200 bg-white px-3 py-2 text-xs font-semibold text-rose-700 disabled:opacity-50">Withdraw</button>{canManageFinancials && <button type="button" disabled={transitioningInvestment} onClick={() => void applySelectedStatus('COMMITTED')} className="rounded-md bg-emerald-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50">Commit</button>}</>}</>}
           </footer>
         </section>
       </div>}
