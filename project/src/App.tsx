@@ -1,4 +1,4 @@
-import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
+import { FormEvent, forwardRef, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowDown,
   ArrowRight,
@@ -83,14 +83,22 @@ const gallery = [
   { image: images.coast, label: 'Location', title: 'The coast, close to home' },
 ];
 
-const navItems: { label: string; view: View }[] = [
-  { label: 'Residences', view: 'residences' },
-  { label: 'Projects', view: 'projects' },
-  { label: 'Reviews', view: 'reviews' },
+type NavigationLink = { label: string; view: View };
+const residenceLinks: NavigationLink[] = [
+  { label: 'Explore residences', view: 'residences' },
+  { label: 'Available homes', view: 'units' },
+  { label: 'Construction progress', view: 'construction' },
+  { label: 'Book a viewing', view: 'viewing' },
+];
+const projectLinks: NavigationLink[] = [
+  { label: 'All projects', view: 'projects' },
+  { label: 'Investment opportunities', view: 'investor' },
+];
+const moreLinks: NavigationLink[] = [
   { label: 'Location', view: 'about' },
   { label: 'Gallery', view: 'gallery' },
   { label: 'Contact', view: 'contact' },
-  { label: 'Verify document', view: 'verify' },
+  { label: 'Verify Documents', view: 'verify' },
 ];
 
 function trackContactEvent(channel: 'whatsapp' | 'phone', context: string) {
@@ -251,47 +259,186 @@ function WatermarkedImage({ src, alt, className = '', imageClassName = '' }: { s
 }
 
 function Header({ view, navigate, mobileOpen, setMobileOpen }: { view: View; navigate: (view: View) => void; mobileOpen: boolean; setMobileOpen: (open: boolean) => void }) {
+  const [scrolled, setScrolled] = useState(() => window.scrollY > 24);
+  const desktopMenuButtonRef = useRef<HTMLButtonElement>(null);
+  const compactMenuButtonRef = useRef<HTMLButtonElement>(null);
+  const drawerRef = useRef<HTMLElement>(null);
   const isHome = view === 'home';
+
+  useEffect(() => {
+    const updateScrollState = () => setScrolled(window.scrollY > 24);
+    window.addEventListener('scroll', updateScrollState, { passive: true });
+    return () => window.removeEventListener('scroll', updateScrollState);
+  }, []);
+
+  useEffect(() => {
+    if (!mobileOpen) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    const firstControl = drawerRef.current?.querySelector<HTMLElement>('[data-drawer-close]');
+    requestAnimationFrame(() => firstControl?.focus());
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        setMobileOpen(false);
+        focusMenuToggle();
+        return;
+      }
+      if (event.key !== 'Tab' || !drawerRef.current) return;
+      const controls = Array.from(drawerRef.current.querySelectorAll<HTMLElement>('button:not([disabled]), a[href]'));
+      if (controls.length === 0) return;
+      const first = controls[0];
+      const last = controls[controls.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [mobileOpen, setMobileOpen]);
+
+  const closeMenu = () => setMobileOpen(false);
+  const focusMenuToggle = () => (window.matchMedia('(min-width: 1200px)').matches ? desktopMenuButtonRef.current : compactMenuButtonRef.current)?.focus();
   const openSignup = () => {
+    closeMenu();
     navigate('portal');
     window.history.replaceState({}, '', '/portal?mode=signup');
   };
-  return (
-    <header className={`site-header site-header-global absolute top-0 z-30 w-full text-white ${isHome ? 'site-header-home' : 'site-header-inner'}`}>
-      <div className="mx-auto flex max-w-[1600px] items-center justify-between px-4 py-4 md:px-8 md:py-5">
-        <button onClick={() => navigate('home')} className="group flex items-center gap-3 text-left" aria-label="Next Bridge Group home">
-          <BrandMark inverse />
-          <span className="hidden sm:block">
-            <span className="block text-[11px] font-semibold tracking-[0.22em]">NEXT BRIDGE</span>
-            <span className="block text-[9px] tracking-[0.22em] text-white/70">GROUP LIMITED</span>
-          </span>
-        </button>
+  const openSignIn = () => {
+    closeMenu();
+    navigate('portal');
+  };
+  const go = (destination: View) => {
+    closeMenu();
+    navigate(destination);
+  };
 
-        <nav className="hidden items-center gap-8 xl:flex">
-          <button onClick={() => navigate('home')} className={`nav-link text-[10px] font-medium uppercase tracking-[0.18em] ${view === 'home' ? 'nav-link-active' : ''}`}>Home</button>
-          {navItems.map((item) => <button key={item.view} onClick={() => navigate(item.view)} className={`nav-link text-[10px] font-medium uppercase tracking-[0.18em] ${item.view === view ? 'nav-link-active' : ''}`}>{item.label}</button>)}
-        </nav>
-
-        <div className="hidden items-center gap-3 xl:flex">
-          <button type="button" onClick={() => navigate('portal')} className="header-auth-link">Sign in</button>
-          <button type="button" onClick={openSignup} className="header-auth-cta">Create account</button>
-          <button onClick={() => navigate('contact')} className="header-contact inline-flex items-center gap-2 rounded-full px-3 py-2 text-[10px] font-medium uppercase tracking-[0.18em] transition">
-            <span className="header-contact-icon flex h-5 w-5 items-center justify-center rounded-full"><Phone size={10} strokeWidth={1.8} /></span>
-            NYALI · MOMBASA · KENYA
+  return <>
+    <header className={`site-header site-header-global ${isHome ? 'site-header-home' : 'site-header-inner'} ${scrolled ? 'is-scrolled' : ''}`}>
+      <div className="site-header-frame">
+        <div className="site-header-bar">
+          <button type="button" onClick={() => go('home')} className="site-header-brand" aria-label="Next Bridge Group home">
+            <BrandMark inverse />
+            <span className="site-header-wordmark"><span>NEXT BRIDGE</span><small>GROUP LIMITED</small></span>
           </button>
-          <button onClick={() => setMobileOpen(!mobileOpen)} className="header-menu flex h-12 w-12 items-center justify-center rounded-full transition" aria-label={mobileOpen ? 'Close menu' : 'Open menu'}>
-            <Menu size={22} />
-          </button>
-        </div>
 
-        <div className="flex items-center gap-2 xl:hidden">
-          <button className="header-menu-mobile flex h-11 w-11 items-center justify-center rounded-full transition" onClick={() => navigate('verify')} aria-label="Verify a document" title="Verify a document"><ShieldCheck size={19} /></button>
-          <button className="header-menu-mobile flex h-11 w-11 items-center justify-center rounded-full transition" onClick={() => setMobileOpen(!mobileOpen)} aria-label={mobileOpen ? 'Close menu' : 'Open menu'}>{mobileOpen ? <X /> : <Menu />}</button>
+          <nav className="site-header-desktop-nav" aria-label="Primary navigation">
+            <button type="button" onClick={() => go('home')} className={`nav-link ${view === 'home' ? 'nav-link-active' : ''}`} aria-current={view === 'home' ? 'page' : undefined}>Home</button>
+            <NavDropdown label="Residences" links={residenceLinks} view={view} navigate={go} />
+            <NavDropdown label="Projects" links={projectLinks} view={view} navigate={go} />
+            <button type="button" onClick={() => go('reviews')} className={`nav-link ${view === 'reviews' ? 'nav-link-active' : ''}`} aria-current={view === 'reviews' ? 'page' : undefined}>Reviews</button>
+            <NavDropdown label="More" links={moreLinks} view={view} navigate={go} className="nav-dropdown-more" />
+          </nav>
+
+          <div className="site-header-desktop-actions">
+            <button type="button" onClick={openSignIn} className="header-auth-link">Sign in</button>
+            <button type="button" onClick={openSignup} className="header-auth-cta">Create account</button>
+            <button type="button" onClick={() => go('contact')} className="header-contact" aria-label="Contact Next Bridge Group in Nyali, Mombasa, Kenya">
+              <Phone size={14} strokeWidth={1.8} /><span>NYALI · MOMBASA · KENYA</span>
+            </button>
+            <MenuToggle ref={desktopMenuButtonRef} open={mobileOpen} onClick={() => setMobileOpen(!mobileOpen)} />
+          </div>
+
+          <div className="site-header-compact-actions">
+            <button type="button" onClick={openSignIn} className="header-auth-link compact-signin">Sign in</button>
+            <button type="button" onClick={openSignup} className="header-auth-cta compact-signup">Create account</button>
+            <button type="button" onClick={() => go('contact')} className="header-contact compact-location" aria-label="Contact Next Bridge Group in Nyali, Mombasa, Kenya">
+              <Phone size={14} strokeWidth={1.8} /><span>NYALI · MOMBASA · KENYA</span>
+            </button>
+            <MenuToggle ref={compactMenuButtonRef} open={mobileOpen} onClick={() => setMobileOpen(!mobileOpen)} />
+          </div>
         </div>
       </div>
-      {mobileOpen && <div className="site-mobile-menu absolute right-4 top-[76px] w-[min(360px,calc(100%-2rem))] p-5 md:right-8"><div className="grid gap-1"><button onClick={() => navigate('home')} className="border-b border-white/20 px-2 py-4 text-left text-xs uppercase tracking-[0.16em]">Home</button>{navItems.map((item) => <button key={item.view} onClick={() => navigate(item.view)} className="border-b border-white/20 px-2 py-4 text-left text-xs uppercase tracking-[0.16em]">{item.label}</button>)}<button onClick={() => navigate('portal')} className="border-b border-white/20 px-2 py-4 text-left text-xs uppercase tracking-[0.16em]">Sign in</button><button onClick={openSignup} className="border-b border-white/20 px-2 py-4 text-left text-xs uppercase tracking-[0.16em]">Create account</button><button onClick={() => navigate('viewing')} className="mt-4 bg-[#0b8e92] px-4 py-4 text-left text-xs font-semibold uppercase tracking-[0.16em] text-white">Book a private viewing</button></div></div>}
     </header>
-  );
+
+    {mobileOpen && <div className="nav-drawer-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) closeMenu(); }}>
+      <aside id="primary-nav-drawer" ref={drawerRef} className="nav-drawer" role="dialog" aria-modal="true" aria-labelledby="nav-drawer-title">
+        <div className="nav-drawer-heading">
+          <div className="nav-drawer-brand"><BrandMark inverse /><span id="nav-drawer-title">Explore NBG</span></div>
+          <button type="button" data-drawer-close aria-label="Close navigation menu" className="nav-drawer-close" onClick={() => { closeMenu(); focusMenuToggle(); }}><X size={20} /></button>
+        </div>
+        <nav className="nav-drawer-links" aria-label="All navigation links">
+          <button type="button" className={`nav-drawer-link ${view === 'home' ? 'is-active' : ''}`} onClick={() => go('home')}>Home</button>
+          <MobileNavGroup label="Residences" links={residenceLinks} view={view} navigate={go} />
+          <MobileNavGroup label="Projects" links={projectLinks} view={view} navigate={go} />
+          <button type="button" className={`nav-drawer-link ${view === 'reviews' ? 'is-active' : ''}`} onClick={() => go('reviews')}>Reviews</button>
+          <MobileNavGroup label="More" links={moreLinks} view={view} navigate={go} />
+        </nav>
+        <div className="nav-drawer-account">
+          <button type="button" onClick={openSignIn} className="nav-drawer-signin">Sign in</button>
+          <button type="button" onClick={openSignup} className="nav-drawer-signup">Create account <ArrowRight size={15} /></button>
+        </div>
+        <button type="button" className="nav-drawer-location" onClick={() => go('contact')}>
+          <span><Phone size={15} /> NYALI · MOMBASA · KENYA</span><small>Contact NBG <ArrowRight size={13} /></small>
+        </button>
+      </aside>
+    </div>}
+  </>;
+}
+
+const MenuToggle = forwardRef<HTMLButtonElement, { open: boolean; onClick: () => void }>(function MenuToggle({ open, onClick }, ref) {
+  return <button ref={ref} type="button" onClick={onClick} className="header-menu" aria-label={open ? 'Close navigation menu' : 'Open navigation menu'} aria-expanded={open} aria-controls="primary-nav-drawer">{open ? <X size={20} /> : <Menu size={20} />}</button>;
+});
+
+function NavDropdown({ label, links, view, navigate, className = '' }: { label: string; links: NavigationLink[]; view: View; navigate: (view: View) => void; className?: string }) {
+  const [open, setOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const active = links.some((link) => link.view === view);
+
+  useEffect(() => {
+    if (!open) return;
+    const handlePointerDown = (event: MouseEvent) => {
+      if (event.target instanceof Node && !dropdownRef.current?.contains(event.target)) setOpen(false);
+    };
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setOpen(false);
+        triggerRef.current?.focus();
+      }
+    };
+    document.addEventListener('mousedown', handlePointerDown);
+    document.addEventListener('keydown', handleEscape);
+    requestAnimationFrame(() => dropdownRef.current?.querySelector<HTMLButtonElement>('[role="menuitem"]')?.focus());
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown);
+      document.removeEventListener('keydown', handleEscape);
+    };
+  }, [open]);
+
+  const handleMenuKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
+    event.preventDefault();
+    const items = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'));
+    const currentIndex = items.indexOf(document.activeElement as HTMLButtonElement);
+    const nextIndex = event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1 : (currentIndex + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length;
+    items[nextIndex]?.focus();
+  };
+
+  return <div ref={dropdownRef} className={`nav-dropdown ${className}`}>
+    <button ref={triggerRef} type="button" className={`nav-link nav-dropdown-trigger ${active ? 'nav-link-active' : ''}`} aria-haspopup="menu" aria-expanded={open} aria-current={active ? 'page' : undefined} onClick={() => setOpen((wasOpen) => !wasOpen)} onKeyDown={(event) => { if (event.key === 'ArrowDown') { event.preventDefault(); setOpen(true); } }}>
+      {label}<ChevronDown size={13} aria-hidden="true" />
+    </button>
+    {open && <div className="nav-dropdown-menu" role="menu" aria-label={`${label} links`} onKeyDown={handleMenuKeyDown}>{links.map((link) => <button key={`${link.label}-${link.view}`} type="button" role="menuitem" className={view === link.view ? 'is-active' : ''} onClick={() => { setOpen(false); navigate(link.view); }}>{link.label}<ArrowRight size={13} aria-hidden="true" /></button>)}</div>}
+  </div>;
+}
+
+function MobileNavGroup({ label, links, view, navigate }: { label: string; links: NavigationLink[]; view: View; navigate: (view: View) => void }) {
+  const [expanded, setExpanded] = useState(true);
+  const active = links.some((link) => link.view === view);
+  const groupId = `drawer-${label.toLowerCase()}-links`;
+  return <section className="nav-drawer-group">
+    <button type="button" className={`nav-drawer-group-trigger ${active ? 'is-active' : ''}`} aria-expanded={expanded} aria-controls={groupId} onClick={() => setExpanded((isExpanded) => !isExpanded)}>{label}<ChevronDown size={15} className={expanded ? 'is-expanded' : ''} /></button>
+    {expanded && <div id={groupId} className="nav-drawer-submenu">{links.map((link) => <button type="button" key={`${link.label}-${link.view}`} className={view === link.view ? 'is-active' : ''} onClick={() => navigate(link.view)}>{link.label}</button>)}</div>}
+  </section>;
 }
 
 function HomePage({ navigate, setGalleryIndex }: { navigate: (view: View) => void; setGalleryIndex: (index: number) => void }) {
