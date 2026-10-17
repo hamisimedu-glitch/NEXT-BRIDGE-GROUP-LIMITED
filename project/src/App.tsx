@@ -33,13 +33,13 @@ import ClientPortal, { ClientPortalSignIn } from '@/ClientPortal';
 import AvailableHomeCard from '@/AvailableHomeCard';
 import AvailableHomesCatalog from '@/AvailableHomesCatalog';
 import LocationMap from '@/LocationMap';
-import ProjectProgressExperience from '@/ProjectProgressExperience';
+import ProjectProgressExperience, { ProjectReviewsView } from '@/ProjectProgressExperience';
 import ProjectInvestmentPage from '@/ProjectInvestmentPage';
 import ProjectDetailsPackage, { type PublicProjectDetails } from '@/ProjectDetailsPackage';
 import { calculateConstructionProgress, type PublishedConstructionProgress } from '@/lib/construction';
 
 type UnitStatus = 'AVAILABLE' | 'RESERVED' | 'SOLD';
-type View = 'home' | 'residences' | 'projects' | 'project' | 'project-investment' | 'units' | 'construction' | 'gallery' | 'about' | 'contact' | 'viewing' | 'faq' | 'investor' | 'privacy' | 'terms' | 'verify' | 'portal' | 'admin' | 'not-found';
+type View = 'home' | 'residences' | 'projects' | 'reviews' | 'project' | 'project-investment' | 'units' | 'construction' | 'gallery' | 'about' | 'contact' | 'viewing' | 'faq' | 'investor' | 'privacy' | 'terms' | 'verify' | 'portal' | 'admin' | 'not-found';
 
 type Unit = {
   id: string;
@@ -86,6 +86,7 @@ const gallery = [
 const navItems: { label: string; view: View }[] = [
   { label: 'Residences', view: 'residences' },
   { label: 'Projects', view: 'projects' },
+  { label: 'Reviews', view: 'reviews' },
   { label: 'Location', view: 'about' },
   { label: 'Gallery', view: 'gallery' },
   { label: 'Contact', view: 'contact' },
@@ -101,7 +102,7 @@ function viewFromPath(pathname: string): View {
   if (pathname.startsWith('/verify/')) return 'verify';
   const route = pathname.replace(/^\//, '') as View;
   if (pathname === '/' || pathname === '') return 'home';
-  return ['residences', 'projects', 'project', 'project-investment', 'units', 'construction', 'gallery', 'about', 'contact', 'viewing', 'faq', 'investor', 'privacy', 'terms', 'verify', 'portal', 'admin'].includes(route) ? route : 'not-found';
+  return ['residences', 'projects', 'reviews', 'project', 'project-investment', 'units', 'construction', 'gallery', 'about', 'contact', 'viewing', 'faq', 'investor', 'privacy', 'terms', 'verify', 'portal', 'admin'].includes(route) ? route : 'not-found';
 }
 
 function projectIdFromPath(pathname: string): string | null {
@@ -127,6 +128,7 @@ function App() {
   const [adminUser, setAdminUser] = useState<AdminUser | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [projectId, setProjectId] = useState<string | null>(() => projectIdFromPath(window.location.pathname));
+  const [reviewProjectId, setReviewProjectId] = useState(() => new URLSearchParams(window.location.search).get('project') ?? '');
   const [verificationCode, setVerificationCode] = useState<string | null>(() => verificationCodeFromPath(window.location.pathname));
 
   const resolveSignedInUser = async () => {
@@ -156,6 +158,7 @@ function App() {
     const handlePopState = () => {
       setView(viewFromPath(window.location.pathname));
       setProjectId(projectIdFromPath(window.location.pathname));
+      setReviewProjectId(new URLSearchParams(window.location.search).get('project') ?? '');
       setVerificationCode(verificationCodeFromPath(window.location.pathname));
       setMobileOpen(false);
       window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -176,7 +179,8 @@ function App() {
   const navigate = (nextView: View) => {
     setView(nextView);
     setMobileOpen(false);
-    window.history.pushState({}, '', nextView === 'home' ? '/' : `/${nextView}`);
+    const nextPath = nextView === 'home' ? '/' : nextView === 'reviews' && reviewProjectId ? `/reviews?project=${encodeURIComponent(reviewProjectId)}` : `/${nextView}`;
+    window.history.pushState({}, '', nextPath);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
@@ -203,6 +207,7 @@ function App() {
         {view === 'home' && <HomePage navigate={navigate} setGalleryIndex={setGalleryIndex} />}
         {view === 'residences' && <DatabaseResidencesPage navigate={navigate} setSelectedUnit={setSelectedUnit} />}
         {view === 'projects' && <DatabaseProjectsPage navigate={navigate} />}
+        {view === 'reviews' && <PublicReviewsPage projectId={reviewProjectId} onProjectChange={(id) => { setReviewProjectId(id); window.history.pushState({}, '', id ? `/reviews?project=${encodeURIComponent(id)}` : '/reviews'); }} onSignIn={() => navigate('portal')} />}
         {view === 'project' && projectId ? <ProjectProgressPage projectId={projectId} navigate={navigate} setSelectedUnit={setSelectedUnit} /> : view === 'project' ? <NotFoundPage navigate={navigate} /> : null}
         {view === 'project-investment' && projectId ? <ProjectInvestmentPage projectId={projectId} navigate={navigate} /> : view === 'project-investment' ? <NotFoundPage navigate={navigate} /> : null}
         {view === 'units' && <DatabaseUnitsPage navigate={navigate} setSelectedUnit={setSelectedUnit} />}
@@ -460,6 +465,37 @@ function DatabaseProjectsPage({ navigate }: { navigate: (view: View) => void }) 
   useEffect(() => { void load(); }, [load]);
   return <PageFrame eyebrow="Developments" title={<>Projects built<br /><em>for the long view.</em></>} intro="Explore NBG developments and view the homes available in each project.">
     {error ? <div className="mt-14"><PublicErrorState message={error} onRetry={() => void load()} navigate={navigate} /></div> : loading ? <p className="mt-14 text-sm text-slate-500">Loading published projects...</p> : projects.length === 0 ? <div className="mt-14"><EmptyState title="Projects are being prepared" text="Published project details will appear here once the NBG team makes them available." action="Back to home" onAction={() => navigate('home')} /></div> : <div className="mt-14 grid gap-8 lg:grid-cols-2">{projects.map((project) => <button key={project.id} type="button" onClick={() => navigateToPublicProject(project.id)} aria-label={`View ${project.name} and its available homes`} className="group relative block min-h-[520px] w-full overflow-hidden text-left"><img src={project.image_url || images.exterior} alt="" className="absolute inset-0 h-full w-full object-cover transition duration-700 group-hover:scale-105" /><span className="absolute inset-0 bg-gradient-to-t from-[#17232b] to-transparent" /><span className="absolute bottom-8 left-8 text-white"><span className="eyebrow text-[#9edfeb]">{project.status}</span><span className="mt-3 block font-serif text-5xl">{project.name}</span><span className="mt-5 flex items-center gap-2 text-xs"><MapPin size={14} className="text-[#20afd1]" /> {project.locality || project.location || 'Location to be announced'}</span><span className="link-arrow mt-7 flex items-center gap-2 text-white">View available homes <ArrowRight size={16} /></span></span></button>)}</div>}
+  </PageFrame>;
+}
+
+function PublicReviewsPage({ projectId, onProjectChange, onSignIn }: { projectId: string; onProjectChange: (id: string) => void; onSignIn: () => void }) {
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError('');
+    const { data, error: queryError } = await supabase.from('projects').select('*').eq('is_published', true).order('name');
+    if (queryError) setError('Published projects are temporarily unavailable.');
+    setProjects((data ?? []) as Project[]);
+    setLoading(false);
+  }, []);
+  useEffect(() => { void load(); }, [load]);
+  const selectedProject = projects.find((project) => project.id === projectId);
+
+  return <PageFrame eyebrow="Community feedback" title={<>Reviews &amp; Ratings<br /><em>from our projects.</em></>} intro="Explore published experiences from buyers, residents and visitors. Choose a project to see its reviews and share your own feedback.">
+    <section className="public-reviews-picker">
+      <label htmlFor="public-review-project">Choose a project</label>
+      <select id="public-review-project" value={projectId} onChange={(event) => onProjectChange(event.target.value)} disabled={loading || projects.length === 0}>
+        <option value="">{loading ? 'Loading published projects...' : projects.length ? 'Select a project' : 'No published projects yet'}</option>
+        {projects.map((project) => <option key={project.id} value={project.id}>{project.name}{project.locality || project.location ? ` · ${project.locality || project.location}` : ''}</option>)}
+      </select>
+      {error && <p role="alert">{error} <button type="button" onClick={() => void load()}>Try again</button></p>}
+      {!loading && !error && projects.length === 0 && <p>Published project reviews will appear here when a project is available.</p>}
+      {selectedProject && <p>Showing published reviews for <strong>{selectedProject.name}</strong>.</p>}
+    </section>
+    {selectedProject && <ProjectReviewsView key={selectedProject.id} projectId={selectedProject.id} onSignIn={onSignIn} />}
+    {projectId && !loading && !selectedProject && <p className="project-empty-note">That project is not currently published. Choose another project above.</p>}
   </PageFrame>;
 }
 

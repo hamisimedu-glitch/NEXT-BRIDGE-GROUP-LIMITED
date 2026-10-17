@@ -106,7 +106,7 @@ export default function ProjectProgressExperience({ project, units, updates, con
   </div>;
 }
 
-function ProjectReviewsView({ projectId, onSignIn }: { projectId: string; onSignIn?: () => void }) {
+export function ProjectReviewsView({ projectId, onSignIn }: { projectId: string; onSignIn?: () => void }) {
   const [reviews, setReviews] = useState<ProjectReview[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
