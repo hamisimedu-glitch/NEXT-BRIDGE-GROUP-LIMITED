@@ -508,7 +508,7 @@ function ProjectProgressPage({ projectId, navigate, setSelectedUnit }: { project
   if (loading) return <PageFrame eyebrow="Project profile" title={<>Preparing<br /><em>the details.</em></>} intro="Loading verified project information..."><p className="mt-14 text-sm text-slate-500">Please wait...</p></PageFrame>;
   if (error) return <PageFrame eyebrow="Project profile" title={<>Details are<br /><em>temporarily paused.</em></>} intro="We could not retrieve this project right now."><PublicErrorState message={error} onRetry={() => void load()} navigate={navigate} /></PageFrame>;
   if (!project) return <NotFoundPage navigate={navigate} />;
-  return <ProjectProgressExperience project={project} units={units} updates={updates} construction={construction} onSelectUnit={(unit) => setSelectedUnit(publicUnitToModalUnit(unit, [project]))} onBack={() => navigate('projects')} onContact={() => navigate('viewing')} />;
+  return <ProjectProgressExperience project={project} units={units} updates={updates} construction={construction} onSelectUnit={(unit) => setSelectedUnit(publicUnitToModalUnit(unit, [project]))} onBack={() => navigate('projects')} onContact={() => navigate('viewing')} onSignIn={() => navigate('portal')} />;
 }
 
 function ProjectDetailPage({ projectId, navigate, setSelectedUnit }: { projectId: string; navigate: (view: View) => void; setSelectedUnit: (unit: Unit) => void }) {
