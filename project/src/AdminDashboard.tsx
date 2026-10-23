@@ -1989,49 +1989,192 @@ function LeadsTab({ user }: { user: AdminUser }) {
         </table>
       </div>
 
-      {selected && (
-        <Drawer title={selected.name} onClose={() => setSelected(null)}>
-          <InfoRow label="Email" value={selected.email} icon={<Mail size={13} />} />
-          <InfoRow label="Phone" value={selected.phone} icon={<Phone size={13} />} />
-          {selected.tracking_code && <a href={`/verify/${encodeURIComponent(selected.tracking_code)}`} target="_blank" rel="noreferrer" className="text-xs font-semibold text-[#087f88] underline">Preview the client reference page · {selected.tracking_code}</a>}
-          <div className="flex flex-wrap gap-2">{selected.phone && <a href={`tel:${selected.phone}`} onClick={() => void recordLeadActivity(selected.id, 'CALL', 'phone', 'Called lead')} className="btn-secondary !px-3 !py-2"><Phone size={13} /> Call</a>}{selected.email && selectedContactDraft && <a href={`mailto:${selected.email}?subject=${encodeURIComponent(selectedContactDraft.subject)}&body=${encodeURIComponent(selectedContactDraft.body)}`} onClick={() => void recordLeadActivity(selected.id, 'EMAIL', 'email', 'Emailed lead')} className="btn-secondary !px-3 !py-2"><Mail size={13} /> Email</a>}{selected.phone && selectedContactDraft && <a href={`https://wa.me/${selected.phone.replace(/\D/g, '')}?text=${encodeURIComponent(selectedContactDraft.body)}`} target="_blank" rel="noreferrer" onClick={() => void recordLeadActivity(selected.id, 'WHATSAPP', 'whatsapp', 'Opened WhatsApp conversation')} className="btn-secondary !px-3 !py-2"><MessageCircle size={13} /> WhatsApp</a>}</div>
-          {selected.phone && (
-            <a href={`https://wa.me/${selected.phone.replace(/\D/g, '')}?text=${encodeURIComponent(selectedContactDraft?.body ?? '')}`} target="_blank" rel="noreferrer" onClick={() => void recordLeadActivity(selected.id, 'WHATSAPP', 'whatsapp', 'Opened WhatsApp conversation')} className="flex items-center gap-2 text-xs text-[#1f8a72] hover:underline">
-              <Phone size={13} /> Message on WhatsApp
-            </a>
-          )}
-          <InfoRow label="Source" value={selected.source} />
-          <InfoRow label="Project" value={selected.project} />
-          <InfoRow label="Apartment type" value={selected.apartment_type} />
-          {selected.message && (
-            <div className="rounded-md bg-[#f0ede6] p-3">
-              <p className="eyebrow text-slate-400">Message</p>
-              <p className="mt-2 text-sm text-slate-600">{selected.message}</p>
-            </div>
-          )}
-          <LeadJourney lead={selected} onChange={(status) => void updateStatus(selected.id, status)} />
-          {selected.outcome && <section className="border border-[#a9d9a8] bg-[#effaf0] p-3"><p className="eyebrow text-[#2e6b3e]">Lead outcome · {selected.outcome}</p><p className="mt-1 text-xs leading-5 text-slate-600">{selected.outcome_notes || 'Outcome reason was not recorded.'}</p></section>}
-          <LeadActionPanel lead={selected} staff={staff} projects={projects} actorId={user.id} onUpdate={(changes) => {
-            setLeads((p) => p.map((lead) => lead.id === selected.id ? { ...lead, ...changes } : lead));
-            setSelected((lead) => lead ? { ...lead, ...changes } : lead);
-          }} />
-          <LeadActivityTimeline leadId={selected.id} actorId={user.id} />
-          <NotesField defaultValue={selected.notes ?? ''} onSave={(n) => saveNotes(selected.id, n)} />
-        </Drawer>
-      )}
+      {selected && <LeadDetailDrawer
+        key={selected.id}
+        lead={selected}
+        leads={leads}
+        staff={staff}
+        projects={projects}
+        contactDraft={selectedContactDraft}
+        onClose={() => setSelected(null)}
+        onStageChange={(status) => void updateStatus(selected.id, status)}
+        onLeadUpdate={(changes) => {
+          setLeads((current) => current.map((lead) => lead.id === selected.id ? { ...lead, ...changes } : lead));
+          setSelected((current) => current ? { ...current, ...changes } : current);
+        }}
+        onNotesSave={(notes) => saveNotes(selected.id, notes)}
+      />}
     </div>
   );
 }
 
-async function recordLeadActivity(leadId: string, activityType: string, channel: string | null, body: string) {
+type LeadActivity = { id: string; activity_type: string; channel: string | null; body: string; created_at: string };
+type LeadDrawerSection = 'lead-details' | 'follow-up-history' | 'activity-timeline' | 'lead-notes';
+
+function LeadDetailDrawer({ lead, leads, staff, projects, contactDraft, onClose, onStageChange, onLeadUpdate, onNotesSave }: {
+  lead: Lead;
+  leads: Lead[];
+  staff: { id: string; full_name: string | null; role: string }[];
+  projects: Project[];
+  contactDraft: { subject: string; body: string } | null;
+  onClose: () => void;
+  onStageChange: (status: string) => void;
+  onLeadUpdate: (changes: Partial<Lead>) => void;
+  onNotesSave: (notes: string) => void;
+}) {
+  const [activeSection, setActiveSection] = useState<LeadDrawerSection>('lead-details');
+  const drawerRef = useRef<HTMLElement>(null);
+  const stageStats = LEAD_STATUSES.slice(0, 4).map((status) => ({ status, count: leads.filter((item) => item.status === status).length }));
+  const initials = lead.name.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join('').toUpperCase();
+
+  useEffect(() => {
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', closeOnEscape);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener('keydown', closeOnEscape);
+    };
+  }, [onClose]);
+
+  const goToSection = (section: LeadDrawerSection) => {
+    setActiveSection(section);
+    drawerRef.current?.querySelector<HTMLElement>(`#${section}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+  const navItems: { id: LeadDrawerSection; label: string; icon: typeof ClipboardList }[] = [
+    { id: 'lead-details', label: 'Lead Details', icon: ClipboardList },
+    { id: 'follow-up-history', label: 'Follow-up History', icon: Clock3 },
+    { id: 'activity-timeline', label: 'Activity Timeline', icon: CircleCheck },
+    { id: 'lead-notes', label: 'Notes', icon: FileText },
+  ];
+
+  return <div className="fixed inset-0 z-[90] flex justify-end bg-[#092733]/65 backdrop-blur-[2px]" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+    <section ref={drawerRef} role="dialog" aria-modal="true" aria-labelledby="lead-drawer-title" className="flex h-[100dvh] w-full flex-col overflow-hidden bg-[#f7fbfb] text-[#123b4b] shadow-2xl md:w-[min(72vw,1100px)]">
+      <header className="relative flex min-h-[82px] shrink-0 items-center justify-between overflow-hidden bg-[radial-gradient(ellipse_at_85%_140%,rgba(104,220,207,.45),transparent_42%),linear-gradient(115deg,#087f88,#0b9ca0_55%,#066671)] px-5 py-4 text-white md:px-7">
+        <div className="pointer-events-none absolute -right-12 -top-24 size-64 rounded-full border border-white/10" />
+        <div className="pointer-events-none absolute -right-4 -top-20 size-48 rounded-full border border-white/10" />
+        <div className="relative flex min-w-0 items-center gap-3">
+          <span className="grid size-12 shrink-0 place-items-center rounded-full border border-white/25 bg-white/15 text-lg font-semibold">{initials || <Users size={20} />}</span>
+          <div className="min-w-0"><h2 id="lead-drawer-title" className="truncate font-serif text-xl">{lead.name}</h2><div className="mt-1 flex flex-wrap items-center gap-2 text-[10px] text-white/75"><span className="rounded-full bg-[#70d9ad] px-2 py-0.5 font-semibold uppercase text-[#075a4d]">{lead.status.replace(/_/g, ' ')}</span><span>Lead ID: #{lead.id.slice(0, 8).toUpperCase()}</span></div></div>
+        </div>
+        <button type="button" onClick={onClose} aria-label="Close lead details" className="relative grid size-9 shrink-0 place-items-center rounded-full text-white/85 transition hover:bg-white/15 hover:text-white"><X size={20} /></button>
+      </header>
+
+      <div className="grid min-h-0 flex-1 grid-cols-1 md:grid-cols-[minmax(150px,25%)_minmax(0,1fr)]">
+        <aside className="hidden min-h-0 flex-col overflow-y-auto border-r border-[#e0eeee] bg-[#f1f9f9] p-3 md:flex">
+          <div className="shrink-0 border-b border-[#dfebeb] px-2 pb-3"><p className="text-sm font-semibold">{lead.name}</p><p className="mt-0.5 truncate text-[10px] text-[#6f8990]">{lead.email || 'Email not provided'}</p>{lead.phone && <a href={`tel:${lead.phone}`} className="mt-1 inline-flex items-center gap-1 text-[10px] font-medium text-[#087f88]"><Phone size={11} />{lead.phone}</a>}
+            <div className="mt-3 grid gap-1.5">{lead.tracking_code ? <a href={`/verify/${encodeURIComponent(lead.tracking_code)}`} target="_blank" rel="noreferrer" className="flex min-h-8 items-center justify-center gap-1.5 rounded-md border border-[#b8d5d6] bg-white px-2 text-[10px] font-semibold text-[#31546b]">View Full Profile <ArrowRight size={12} /></a> : <button type="button" onClick={() => goToSection('lead-details')} className="flex min-h-8 items-center justify-center gap-1.5 rounded-md border border-[#b8d5d6] bg-white px-2 text-[10px] font-semibold text-[#31546b]">View Full Profile <ArrowRight size={12} /></button>}{lead.phone && <a href={`tel:${lead.phone}`} onClick={() => void recordLeadActivity(lead.id, 'CALL', 'phone', 'Called lead')} className="flex min-h-8 items-center justify-center gap-1.5 rounded-md bg-[#087f88] px-2 text-[10px] font-semibold text-white"><Phone size={12} />Call lead</a>}{lead.email && contactDraft && <a href={`mailto:${lead.email}?subject=${encodeURIComponent(contactDraft.subject)}&body=${encodeURIComponent(contactDraft.body)}`} onClick={() => void recordLeadActivity(lead.id, 'EMAIL', 'email', 'Emailed lead')} className="flex min-h-8 items-center justify-center gap-1.5 rounded-md border border-[#b8d5d6] bg-white px-2 text-[10px] font-semibold text-[#31546b]"><Mail size={12} />Email lead</a>}{lead.phone && contactDraft && <a href={`https://wa.me/${lead.phone.replace(/\D/g, '')}?text=${encodeURIComponent(contactDraft.body)}`} target="_blank" rel="noreferrer" onClick={() => void recordLeadActivity(lead.id, 'WHATSAPP', 'whatsapp', 'Opened WhatsApp conversation')} className="flex min-h-8 items-center justify-center gap-1.5 rounded-md border border-[#b8d5d6] bg-white px-2 text-[10px] font-semibold text-[#31546b]"><MessageCircle size={12} />WhatsApp</a>}</div>
+          </div>
+          <nav aria-label="Lead detail sections" className="shrink-0 border-b border-[#dfebeb] py-3">{navItems.map(({ id, label, icon: Icon }) => <button type="button" key={id} onClick={() => goToSection(id)} className={`flex min-h-8 items-center gap-2 rounded-md px-2 text-left text-[10px] font-medium ${activeSection === id ? 'bg-[#087f88] text-white' : 'text-[#65818a] hover:bg-white hover:text-[#087f88]'}`}><Icon size={13} />{label}</button>)}</nav>
+          <div className="mt-3 shrink-0 space-y-2 px-1"><p className="px-1 text-[9px] font-semibold uppercase tracking-[.12em] text-[#65818a]">Quick info</p>{[
+            ['Source', lead.source || 'Not recorded'],
+            ['Project', lead.project || 'Not selected'],
+            ['Home type', lead.apartment_type || lead.unit || 'Not selected'],
+            ['Owner', lead.assigned_consultant || 'Unassigned'],
+            ['Priority', lead.priority || 'NORMAL'],
+          ].map(([label, value]) => <div key={label} className="rounded-md border border-[#e0eeee] bg-white px-2 py-1.5"><p className="text-[8px] text-[#78929a]">{label}</p><p className="mt-0.5 truncate text-[9px] font-semibold text-[#31546b]">{value}</p></div>)}</div>
+          {lead.tracking_code && <a href={`/verify/${encodeURIComponent(lead.tracking_code)}`} target="_blank" rel="noreferrer" className="mt-auto pt-3 text-[9px] font-semibold text-[#087f88] underline">View client reference</a>}
+        </aside>
+
+        <main className="min-h-0 overflow-y-auto p-3 md:p-4">
+          <section id="lead-details" className="scroll-mt-3">
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">{stageStats.map(({ status, count }) => <div key={status} className="flex min-h-[46px] items-center gap-2 rounded-md border border-[#e5eeee] bg-white px-2"><span className="grid size-7 shrink-0 place-items-center rounded-full bg-[#e3f4f3] text-[#087f88]"><Users size={13} /></span><div><p className="text-[8px] text-[#6e8790]">{status.replace(/_/g, ' ').toLowerCase().replace(/^./, (letter) => letter.toUpperCase())}</p><strong className="font-serif text-base leading-none">{count}</strong></div></div>)}</div>
+            <div className="mt-2"><LeadJourney lead={lead} onChange={onStageChange} /></div>
+            {lead.message && <p className="mt-2 rounded-md border border-[#e4eeee] bg-white px-3 py-2 text-[10px] leading-4 text-[#55717d]">{lead.message}</p>}
+            {lead.outcome && <section className="mt-2 rounded-md border border-[#b9dfc1] bg-[#f0faf3] p-3"><p className="text-[9px] font-semibold uppercase text-[#2e6b3e]">Lead outcome · {lead.outcome}</p><p className="mt-1 text-[10px] leading-4 text-slate-600">{lead.outcome_notes || 'Outcome reason was not recorded.'}</p></section>}
+            <div className="mt-2"><LeadActionPanel lead={lead} projects={projects} onUpdate={onLeadUpdate} /></div>
+          </section>
+          <section id="follow-up-history" className="mt-3 scroll-mt-3"><LeadActivityTimeline leadId={lead.id} followUpsOnly /></section>
+          <section id="activity-timeline" className="mt-3 scroll-mt-3"><LeadActivityTimeline leadId={lead.id} /></section>
+          <section className="mt-3 scroll-mt-3"><LeadFollowUpForm lead={lead} onUpdate={onLeadUpdate} /></section>
+          <section id="lead-notes" className="mt-3 scroll-mt-3 rounded-md border border-[#deebeb] bg-white p-3"><NotesField defaultValue={lead.notes ?? ''} onSave={onNotesSave} /></section>
+          <section className="mt-3"><LeadOwnerAssignmentPanel lead={lead} staff={staff} onUpdate={onLeadUpdate} /></section>
+        </main>
+      </div>
+    </section>
+  </div>;
+}
+
+function LeadFollowUpForm({ lead, onUpdate }: { lead: Lead; onUpdate: (changes: Partial<Lead>) => void }) {
+  const [note, setNote] = useState('');
+  const [type, setType] = useState('CALL');
+  const [outcome, setOutcome] = useState('CONTACTED');
+  const [followUpAt, setFollowUpAt] = useState(() => {
+    const now = new Date();
+    return new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+  });
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState('');
+  const quickNotes = ['Interested', 'Needs more info', 'Follow up again', 'Not interested'];
+
+  const save = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!note.trim()) { setMessage('Add a note before saving this follow-up.'); return; }
+    setSaving(true);
+    setMessage('');
+    const scheduledAt = new Date(followUpAt).toISOString();
+    const changes = { next_action: 'Follow up', next_action_at: scheduledAt };
+    const { error } = await supabase.from('leads').update(changes).eq('id', lead.id);
+    if (error) { setSaving(false); setMessage(`Follow-up could not be scheduled: ${error.message}`); return; }
+    onUpdate(changes);
+    const details = [`${note.trim()}`, `Outcome: ${outcome.replace(/_/g, ' ')}`, `Follow-up date: ${fmt(scheduledAt)}`].join('\n');
+    const saved = await recordLeadActivity(lead.id, 'FOLLOW_UP', type.toLowerCase(), details);
+    setSaving(false);
+    if (saved) { setNote(''); setMessage('Follow-up saved.'); }
+    else setMessage('The next follow-up was scheduled, but its activity could not be recorded.');
+  };
+
+  return <section className="rounded-md border border-[#cce7e7] bg-white p-3 shadow-[0_1px_4px_rgba(25,76,81,.04)]">
+    <div className="mb-3 flex items-center gap-2"><span className="grid size-7 place-items-center rounded-md bg-[#e3f4f3] text-[#087f88]"><Send size={13} /></span><div><h3 className="text-[11px] font-semibold text-[#31546b]">Log Follow-up</h3><p className="text-[8px] text-[#7b9299]">Record interactions and track the next step.</p></div></div>
+    <form onSubmit={(event) => void save(event)} className="grid gap-2 sm:grid-cols-2">
+      <label className="sm:col-span-1"><span className="mb-1 block text-[8px] font-semibold text-[#54717c]">Follow-up Note <span className="text-[#c44c50]">*</span></span><textarea required rows={3} maxLength={1000} value={note} onChange={(event) => setNote(event.target.value)} placeholder="Add details about the follow-up, discussion, or next steps..." className="admin-input w-full resize-y text-[9px]" /><span className="mt-0.5 block text-right text-[7px] text-[#82969d]">{note.length}/1000</span></label>
+      <div className="grid content-start gap-2"><label><span className="mb-1 block text-[8px] font-semibold text-[#54717c]">Follow-up Type <span className="text-[#c44c50]">*</span></span><select value={type} onChange={(event) => setType(event.target.value)} className="admin-input w-full text-[9px]"><option value="CALL">Call</option><option value="EMAIL">Email</option><option value="WHATSAPP">WhatsApp</option><option value="MEETING">Meeting</option><option value="OTHER">Other</option></select></label><label><span className="mb-1 block text-[8px] font-semibold text-[#54717c]">Outcome <span className="text-[#c44c50]">*</span></span><select value={outcome} onChange={(event) => setOutcome(event.target.value)} className="admin-input w-full text-[9px]"><option value="CONTACTED">Contacted</option><option value="NO_ANSWER">No answer</option><option value="INTERESTED">Interested</option><option value="NEEDS_INFORMATION">Needs more information</option><option value="FOLLOW_UP">Follow up again</option><option value="NOT_INTERESTED">Not interested</option></select></label></div>
+      <label><span className="mb-1 block text-[8px] font-semibold text-[#54717c]">Date &amp; Time <span className="text-[#c44c50]">*</span></span><input required type="datetime-local" value={followUpAt} onChange={(event) => setFollowUpAt(event.target.value)} className="admin-input w-full text-[9px]" /></label>
+      <div><span className="mb-1 block text-[8px] font-semibold text-[#54717c]">Quick Notes</span><div className="flex flex-wrap gap-1">{quickNotes.map((item) => <button key={item} type="button" onClick={() => setNote((current) => current ? `${current}${current.endsWith(' ') ? '' : ' '}${item}.` : `${item}.`)} className="rounded-full border border-[#dceaea] bg-[#f5fbfb] px-2 py-1 text-[7px] font-medium text-[#54717c] hover:border-[#087f88] hover:text-[#087f88]">{item}</button>)}</div></div>
+      {message && <p role="status" className={`text-[9px] sm:col-span-2 ${message === 'Follow-up saved.' ? 'text-[#2e6b3e]' : 'text-[#a55445]'}`}>{message}</p>}
+      <div className="flex justify-end gap-2 sm:col-span-2"><button type="button" onClick={() => { setNote(''); setType('CALL'); setOutcome('CONTACTED'); const now = new Date(); setFollowUpAt(new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0, 16)); setMessage(''); }} className="min-h-8 border border-[#9ccfd0] px-3 text-[9px] font-semibold text-[#087f88]">Cancel</button><button type="submit" disabled={saving || !note.trim()} className="inline-flex min-h-8 items-center gap-1.5 rounded-md bg-[#087f88] px-4 text-[9px] font-semibold text-white disabled:opacity-50"><Check size={12} />{saving ? 'Saving…' : 'Save Follow-up'}</button></div>
+    </form>
+  </section>;
+}
+
+function LeadOwnerAssignmentPanel({ lead, staff, onUpdate }: { lead: Lead; staff: { id: string; full_name: string | null; role: string }[]; onUpdate: (changes: Partial<Lead>) => void }) {
+  const [search, setSearch] = useState('');
+  const [assigneeId, setAssigneeId] = useState(lead.assigned_consultant_user_id ?? '');
+  const [note, setNote] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState('');
+  const matches = staff.filter((member) => (member.full_name || '').toLowerCase().includes(search.toLowerCase()));
+  const save = async (event: FormEvent) => {
+    event.preventDefault();
+    const assignee = staff.find((member) => member.id === assigneeId);
+    const changes = { assigned_consultant: assignee?.full_name || null, assigned_consultant_user_id: assignee?.id || null };
+    setSaving(true);
+    setMessage('');
+    const { error } = await supabase.from('leads').update(changes).eq('id', lead.id);
+    setSaving(false);
+    if (error) { setMessage(error.message); return; }
+    onUpdate(changes);
+    const activityNote = note.trim() ? ` · ${note.trim()}` : '';
+    const saved = await recordLeadActivity(lead.id, 'OWNER_ASSIGNMENT', null, `Assigned to ${assignee?.full_name || 'Unassigned'}${activityNote}`);
+    if (saved) { setNote(''); setMessage('Lead owner updated.'); }
+  };
+
+  return <section className="rounded-md border border-[#cce7e7] bg-white p-3 shadow-[0_1px_4px_rgba(25,76,81,.04)]"><div className="mb-3 flex items-center gap-2"><span className="grid size-7 place-items-center rounded-md bg-[#e3f4f3] text-[#087f88]"><Users size={13} /></span><div><h3 className="text-[11px] font-semibold text-[#31546b]">Assign Lead Owner</h3><p className="text-[8px] text-[#7b9299]">Current owner: {lead.assigned_consultant || 'Unassigned'}</p></div></div><form onSubmit={(event) => void save(event)} className="grid gap-2 sm:grid-cols-2"><label><span className="mb-1 block text-[8px] font-semibold text-[#54717c]">Search Staff</span><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search staff by name" className="admin-input w-full text-[9px]" /></label><label><span className="mb-1 block text-[8px] font-semibold text-[#54717c]">Assign New Owner</span><select value={assigneeId} onChange={(event) => setAssigneeId(event.target.value)} className="admin-input w-full text-[9px]"><option value="">Unassigned</option>{matches.map((member) => <option key={member.id} value={member.id}>{member.full_name || member.id} · {member.role}</option>)}</select></label><label className="sm:col-span-2"><span className="mb-1 block text-[8px] font-semibold text-[#54717c]">Assignment Notes <span className="font-normal text-[#82969d]">(optional)</span></span><input maxLength={500} value={note} onChange={(event) => setNote(event.target.value)} placeholder="Add context for this assignment" className="admin-input w-full text-[9px]" /></label>{message && <p role="status" className="text-[9px] text-[#2e6b3e] sm:col-span-2">{message}</p>}<button type="submit" disabled={saving} className="inline-flex min-h-8 items-center justify-center gap-1.5 rounded-md bg-[#087f88] px-3 text-[9px] font-semibold text-white disabled:opacity-50 sm:col-span-2"><Users size={12} />{saving ? 'Saving…' : 'Assign Owner'}</button></form></section>;
+}
+
+async function recordLeadActivity(leadId: string, activityType: string, channel: string | null, body: string): Promise<boolean> {
   const { error } = await supabase.rpc('record_lead_activity', {
     p_lead_id: leadId,
     p_activity_type: activityType,
     p_channel: channel,
     p_body: body,
   });
-  if (error) notifyAdmin(`Activity could not be recorded: ${error.message}`, 'error');
-  else window.dispatchEvent(new CustomEvent('nbg-lead-activity-recorded', { detail: { leadId } }));
+  if (error) { notifyAdmin(`Activity could not be recorded: ${error.message}`, 'error'); return false; }
+  window.dispatchEvent(new CustomEvent('nbg-lead-activity-recorded', { detail: { leadId } }));
+  return true;
 }
 
 function LeadJourney({ lead, onChange }: { lead: Lead; onChange: (status: string) => void }) {
@@ -2042,8 +2185,8 @@ function LeadJourney({ lead, onChange }: { lead: Lead; onChange: (status: string
   return <section className="border border-[#d6efee] bg-[#f8fdfd] p-4"><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="eyebrow text-[#087f88]">Lead journey</p><p className="mt-1 text-xs text-slate-500">Every stage resets the 48-hour action clock.</p></div><span className={`inline-flex items-center gap-1 text-[10px] font-semibold ${terminal ? 'text-[#2e6b3e]' : staleMs >= 48 * 60 * 60 * 1000 ? 'text-[#a55445]' : 'text-slate-500'}`}><Clock3 size={12} />{terminal ? `Outcome ${lead.outcome || (lead.status === 'CONVERTED' ? 'WON' : 'LOST')}` : staleMs >= 48 * 60 * 60 * 1000 ? '48h follow-up overdue' : `${Math.floor(staleMs / 3600000)}h in stage`}</span></div><div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">{stages.map((stage, index) => { const current = stage === lead.status; const completed = activeIndex > index || terminal && index < 5; const lost = stage === 'LOST' && lead.status === 'LOST'; const blocked = terminal || stage !== 'LOST' && index > activeIndex + 1 || stage === 'CONVERTED' && lead.status !== 'NEGOTIATING'; return <button key={stage} type="button" disabled={blocked} onClick={() => onChange(stage)} aria-current={current ? 'step' : undefined} className={`min-h-10 border px-2 py-2 text-left text-[10px] font-semibold transition-colors disabled:cursor-default disabled:opacity-55 ${current ? 'border-[#087f88] bg-[#087f88] text-white' : lost ? 'border-[#a55445] bg-[#fff2ee] text-[#a55445]' : completed ? 'border-[#a9d9a8] bg-[#effaf0] text-[#2e6b3e]' : 'border-[#d6efee] bg-white text-slate-500 hover:border-[#087f88]'}`}><span className="mr-1 opacity-70">{index + 1}.</span>{stage.replace('_', ' ')}</button>; })}</div>{terminal && <p className="mt-3 text-xs font-semibold text-[#2e6b3e]">Final result recorded: {lead.status === 'CONVERTED' ? 'WON' : 'LOST'}.</p>}</section>;
 }
 
-function LeadActivityTimeline({ leadId, actorId }: { leadId: string; actorId: string }) {
-  const [activities, setActivities] = useState<{ id: string; activity_type: string; channel: string | null; body: string; created_at: string }[]>([]);
+function LeadActivityTimeline({ leadId, followUpsOnly = false }: { leadId: string; followUpsOnly?: boolean }) {
+  const [activities, setActivities] = useState<LeadActivity[]>([]);
   const [note, setNote] = useState('');
   const load = useCallback(async () => { const { data } = await supabase.from('lead_activities').select('id, activity_type, channel, body, created_at').eq('lead_id', leadId).order('created_at', { ascending: false }); setActivities((data ?? []) as typeof activities); }, [leadId]);
   useEffect(() => { void load(); }, [load]);
@@ -2055,6 +2198,7 @@ function LeadActivityTimeline({ leadId, actorId }: { leadId: string; actorId: st
     window.addEventListener('nbg-lead-activity-recorded', handleActivityRecorded);
     return () => window.removeEventListener('nbg-lead-activity-recorded', handleActivityRecorded);
   }, [leadId, load]);
+  const visibleActivities = followUpsOnly ? activities.filter((activity) => activity.activity_type === 'FOLLOW_UP') : activities;
   const addNote = async () => {
     if (!note.trim()) return;
     const { error } = await supabase.rpc('record_lead_activity', { p_lead_id: leadId, p_activity_type: 'NOTE', p_channel: null, p_body: note.trim() });
@@ -2063,13 +2207,17 @@ function LeadActivityTimeline({ leadId, actorId }: { leadId: string; actorId: st
     await load();
     notifyAdmin('Activity note added.');
   };
-  return <div className="space-y-3 border-t border-[#c9c5bd] pt-5"><div className="flex items-center justify-between"><p className="eyebrow text-[#20afd1]">Activity timeline</p><span className="text-[10px] text-slate-400">{activities.length} events</span></div><div className="max-h-48 space-y-3 overflow-y-auto">{activities.map((activity) => <div key={activity.id} className="border-l-2 border-[#a9d9d8] pl-3"><p className="text-xs text-[#123b4b]">{activity.body}</p><p className="mt-1 text-[10px] uppercase tracking-[.1em] text-slate-400">{activity.activity_type} · {fmt(activity.created_at)}</p></div>)}{activities.length === 0 && <p className="text-xs text-slate-400">Contact actions and notes will appear here.</p>}</div><div className="flex gap-2"><input value={note} onChange={(event) => setNote(event.target.value)} className="admin-input min-w-0 flex-1" placeholder="Add a follow-up note" /><button onClick={() => void addNote()} className="btn-secondary !px-3"><Plus size={14} /></button></div></div>;
+  return <section className="rounded-md border border-[#cce7e7] bg-white p-3 shadow-[0_1px_4px_rgba(25,76,81,.04)]"><div className="flex items-center justify-between"><div><p className="text-[11px] font-semibold text-[#31546b]">{followUpsOnly ? 'Follow-up History' : 'Activity Timeline'}</p><p className="text-[8px] text-[#7b9299]">{followUpsOnly ? 'Previously logged follow-ups for this lead.' : 'Recent interactions and notes.'}</p></div><span className="text-[9px] text-slate-400">{visibleActivities.length} events</span></div><div className="mt-3 max-h-48 space-y-3 overflow-y-auto">{visibleActivities.map((activity) => <div key={activity.id} className="border-l-2 border-[#a9d9d8] pl-3"><p className="text-[10px] leading-4 text-[#123b4b]">{activity.body}</p><p className="mt-1 text-[8px] uppercase tracking-[.1em] text-slate-400">{activity.activity_type.replace(/_/g, ' ')}{activity.channel ? ` · ${activity.channel}` : ''} · {fmt(activity.created_at)}</p></div>)}{visibleActivities.length === 0 && <p className="text-[9px] text-slate-400">{followUpsOnly ? 'No follow-ups have been logged for this lead yet.' : 'Contact actions and notes will appear here.'}</p>}</div>{!followUpsOnly && <div className="mt-3 flex gap-2 border-t border-[#e5eeee] pt-3"><input value={note} onChange={(event) => setNote(event.target.value)} className="admin-input min-w-0 flex-1 text-[9px]" placeholder="Add an activity note" /><button onClick={() => void addNote()} aria-label="Add activity note" className="btn-secondary !px-3"><Plus size={14} /></button></div>}</section>;
 }
 
-function LeadActionPanel({ lead, staff, projects, actorId, onUpdate }: { lead: Lead; staff: { id: string; full_name: string | null; role: string }[]; projects: Project[]; actorId: string; onUpdate: (changes: Partial<Lead>) => void }) {
-  const [f, setF] = useState({ assigned_consultant_user_id: lead.assigned_consultant_user_id || staff.find((member) => member.full_name === lead.assigned_consultant)?.id || '', priority: lead.priority ?? 'NORMAL', next_action: lead.next_action ?? 'Call lead', next_action_at: lead.next_action_at ? lead.next_action_at.slice(0, 16) : '', action_project_id: lead.action_project_id ?? '' });
+function LeadActionPanel({ lead, projects, onUpdate }: { lead: Lead; projects: Project[]; onUpdate: (changes: Partial<Lead>) => void }) {
+  const [f, setF] = useState({ priority: lead.priority ?? 'NORMAL', next_action: lead.next_action ?? 'Call lead', next_action_at: lead.next_action_at ? lead.next_action_at.slice(0, 16) : '', action_project_id: lead.action_project_id ?? '' });
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
+
+  useEffect(() => {
+    setF((current) => ({ ...current, priority: lead.priority ?? 'NORMAL', next_action: lead.next_action ?? 'Call lead', next_action_at: lead.next_action_at ? lead.next_action_at.slice(0, 16) : '', action_project_id: lead.action_project_id ?? '' }));
+  }, [lead.id, lead.priority, lead.next_action, lead.next_action_at, lead.action_project_id]);
 
   const save = async () => {
     if (f.next_action === 'Send project details' && !f.action_project_id) {
@@ -2077,8 +2225,7 @@ function LeadActionPanel({ lead, staff, projects, actorId, onUpdate }: { lead: L
       return;
     }
     setSaving(true); setMessage('');
-    const assignee = staff.find((member) => member.id === f.assigned_consultant_user_id);
-    const changes = { assigned_consultant: assignee?.full_name || null, assigned_consultant_user_id: assignee?.id || null, priority: f.priority, next_action: f.next_action || null, next_action_at: f.next_action_at ? new Date(f.next_action_at).toISOString() : null, action_project_id: f.next_action === 'Send project details' ? f.action_project_id : null };
+    const changes = { priority: f.priority, next_action: f.next_action || null, next_action_at: f.next_action_at ? new Date(f.next_action_at).toISOString() : null, action_project_id: f.next_action === 'Send project details' ? f.action_project_id : null };
     const { error } = await supabase.from('leads').update(changes).eq('id', lead.id);
     setSaving(false);
     if (error) { setMessage(error.message); return; }
@@ -2093,7 +2240,7 @@ function LeadActionPanel({ lead, staff, projects, actorId, onUpdate }: { lead: L
       setMessage('Action plan saved.');
     }
     notifyAdmin('Lead action plan saved.');
-    await recordLeadActivity(lead.id, 'ACTION_PLAN', null, `Assigned ${assignee?.full_name || 'unassigned'} · ${f.next_action || 'No action'}${f.action_project_id ? ` · Project ${projects.find((project) => project.id === f.action_project_id)?.name || ''}` : ''}`);
+    await recordLeadActivity(lead.id, 'ACTION_PLAN', null, `Next action: ${f.next_action || 'No action'}${f.action_project_id ? ` · Project ${projects.find((project) => project.id === f.action_project_id)?.name || ''}` : ''}`);
   };
 
   const markContacted = async () => {
@@ -2104,8 +2251,7 @@ function LeadActionPanel({ lead, staff, projects, actorId, onUpdate }: { lead: L
 
   return <div className="space-y-4 border-y border-[#c9c5bd] py-5">
     <div className="flex items-center justify-between"><p className="eyebrow text-[#20afd1]">Next action</p><button onClick={markContacted} className="text-[10px] font-semibold uppercase tracking-[.1em] text-[#247b85] hover:underline">Mark contacted</button></div>
-    <div className="grid grid-cols-2 gap-3"><label className="block"><span className="eyebrow mb-1.5 block text-slate-400">Owner</span><select value={f.assigned_consultant_user_id} onChange={(e) => setF({ ...f, assigned_consultant_user_id: e.target.value })} className="admin-input w-full"><option value="">Unassigned</option>{staff.map((member) => <option key={member.id} value={member.id}>{member.full_name || member.id} · {member.role}</option>)}</select></label><label className="block"><span className="eyebrow mb-1.5 block text-slate-400">Priority</span><select value={f.priority} onChange={(e) => setF({ ...f, priority: e.target.value })} className="admin-input w-full">{LEAD_PRIORITIES.map((item) => <option key={item}>{item}</option>)}</select></label></div>
-    <div className="grid grid-cols-2 gap-3"><label className="block"><span className="eyebrow mb-1.5 block text-slate-400">Action</span><select value={f.next_action} onChange={(e) => setF({ ...f, next_action: e.target.value, action_project_id: e.target.value === 'Send project details' ? f.action_project_id : '' })} className="admin-input w-full">{LEAD_ACTIONS.map((item) => <option key={item}>{item}</option>)}</select></label><label className="block"><span className="eyebrow mb-1.5 block text-slate-400">Due date</span><input type="datetime-local" value={f.next_action_at} onChange={(e) => setF({ ...f, next_action_at: e.target.value })} className="admin-input w-full" /></label></div>
+    <div className="grid grid-cols-2 gap-2 sm:grid-cols-4"><div className="min-w-0"><span className="eyebrow mb-1.5 block text-slate-400">Owner</span><div className="flex h-9 items-center gap-2 rounded border border-[#dce8e8] bg-[#f7fbfb] px-2 text-[10px] text-[#31546b]"><Users size={12} className="shrink-0 text-[#087f88]" /><span className="truncate">{lead.assigned_consultant || 'Unassigned'}</span></div></div><label className="block min-w-0"><span className="eyebrow mb-1.5 block text-slate-400">Priority</span><select value={f.priority} onChange={(e) => setF({ ...f, priority: e.target.value })} className="admin-input w-full">{LEAD_PRIORITIES.map((item) => <option key={item}>{item}</option>)}</select></label><label className="block min-w-0"><span className="eyebrow mb-1.5 block text-slate-400">Action</span><select value={f.next_action} onChange={(e) => setF({ ...f, next_action: e.target.value, action_project_id: e.target.value === 'Send project details' ? f.action_project_id : '' })} className="admin-input w-full">{LEAD_ACTIONS.map((item) => <option key={item}>{item}</option>)}</select></label><label className="block min-w-0"><span className="eyebrow mb-1.5 block text-slate-400">Due date</span><input type="datetime-local" value={f.next_action_at} onChange={(e) => setF({ ...f, next_action_at: e.target.value })} className="admin-input w-full" /></label></div>
     {f.next_action === 'Send project details' && <label className="block"><span className="eyebrow mb-1.5 block text-slate-400">Published project to share</span><select required value={f.action_project_id} onChange={(event) => setF({ ...f, action_project_id: event.target.value })} className="admin-input w-full"><option value="">Choose a published project...</option>{projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}</select><span className="mt-1 block text-[10px] text-slate-400">Only published project information and public documents will be shared.</span></label>}
     {lead.last_contacted_at && <p className="text-[10px] text-slate-400">Last contacted {fmt(lead.last_contacted_at)}</p>}
     {message && <p className={`text-xs ${message === 'Action plan saved.' ? 'text-[#2e6b3e]' : 'text-[#a55445]'}`}>{message}</p>}
