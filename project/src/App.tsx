@@ -15,8 +15,10 @@ import {
   Instagram,
   Layers3,
   MapPin,
+  Minus,
   Menu,
   MessageCircle,
+  Plus,
   Phone,
   Search,
   ShieldCheck,
@@ -100,6 +102,18 @@ const moreLinks: NavigationLink[] = [
   { label: 'Contact', view: 'contact' },
   { label: 'Verify Documents', view: 'verify' },
 ];
+const FONT_SIZE_STEPS = [100, 110, 120, 130, 140, 150, 175, 200] as const;
+type FontSizeScale = typeof FONT_SIZE_STEPS[number];
+const FONT_SIZE_STORAGE_KEY = 'nbg-font-size-scale';
+
+function readFontSizeScale(): FontSizeScale {
+  try {
+    const saved = Number(window.localStorage.getItem(FONT_SIZE_STORAGE_KEY));
+    return FONT_SIZE_STEPS.includes(saved as FontSizeScale) ? saved as FontSizeScale : 100;
+  } catch {
+    return 100;
+  }
+}
 
 function trackContactEvent(channel: 'whatsapp' | 'phone', context: string) {
   void supabase.from('contact_events').insert({ channel, context, page_path: window.location.pathname });
@@ -130,6 +144,7 @@ function verificationCodeFromPath(pathname: string): string | null {
 
 function App() {
   const [view, setView] = useState<View>(() => viewFromPath(window.location.pathname));
+  const [fontSizeScale, setFontSizeScale] = useState<FontSizeScale>(readFontSizeScale);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [selectedUnit, setSelectedUnit] = useState<Unit | null>(null);
   const [galleryIndex, setGalleryIndex] = useState<number | null>(null);
@@ -138,6 +153,11 @@ function App() {
   const [projectId, setProjectId] = useState<string | null>(() => projectIdFromPath(window.location.pathname));
   const [reviewProjectId, setReviewProjectId] = useState(() => new URLSearchParams(window.location.search).get('project') ?? '');
   const [verificationCode, setVerificationCode] = useState<string | null>(() => verificationCodeFromPath(window.location.pathname));
+
+  useEffect(() => {
+    document.documentElement.style.setProperty('--app-font-zoom', String(fontSizeScale / 100));
+    try { window.localStorage.setItem(FONT_SIZE_STORAGE_KEY, String(fontSizeScale)); } catch { /* Keep the preference for this session when storage is unavailable. */ }
+  }, [fontSizeScale]);
 
   const resolveSignedInUser = async () => {
     const { data: { session }, error } = await supabase.auth.getSession();
@@ -194,18 +214,19 @@ function App() {
 
   const normalizedRole = String(adminUser?.role ?? '').trim().toLowerCase();
   const isAuthorizedAdmin = adminUser?.email.trim().toLowerCase() === 'hamisimedu@gmail.com';
+  const fontSizeControl = <div role="group" aria-label="Text size controls" className="fixed bottom-3 right-3 z-[80] flex items-center gap-1 border border-[#c9d8d8] bg-white/95 p-1.5 text-[#31546b] shadow-md backdrop-blur"><button type="button" onClick={() => setFontSizeScale((current) => FONT_SIZE_STEPS[Math.max(0, FONT_SIZE_STEPS.indexOf(current) - 1)])} disabled={fontSizeScale === FONT_SIZE_STEPS[0]} aria-label="Decrease text size" title="Decrease text size" className="grid size-8 place-items-center border border-[#e1e9e9] disabled:opacity-40"><span className="font-serif text-sm font-semibold">A</span><Minus size={10} /></button><output aria-live="polite" aria-label={`Text size ${fontSizeScale}%`} className="min-w-9 text-center text-[9px] font-semibold">{fontSizeScale}%</output><button type="button" onClick={() => setFontSizeScale((current) => FONT_SIZE_STEPS[Math.min(FONT_SIZE_STEPS.length - 1, FONT_SIZE_STEPS.indexOf(current) + 1)])} disabled={fontSizeScale === FONT_SIZE_STEPS[FONT_SIZE_STEPS.length - 1]} aria-label="Increase text size" title="Increase text size" className="grid size-8 place-items-center border border-[#e1e9e9] disabled:opacity-40"><span className="font-serif text-base font-semibold">A</span><Plus size={10} /></button></div>;
 
   if (view === 'admin') {
-    if (authLoading) return <div className="flex min-h-screen items-center justify-center bg-[#0f8f9f] text-white/75">Loading…</div>;
-    if (!adminUser) return <AdminSignIn />;
-    if (!isAuthorizedAdmin || !['admin', 'owner', 'staff'].includes(normalizedRole)) return <AdminAccessDenied email={adminUser.email} navigate={navigate} />;
-    return <AdminDashboard user={{ ...adminUser, role: normalizedRole }} onSignOut={async () => { await signOut(); setAdminUser(null); setView('home'); }} />;
+    if (authLoading) return <><div className="flex min-h-screen items-center justify-center bg-[#0f8f9f] text-white/75">Loading…</div>{fontSizeControl}</>;
+    if (!adminUser) return <><AdminSignIn />{fontSizeControl}</>;
+    if (!isAuthorizedAdmin || !['admin', 'owner', 'staff'].includes(normalizedRole)) return <><AdminAccessDenied email={adminUser.email} navigate={navigate} />{fontSizeControl}</>;
+    return <><AdminDashboard user={{ ...adminUser, role: normalizedRole }} onSignOut={async () => { await signOut(); setAdminUser(null); setView('home'); }} />{fontSizeControl}</>;
   }
 
   if (view === 'portal') {
-    if (authLoading) return <div className="flex min-h-screen items-center justify-center bg-[#0d4055] text-white/75">Checking your secure portal...</div>;
-    if (!adminUser) return <ClientPortalSignIn />;
-    return <ClientPortal user={{ ...adminUser, role: normalizedRole }} onSignOut={async () => { await signOut(); setAdminUser(null); }} navigate={navigate} />;
+    if (authLoading) return <><div className="flex min-h-screen items-center justify-center bg-[#0d4055] text-white/75">Checking your secure portal...</div>{fontSizeControl}</>;
+    if (!adminUser) return <><ClientPortalSignIn />{fontSizeControl}</>;
+    return <><ClientPortal user={{ ...adminUser, role: normalizedRole }} onSignOut={async () => { await signOut(); setAdminUser(null); }} navigate={navigate} />{fontSizeControl}</>;
   }
 
   return (
@@ -234,6 +255,7 @@ function App() {
       <WhatsAppButton />
       {selectedUnit && <UnitModal unit={selectedUnit} close={() => setSelectedUnit(null)} navigate={navigate} />}
       {galleryIndex !== null && <Lightbox index={galleryIndex} close={() => setGalleryIndex(null)} change={setGalleryIndex} />}
+      {fontSizeControl}
     </div>
   );
 }
