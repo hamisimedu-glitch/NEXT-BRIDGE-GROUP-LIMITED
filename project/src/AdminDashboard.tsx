@@ -1,5 +1,5 @@
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AlertCircle, ArrowRight, Award, BarChart3, Building2, CalendarDays, Calculator, Check, ChevronRight, CircleCheck, ClipboardList, Clock3, Construction, CreditCard, Download, DollarSign, Eye, EyeOff, FileDown, FileText, Info, LayoutDashboard, LogOut, Mail, MapPin, Menu, MessageCircle, Pencil, Phone, Plus, RefreshCw, Search, Send, SlidersHorizontal, TrendingUp, Trash2, Upload, Users, X } from 'lucide-react';
+import { AlertCircle, ArrowRight, Award, BarChart3, Building2, CalendarDays, Calculator, Check, ChevronDown, ChevronLeft, ChevronRight, CircleCheck, ClipboardList, Clock3, Construction, CreditCard, Download, DollarSign, Eye, EyeOff, FileDown, FileText, Info, LayoutDashboard, LogOut, Mail, MapPin, Menu, MessageCircle, MoreHorizontal, Pencil, Phone, Plus, RefreshCw, Search, Send, SlidersHorizontal, TrendingUp, Trash2, Upload, Users, X } from 'lucide-react';
 import { GState, jsPDF } from 'jspdf';
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import QRCode from 'qrcode';
@@ -2116,23 +2116,46 @@ function LeadActionPanel({ lead, staff, projects, actorId, onUpdate }: { lead: L
 function BuyerPaymentsTab({ goTo }: { goTo: (tab: AdminTab) => void }) {
   const [sales, setSales] = useState<Sale[]>([]);
   const [installments, setInstallments] = useState<BuyerInstallment[]>([]);
+  const [payments, setPayments] = useState<BuyerPaymentRecord[]>([]);
+  const [units, setUnits] = useState<ProjectUnit[]>([]);
+  const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
+  const [showAddBuyer, setShowAddBuyer] = useState(false);
   const [search, setSearch] = useState('');
+  const [projectFilter, setProjectFilter] = useState('ALL');
+  const [paymentFilter, setPaymentFilter] = useState('ALL');
+  const [unitTypeFilter, setUnitTypeFilter] = useState('ALL');
+  const [dueFilter, setDueFilter] = useState('ALL');
+  const [sortBy, setSortBy] = useState('NEWEST');
+  const [pageSize, setPageSize] = useState(25);
+  const [page, setPage] = useState(1);
+  const [openActions, setOpenActions] = useState('');
   const [selected, setSelected] = useState<Sale | null>(null);
   const [selectedPaymentView, setSelectedPaymentView] = useState<PaymentView>('summary');
 
   const load = useCallback(async () => {
-    const [{ data: saleRows }, { data: installmentRows }] = await Promise.all([
+    const [saleResult, installmentResult, paymentResult, unitResult, projectResult] = await Promise.all([
       supabase.from('sales').select('*').order('created_at', { ascending: false }),
       supabase.from('buyer_installments').select('*').order('due_date'),
+      supabase.from('buyer_payments').select('id,sale_id,installment_id,amount,payment_date,method,reference,transaction_ref,created_at,notes').order('payment_date', { ascending: false }),
+      supabase.from('project_units').select('id,project_id,unit_number,type').order('unit_number'),
+      supabase.from('projects').select('id,name'),
     ]);
-    setSales((saleRows ?? []) as Sale[]); setInstallments((installmentRows ?? []) as BuyerInstallment[]); setLoading(false);
+    setSales((saleResult.data ?? []) as Sale[]);
+    setInstallments((installmentResult.data ?? []) as BuyerInstallment[]);
+    setPayments((paymentResult.data ?? []) as BuyerPaymentRecord[]);
+    setUnits((unitResult.data ?? []) as ProjectUnit[]);
+    setProjects((projectResult.data ?? []) as Project[]);
+    setLoading(false);
   }, []);
   useEffect(() => {
     void load();
     const channel = supabase.channel('admin-buyer-payments-list')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'sales' }, () => { void load(); })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'buyer_installments' }, () => { void load(); })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'buyer_payments' }, () => { void load(); })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'project_units' }, () => { void load(); })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'projects' }, () => { void load(); })
       .subscribe();
     return () => { void supabase.removeChannel(channel); };
   }, [load]);
@@ -2141,12 +2164,86 @@ function BuyerPaymentsTab({ goTo }: { goTo: (tab: AdminTab) => void }) {
   const filtered = sales.filter((sale) => { const query = search.toLowerCase(); return !query || sale.buyer_name.toLowerCase().includes(query) || sale.unit_number.toLowerCase().includes(query); });
   const buyerRequestQueue = sales.filter((sale) => sale.unit_id && ['RESERVED', 'DEPOSIT_PAID'].includes(sale.status)).sort((first, second) => (second.created_at || '').localeCompare(first.created_at || ''));
   const totals = sales.reduce((result, sale) => { const rows = installments.filter((item) => item.sale_id === sale.id); result.paid += (sale.deposit_amount ?? 0) + rows.reduce((sum, item) => sum + item.paid_amount, 0); result.balance += Math.max((sale.sale_price ?? 0) - (sale.deposit_amount ?? 0) - rows.reduce((sum, item) => sum + item.paid_amount, 0), 0); result.overdue += rows.filter((item) => item.status !== 'PAID' && new Date(item.due_date) < new Date(new Date().toDateString())).length; return result; }, { paid: 0, balance: 0, overdue: 0 });
+  const today = kenyaCalendarDate();
+  const unitById = new Map(units.map((unit) => [unit.id, unit]));
+  const projectById = new Map(projects.map((project) => [project.id, project]));
+  const directoryRows = sales.filter((sale) => sale.status !== 'CANCELLED').map((sale) => {
+    const schedule = installments.filter((item) => item.sale_id === sale.id);
+    const receiptTotal = payments.filter((payment) => payment.sale_id === sale.id).reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
+    const ledgerTotal = schedule.reduce((sum, item) => sum + Number(item.paid_amount || 0), 0);
+    const paid = Math.max(receiptTotal, ledgerTotal);
+    const price = Number(sale.sale_price ?? schedule.reduce((sum, item) => sum + Number(item.amount || 0), 0));
+    const balance = Math.max(price - paid, 0);
+    const nextInstallment = [...schedule].filter((item) => Number(item.amount) > Number(item.paid_amount)).sort((left, right) => left.due_date.localeCompare(right.due_date))[0];
+    const overdue = schedule.some((item) => Number(item.amount) > Number(item.paid_amount) && item.due_date < today);
+    const daysToDue = nextInstallment ? Math.round((new Date(`${nextInstallment.due_date}T00:00:00`).getTime() - new Date(`${today}T00:00:00`).getTime()) / 86400000) : null;
+    const status = price > 0 && balance <= 0 ? 'PAID' : overdue ? 'OVERDUE' : daysToDue !== null && daysToDue <= 7 ? 'DUE_SOON' : 'ON_TRACK';
+    const unit = sale.unit_id ? unitById.get(sale.unit_id) : units.find((candidate) => candidate.unit_number === sale.unit_number);
+    const projectName = unit?.project_id ? projectById.get(unit.project_id)?.name || 'Project pending' : 'Project pending';
+    return { sale, unit, projectName, schedule, paid, price, balance, nextInstallment, overdue, daysToDue, status };
+  });
+  const uniqueBuyerCount = new Set(directoryRows.map(({ sale }) => sale.buyer_user_id || sale.buyer_email?.trim().toLowerCase() || sale.id)).size;
+  const activePlanCount = directoryRows.filter((row) => row.balance > 0 && row.schedule.length > 0).length;
+  const overdueBuyerCount = new Set(directoryRows.filter((row) => row.overdue).map(({ sale }) => sale.buyer_user_id || sale.buyer_email?.trim().toLowerCase() || sale.id)).size;
+  const outstandingTotal = directoryRows.reduce((sum, row) => sum + row.balance, 0);
+  const projectOptions = units.reduce<{ id: string; name: string }[]>((options, unit) => {
+    const project = unit.project_id ? projectById.get(unit.project_id) : null;
+    if (project && !options.some((option) => option.id === project.id)) options.push({ id: project.id, name: project.name });
+    return options;
+  }, []).sort((left, right) => left.name.localeCompare(right.name));
+  const unitTypeOptions = [...new Set(units.map((unit) => unit.type).filter((type): type is string => Boolean(type)))].sort();
+  const visibleBuyerRows = directoryRows.filter((row) => {
+    const query = search.trim().toLowerCase();
+    const matchesSearch = !query || [row.sale.buyer_name, row.sale.buyer_email, row.sale.buyer_phone, row.sale.unit_number, row.projectName].some((value) => value?.toLowerCase().includes(query));
+    const matchesProject = projectFilter === 'ALL' || row.unit?.project_id === projectFilter;
+    const matchesPayment = paymentFilter === 'ALL' || row.status === paymentFilter;
+    const matchesUnitType = unitTypeFilter === 'ALL' || row.unit?.type === unitTypeFilter;
+    const matchesDue = dueFilter === 'ALL' || (dueFilter === 'OVERDUE' && row.overdue) || (dueFilter === 'NEXT_7' && row.daysToDue !== null && row.daysToDue >= 0 && row.daysToDue <= 7) || (dueFilter === 'NEXT_30' && row.daysToDue !== null && row.daysToDue >= 0 && row.daysToDue <= 30) || (dueFilter === 'NONE' && row.daysToDue === null);
+    return matchesSearch && matchesProject && matchesPayment && matchesUnitType && matchesDue;
+  }).sort((left, right) => sortBy === 'OLDEST' ? (left.sale.created_at || '').localeCompare(right.sale.created_at || '') : sortBy === 'BALANCE_HIGH' ? right.balance - left.balance : sortBy === 'BALANCE_LOW' ? left.balance - right.balance : (right.sale.created_at || '').localeCompare(left.sale.created_at || ''));
+  const pageCount = Math.max(1, Math.ceil(visibleBuyerRows.length / pageSize));
+  const currentPage = Math.min(page, pageCount);
+  const pagedBuyerRows = visibleBuyerRows.slice((currentPage - 1) * pageSize, currentPage * pageSize);
 
   return <div>
+    <header className="mb-6 flex flex-wrap items-start justify-between gap-4"><div><h2 className="font-serif text-4xl text-[#123b4b]">Buyers &amp; Collections</h2><p className="mt-2 text-sm text-slate-500">Manage buyer accounts, unit allocations, and payment plans.</p></div><div className="flex gap-2"><button type="button" onClick={() => setShowAddBuyer(true)} className="btn-primary"><Plus size={15} />Add buyer</button><button type="button" onClick={() => void downloadReportPdf(`nbg-buyers-${new Date().toISOString().slice(0, 10)}.pdf`, ['Buyer', 'Email', 'Phone', 'Unit', 'Project', 'Purchase price', 'Paid', 'Outstanding', 'Next due', 'Status'], visibleBuyerRows.map(({ sale, projectName, price, paid, balance, nextInstallment, status }) => [sale.buyer_name, sale.buyer_email, sale.buyer_phone, sale.unit_number, projectName, price, paid, balance, nextInstallment?.due_date || '', status]), 'Buyers & Collections Report')} className="btn-secondary"><Download size={14} />Export</button></div></header>
+    <section className="mb-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4" aria-label="Buyer collection summary">
+      {[{ label: 'Total buyers', value: String(uniqueBuyerCount), icon: Users, tone: 'teal', note: 'Active buyer accounts' }, { label: 'Active payment plans', value: String(activePlanCount), icon: CreditCard, tone: 'green', note: 'With balance remaining' }, { label: 'Overdue accounts', value: String(overdueBuyerCount), icon: AlertCircle, tone: 'red', note: 'Past-due installments' }, { label: 'Outstanding balance', value: fmtKes(outstandingTotal), icon: DollarSign, tone: 'teal', note: 'Across active sales' }].map(({ label, value, icon: Icon, tone, note }) => <article key={label} className="flex min-h-[112px] items-center gap-4 border border-[#d6dfe0] bg-white px-4 py-4"><span className={`grid size-11 shrink-0 place-items-center rounded-full ${tone === 'red' ? 'bg-[#fde7e8] text-[#cb3345]' : tone === 'green' ? 'bg-[#e1f3ee] text-[#16866f]' : 'bg-[#def5f5] text-[#078c9c]'}`}><Icon size={19} /></span><div className="min-w-0"><p className="text-[11px] font-semibold text-[#31546b]">{label}</p><p className="mt-1 truncate font-serif text-2xl font-semibold text-[#123b4b]">{value}</p><p className="mt-1 text-[10px] text-slate-400">{note}</p></div></article>)}
+    </section>
+    <section className="mb-5 border border-[#d6dfe0] bg-white p-4 sm:p-5">
+      <h3 className="font-serif text-2xl text-[#123b4b]">Buyer directory</h3>
+      <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-[minmax(220px,1.5fr)_repeat(5,minmax(120px,1fr))]">
+        <label className="relative min-w-0"><Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" /><input value={search} onChange={(event) => { setSearch(event.target.value); setPage(1); }} placeholder="Search name, email, phone, unit ID..." aria-label="Search buyers" className="admin-input h-[38px] w-full pl-9" /></label>
+        <select aria-label="Filter by project" value={projectFilter} onChange={(event) => { setProjectFilter(event.target.value); setPage(1); }} className="admin-input h-[38px]"><option value="ALL">All projects</option>{projectOptions.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}</select>
+        <select aria-label="Filter by payment status" value={paymentFilter} onChange={(event) => { setPaymentFilter(event.target.value); setPage(1); }} className="admin-input h-[38px]"><option value="ALL">All statuses</option><option value="ON_TRACK">On track</option><option value="DUE_SOON">Due soon</option><option value="OVERDUE">Overdue</option><option value="PAID">Paid in full</option></select>
+        <select aria-label="Filter by unit type" value={unitTypeFilter} onChange={(event) => { setUnitTypeFilter(event.target.value); setPage(1); }} className="admin-input h-[38px]"><option value="ALL">All unit types</option>{unitTypeOptions.map((type) => <option key={type} value={type}>{type}</option>)}</select>
+        <select aria-label="Filter by due date" value={dueFilter} onChange={(event) => { setDueFilter(event.target.value); setPage(1); }} className="admin-input h-[38px]"><option value="ALL">Any due date</option><option value="OVERDUE">Overdue</option><option value="NEXT_7">Due in 7 days</option><option value="NEXT_30">Due in 30 days</option><option value="NONE">No upcoming due</option></select>
+        <select aria-label="Sort buyers" value={sortBy} onChange={(event) => setSortBy(event.target.value)} className="admin-input h-[38px]"><option value="NEWEST">Newest first</option><option value="OLDEST">Oldest first</option><option value="BALANCE_HIGH">Balance: high to low</option><option value="BALANCE_LOW">Balance: low to high</option></select>
+      </div>
+      <div className="mt-4 overflow-x-auto border border-[#e2e8e8]"><table className="w-full min-w-[1050px] table-fixed text-left"><thead className="bg-[#f4f6f5] text-[10px] font-semibold text-[#567184]"><tr>{[['Buyer', '21%'], ['Unit / Project', '15%'], ['Purchase price', '11%'], ['Paid', '10%'], ['Outstanding', '11%'], ['Next due', '10%'], ['Status', '11%'], ['Actions', '11%']].map(([label, width]) => <th key={label} style={{ width }} className="px-3 py-3">{label}</th>)}</tr></thead><tbody>
+        {pagedBuyerRows.map(({ sale, unit, projectName, paid, price, balance, nextInstallment, overdue, status }, index) => {
+          const initials = sale.buyer_name.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join('').toUpperCase() || 'NB';
+          const dueLabel = nextInstallment ? new Date(`${nextInstallment.due_date}T00:00:00`).toLocaleDateString('en-KE', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
+          const statusLabel = status === 'PAID' ? 'Paid in full' : status === 'OVERDUE' ? 'Overdue' : status === 'DUE_SOON' ? 'Due soon' : 'On track';
+          const statusStyle = status === 'PAID' ? 'bg-[#e5f5ef] text-[#208267]' : status === 'OVERDUE' ? 'bg-[#fde8e9] text-[#bc3343]' : status === 'DUE_SOON' ? 'bg-[#fff2de] text-[#a76b11]' : 'bg-[#e2f6f4] text-[#078b91]';
+          return <tr key={sale.id} className="border-t border-[#e8eded] text-[11px] text-[#31546b] hover:bg-[#f8fbfa]">
+            <td className="px-3 py-2"><div className="flex min-w-0 items-center gap-3"><span className={`grid size-9 shrink-0 place-items-center rounded-full text-[11px] font-bold ${['bg-[#d9f1ef] text-[#087f88]', 'bg-[#e0f1e9] text-[#21816e]', 'bg-[#fde5e3] text-[#b84f45]', 'bg-[#e7e9fb] text-[#566cb5]', 'bg-[#fff0d4] text-[#98702c]'][index % 5]}`}>{initials}</span><span className="min-w-0"><strong className="block truncate font-semibold text-[#164b68]">{sale.buyer_name}</strong><span className="mt-1 flex min-w-0 flex-wrap gap-x-2 text-[9px] text-slate-400"><span className="truncate">{sale.buyer_phone || 'Phone unavailable'}</span><span className="truncate">{sale.buyer_email || 'Email unavailable'}</span></span></span></div></td>
+            <td className="px-3 py-2"><strong className="block truncate font-medium text-[#31546b]">{sale.unit_number} · {projectName}</strong><span className="mt-1 block truncate text-[9px] text-slate-400">{unit?.type || 'Unit type pending'}</span></td><td className="px-3 py-2">{fmtKes(price)}</td><td className="px-3 py-2">{fmtKes(paid)}</td><td className="px-3 py-2">{fmtKes(balance)}</td><td className="px-3 py-2">{dueLabel}</td>
+            <td className="px-3 py-2"><span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-semibold ${statusStyle}`}><span className="size-1.5 rounded-full bg-current" />{statusLabel}</span>{overdue && <span className="sr-only">Payment is overdue</span>}</td>
+            <td className="px-3 py-2"><div className="flex items-center justify-between gap-1"><button type="button" onClick={() => { setSelectedPaymentView('summary'); setSelected(sale); }} className="whitespace-nowrap font-semibold text-[#078ba5] hover:underline">View account</button><div className="relative"><button type="button" aria-label={`More actions for ${sale.buyer_name}`} aria-expanded={openActions === sale.id} onClick={() => setOpenActions((current) => current === sale.id ? '' : sale.id)} className="grid size-8 place-items-center text-[#078ba5] hover:bg-[#e8f7f6]"><MoreHorizontal size={16} /></button>{openActions === sale.id && <div className="absolute right-0 top-full z-20 min-w-36 border border-[#d6dfe0] bg-white py-1 shadow-lg"><button type="button" onClick={() => { setSelectedPaymentView('record'); setSelected(sale); setOpenActions(''); }} className="block w-full px-3 py-2 text-left text-xs text-[#31546b] hover:bg-[#f2f8f7]">Record payment</button><button type="button" onClick={() => { setSelectedPaymentView('schedule'); setSelected(sale); setOpenActions(''); }} className="block w-full px-3 py-2 text-left text-xs text-[#31546b] hover:bg-[#f2f8f7]">View payment plan</button></div>}</div></div></td>
+          </tr>;
+        })}
+        {pagedBuyerRows.length === 0 && <tr><td colSpan={8} className="px-4 py-10 text-center text-sm text-slate-500">No buyers match these filters.</td></tr>}
+      </tbody></table></div>
+      <footer className="flex flex-wrap items-center justify-between gap-3 pt-3 text-[10px] text-slate-500"><span>Showing {visibleBuyerRows.length ? (currentPage - 1) * pageSize + 1 : 0}–{Math.min(currentPage * pageSize, visibleBuyerRows.length)} of {visibleBuyerRows.length} buyer accounts</span><div className="flex items-center gap-2"><label className="flex items-center gap-2"><span>Rows</span><select aria-label="Rows per page" value={pageSize} onChange={(event) => { setPageSize(Number(event.target.value)); setPage(1); }} className="h-8 border border-[#d6dfe0] bg-white px-2"><option value={25}>25</option><option value={50}>50</option><option value={100}>100</option></select><ChevronDown size={12} /></label><button type="button" aria-label="Previous page" onClick={() => setPage((current) => Math.max(1, current - 1))} disabled={currentPage === 1} className="grid size-8 place-items-center border border-[#d6dfe0] disabled:opacity-40"><ChevronLeft size={14} /></button>{Array.from({ length: Math.min(5, pageCount) }, (_, index) => { const pageNumber = Math.max(1, Math.min(pageCount - 4, currentPage - 2)) + index; return <button key={pageNumber} type="button" aria-current={currentPage === pageNumber ? 'page' : undefined} onClick={() => setPage(pageNumber)} className={`grid size-8 place-items-center border text-[10px] ${currentPage === pageNumber ? 'border-[#078b91] bg-[#078b91] text-white' : 'border-[#d6dfe0] bg-white text-[#31546b]'}`}>{pageNumber}</button>; })}<button type="button" aria-label="Next page" onClick={() => setPage((current) => Math.min(pageCount, current + 1))} disabled={currentPage === pageCount} className="grid size-8 place-items-center border border-[#d6dfe0] disabled:opacity-40"><ChevronRight size={14} /></button></div></footer>
+    </section>
+    {showAddBuyer && <Modal title="Add buyer" onClose={() => setShowAddBuyer(false)}><SaleForm onDone={() => { setShowAddBuyer(false); void load(); }} /></Modal>}
+    <div className="hidden">
     <div className="mb-6 flex flex-wrap items-end justify-between gap-4"><div><p className="eyebrow text-[#20afd1]">Collections</p><h2 className="mt-2 font-serif text-4xl">Buyer payments</h2><p className="mt-3 max-w-xl text-sm leading-6 text-slate-500">Track every buyer repayment, outstanding balance, due date, and overdue installment from one place.</p></div><div className="flex flex-wrap gap-2"><button onClick={() => void downloadReportPdf(`nbg-payments-${new Date().toISOString().slice(0, 10)}.pdf`, ['Buyer', 'Unit', 'Sale price', 'Deposit', 'Status'], sales.map((sale) => [sale.buyer_name, sale.unit_number, sale.sale_price, sale.deposit_amount, sale.status]), 'Buyer Payments Report')} className="btn-secondary"><Download size={14} /> Export PDF</button><div className="relative"><Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" /><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search buyer or unit" className="admin-input pl-9" /></div></div></div>
     <div className="mb-6 grid gap-3 sm:grid-cols-4"><StatMini label="Buyer requests" value={String(buyerRequestQueue.length)} color="text-[#2e5f7a]" /><StatMini label="Collected" value={fmtKes(totals.paid)} color="text-[#2e6b3e]" /><StatMini label="Outstanding balance" value={fmtKes(totals.balance)} color="text-[#856b2e]" /><StatMini label="Overdue installments" value={String(totals.overdue)} color="text-[#a55445]" /></div>
     <section className="mb-7 border border-[#a9d9d8] bg-[#eefbf9] p-4 sm:p-5"><div className="flex flex-wrap items-end justify-between gap-3"><div><p className="eyebrow text-[#087f88]">Operations queue</p><h3 className="mt-1 font-serif text-2xl text-[#123b4b]">Buyer requests & deposits</h3><p className="mt-1 text-xs text-slate-500">Review requests, verify incoming deposits, and continue each buyer’s payment ledger.</p></div><button type="button" onClick={() => goTo('units')} className="btn-secondary !px-3 !py-2"><Building2 size={14} />Unit availability</button></div><div className="mt-4 divide-y divide-[#d6e9e6] border-y border-[#d6e9e6]">{buyerRequestQueue.map((sale) => { const rows = installments.filter((item) => item.sale_id === sale.id); const paid = Number(sale.deposit_amount || 0) + rows.reduce((sum, item) => sum + Number(item.paid_amount || 0), 0); const balance = Math.max(Number(sale.sale_price || 0) - paid, 0); const expired = sale.status === 'RESERVED' && Boolean(sale.reservation_expires_at && new Date(sale.reservation_expires_at).getTime() <= Date.now()); return <article key={`queue-${sale.id}`} className="flex flex-wrap items-center justify-between gap-3 py-3"><div className="min-w-[180px] flex-1"><div className="flex flex-wrap items-center gap-2"><strong className="text-sm text-[#123b4b]">{sale.buyer_name}</strong><span className="text-[10px] font-semibold uppercase text-[#087f88]">Unit {sale.unit_number}</span><span className={`border px-2 py-0.5 text-[9px] font-semibold uppercase ${expired ? 'border-[#e4b8ad] bg-[#fff7f4] text-[#a55445]' : sale.status === 'RESERVED' ? 'border-[#e7d3a8] bg-[#fff8e6] text-[#765d2b]' : 'border-[#a9d9d8] bg-white text-[#087f88]'}`}>{expired ? 'Reservation expired' : sale.status.replace('_', ' ')}</span></div><p className="mt-1 text-[10px] text-slate-500">{sale.buyer_email || sale.buyer_phone || 'Buyer contact not recorded'} · {sale.installment_frequency === 'ONE_TIME' ? 'One-time payment' : `${sale.installment_count || 0} scheduled payments`}</p><p className="mt-1 text-xs text-slate-600">{sale.sale_price ? `${fmtKes(paid)} received · ${fmtKes(balance)} remaining` : 'Sale amount pending'}</p></div><div className="flex gap-2"><button type="button" onClick={() => { setSelected(sale); setSelectedPaymentView('summary'); }} className="btn-secondary !px-3 !py-2"><Eye size={14} />Review</button><button type="button" disabled={expired} onClick={() => { setSelected(sale); setSelectedPaymentView('record'); }} className="btn-primary !px-3 !py-2 disabled:opacity-50"><Plus size={14} />Record deposit/payment</button></div></article>; })}{buyerRequestQueue.length === 0 && <p className="py-5 text-sm text-slate-500">No active buyer unit requests. New reservations will appear here automatically.</p>}</div></section>
     <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{filtered.map((sale) => { const rows = installments.filter((item) => item.sale_id === sale.id); const paid = (sale.deposit_amount ?? 0) + rows.reduce((sum, item) => sum + item.paid_amount, 0); const balance = Math.max((sale.sale_price ?? 0) - paid, 0); const percent = sale.sale_price ? Math.min((paid / sale.sale_price) * 100, 100) : 0; const next = rows.find((item) => Number(item.paid_amount) < Number(item.amount)); const overdue = next && new Date(next.due_date) < new Date(new Date().toDateString()); return <button key={sale.id} onClick={() => setSelected(sale)} className="rounded-lg border border-[#c9c5bd] bg-white p-5 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-[#20afd1] hover:shadow-md"><div className="flex items-start justify-between"><div><p className="eyebrow text-[#20afd1]">Unit {sale.unit_number}</p><h3 className="mt-2 text-lg">{sale.buyer_name}</h3></div><CreditCard size={20} className="text-[#20afd1]" /></div><div className="mt-5 flex justify-between text-xs"><span className="text-slate-500">Paid <strong className="text-[#2e6b3e]">{fmtKes(paid)}</strong></span><span className="text-slate-500">Balance <strong className="text-[#856b2e]">{fmtKes(balance)}</strong></span></div><div className="mt-3 h-2 rounded-full bg-[#e6e2da]"><div className="h-full rounded-full bg-[#20afd1]" style={{ width: `${percent}%` }} /></div><div className="mt-4 flex items-center justify-between text-[10px] uppercase tracking-[.1em]">{balance <= 0 ? <span className="font-semibold text-[#2e6b3e]">Paid in full</span> : next ? <span className={overdue ? 'font-semibold text-[#a55445]' : 'text-slate-500'}>{overdue ? 'Overdue' : 'Next due'} · {new Date(next.due_date).toLocaleDateString()}</span> : <span className="font-semibold text-[#856b2e]">Balance due · no schedule</span>}<span className="text-[#20afd1]">Open plan</span></div></button>})}{filtered.length === 0 && <div className="rounded-lg border border-dashed border-[#b8b4ab] p-12 text-center text-sm text-slate-400 md:col-span-2 xl:col-span-3">No buyers found.</div>}</div>
+    </div>
     {selected && <Modal title={`Payments · Unit ${selected.unit_number}`} wide onClose={() => { setSelected(null); load(); }}><InstallmentPanel sale={selected} goTo={goTo} initialView={selectedPaymentView} /></Modal>}
   </div>;
 }
