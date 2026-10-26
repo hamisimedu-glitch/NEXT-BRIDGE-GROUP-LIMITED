@@ -1,4 +1,4 @@
-import { FormEvent, forwardRef, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Component, FormEvent, forwardRef, lazy, startTransition, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   ArrowDown,
   ArrowRight,
@@ -30,14 +30,18 @@ import {
 import { supabase } from '@/lib/supabase';
 import { fetchProfile, onAuthChange, sendMagicLink, sendPasswordReset, signInWithPassword, signOut, updatePassword, type AdminUser } from '@/lib/auth';
 import type { ConstructionUpdate, Investment, Project, ProjectUnit } from '@/lib/types';
-import AdminDashboard, { AdminSignIn } from '@/AdminDashboard';
-import ClientPortal, { ClientPortalSignIn } from '@/ClientPortal';
+const AdminDashboard = lazy(() => import('@/AdminDashboard'));
+const AdminSignIn = lazy(() => import('@/AdminDashboard').then((module) => ({ default: module.AdminSignIn })));
+const ClientPortal = lazy(() => import('@/ClientPortal'));
+const ClientPortalSignIn = lazy(() => import('@/ClientPortal').then((module) => ({ default: module.ClientPortalSignIn })));
 import AvailableHomeCard from '@/AvailableHomeCard';
 import AvailableHomesCatalog from '@/AvailableHomesCatalog';
 import LocationMap from '@/LocationMap';
-import ProjectProgressExperience, { ProjectReviewsView } from '@/ProjectProgressExperience';
-import ProjectInvestmentPage from '@/ProjectInvestmentPage';
-import ProjectDetailsPackage, { type PublicProjectDetails } from '@/ProjectDetailsPackage';
+const ProjectProgressExperience = lazy(() => import('@/ProjectProgressExperience'));
+const ProjectReviewsView = lazy(() => import('@/ProjectProgressExperience').then((module) => ({ default: module.ProjectReviewsView })));
+const ProjectInvestmentPage = lazy(() => import('@/ProjectInvestmentPage'));
+const ProjectDetailsPackage = lazy(() => import('@/ProjectDetailsPackage'));
+import type { PublicProjectDetails } from '@/ProjectDetailsPackage';
 import { calculateConstructionProgress, type PublishedConstructionProgress } from '@/lib/construction';
 import { formatAccountingCurrency, formatAccountingKes } from '@/lib/format';
 import { dashboardTabsForRole } from '@/lib/dashboard-access';
@@ -62,6 +66,25 @@ type Unit = {
   location?: string | null;
   availability_note?: string | null;
 };
+
+class RouteErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean }> {
+  state = { hasError: false };
+
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+
+  componentDidCatch(error: Error) {
+    console.error('Application route failed to render.', error);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return <main className="flex min-h-screen flex-col items-center justify-center gap-4 bg-[#f4f1eb] px-6 text-center text-[#123b4b]"><h1 className="font-serif text-3xl">This page could not load.</h1><p className="max-w-md text-sm text-slate-600">Your data is unchanged. Reload the page to retry the route.</p><button type="button" onClick={() => window.location.reload()} className="btn-primary">Reload page <ArrowRight size={15} /></button></main>;
+    }
+    return this.props.children;
+  }
+}
 
 const images = {
   hero: '/NBG%20HERO.png',
@@ -103,6 +126,7 @@ const moreLinks: NavigationLink[] = [
   { label: 'Gallery', view: 'gallery' },
   { label: 'Contact', view: 'contact' },
   { label: 'Verify Documents', view: 'verify' },
+  { label: 'Staff dashboard', view: 'admin' },
 ];
 const FONT_SIZE_STEPS = [100, 110, 120, 130, 140, 150, 175, 200] as const;
 type FontSizeScale = typeof FONT_SIZE_STEPS[number];
@@ -122,6 +146,7 @@ function trackContactEvent(channel: 'whatsapp' | 'phone', context: string) {
 }
 
 function viewFromPath(pathname: string): View {
+  if (pathname === '/dashboard' || pathname.startsWith('/dashboard/')) return 'admin';
   if (pathname.startsWith('/project/')) return pathname.endsWith('/invest') ? 'project-investment' : 'project';
   if (pathname.startsWith('/verify/')) return 'verify';
   const route = pathname.replace(/^\//, '') as View;
@@ -162,34 +187,34 @@ function App() {
   }, [fontSizeScale]);
 
   const resolveSignedInUser = async () => {
-    const { data: { session }, error } = await supabase.auth.getSession();
-    if (error) {
-      setAdminUser(null);
-      setAuthLoading(false);
-      return;
-    }
+    try {
+      const { data: { session }, error } = await supabase.auth.getSession();
+      if (error || !session?.user) {
+        setAdminUser(null);
+        return;
+      }
 
-    if (!session?.user) {
+      const profile = await fetchProfile(session.user.id);
+      setAdminUser(
+        profile
+          ? { ...profile, email: session.user.email ?? '' }
+          : { id: session.user.id, email: session.user.email ?? '', role: 'client' }
+      );
+    } catch {
       setAdminUser(null);
+    } finally {
       setAuthLoading(false);
-      return;
     }
-
-    const profile = await fetchProfile(session.user.id);
-    setAdminUser(
-      profile
-        ? { ...profile, email: session.user.email ?? '' }
-        : { id: session.user.id, email: session.user.email ?? '', role: 'client' }
-    );
-    setAuthLoading(false);
   };
 
   useEffect(() => {
     const handlePopState = () => {
-      setView(viewFromPath(window.location.pathname));
-      setProjectId(projectIdFromPath(window.location.pathname));
-      setReviewProjectId(new URLSearchParams(window.location.search).get('project') ?? '');
-      setVerificationCode(verificationCodeFromPath(window.location.pathname));
+      startTransition(() => {
+        setView(viewFromPath(window.location.pathname));
+        setProjectId(projectIdFromPath(window.location.pathname));
+        setReviewProjectId(new URLSearchParams(window.location.search).get('project') ?? '');
+        setVerificationCode(verificationCodeFromPath(window.location.pathname));
+      });
       setMobileOpen(false);
       window.scrollTo({ top: 0, behavior: 'smooth' });
     };
@@ -219,35 +244,37 @@ function App() {
   }, [adminUser?.id]);
 
   const navigate = (nextView: View) => {
-    setView(nextView);
+    startTransition(() => setView(nextView));
     setMobileOpen(false);
-    const nextPath = nextView === 'home' ? '/' : nextView === 'reviews' && reviewProjectId ? `/reviews?project=${encodeURIComponent(reviewProjectId)}` : `/${nextView}`;
+    const nextPath = nextView === 'home' ? '/' : nextView === 'admin' ? '/dashboard' : nextView === 'reviews' && reviewProjectId ? `/reviews?project=${encodeURIComponent(reviewProjectId)}` : `/${nextView}`;
     window.history.pushState({}, '', nextPath);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const normalizedRole = String(adminUser?.role ?? '').trim().toLowerCase();
   const isAuthorizedAdmin = adminUser?.email.trim().toLowerCase() === 'hamisimedu@gmail.com';
+  const routeLoading = <div className="flex min-h-screen items-center justify-center bg-[#f4f1eb] px-6 text-sm text-[#31546b]">Opening your secure NBG workspace…</div>;
   const fontSizeControl = <div role="group" aria-label="Text size controls" className="fixed bottom-3 right-3 z-[80] flex items-center gap-1 border border-[#c9d8d8] bg-white/95 p-1.5 text-[#31546b] shadow-md backdrop-blur"><button type="button" onClick={() => setFontSizeScale((current) => FONT_SIZE_STEPS[Math.max(0, FONT_SIZE_STEPS.indexOf(current) - 1)])} disabled={fontSizeScale === FONT_SIZE_STEPS[0]} aria-label="Decrease text size" title="Decrease text size" className="grid size-8 place-items-center border border-[#e1e9e9] disabled:opacity-40"><span className="font-serif text-sm font-semibold">A</span><Minus size={10} /></button><output aria-live="polite" aria-label={`Text size ${fontSizeScale}%`} className="min-w-9 text-center text-[9px] font-semibold">{fontSizeScale}%</output><button type="button" onClick={() => setFontSizeScale((current) => FONT_SIZE_STEPS[Math.min(FONT_SIZE_STEPS.length - 1, FONT_SIZE_STEPS.indexOf(current) + 1)])} disabled={fontSizeScale === FONT_SIZE_STEPS[FONT_SIZE_STEPS.length - 1]} aria-label="Increase text size" title="Increase text size" className="grid size-8 place-items-center border border-[#e1e9e9] disabled:opacity-40"><span className="font-serif text-base font-semibold">A</span><Plus size={10} /></button></div>;
 
   if (view === 'admin') {
     if (authLoading) return <><div className="font-scaled-surface"><div className="flex min-h-screen items-center justify-center bg-[#0f8f9f] text-white/75">Loading…</div></div>{fontSizeControl}</>;
-    if (!adminUser) return <><div className="font-scaled-surface"><AdminSignIn /></div>{fontSizeControl}</>;
+    if (!adminUser) return <><RouteErrorBoundary><Suspense fallback={routeLoading}><div className="font-scaled-surface"><AdminSignIn /></div></Suspense></RouteErrorBoundary>{fontSizeControl}</>;
     if (dashboardTabsForRole(normalizedRole).length === 0 || normalizedRole === 'admin' && !isAuthorizedAdmin) return <><div className="font-scaled-surface"><AdminAccessDenied email={adminUser.email} role={normalizedRole} navigate={navigate} /></div>{fontSizeControl}</>;
-    return <><div className="font-scaled-surface"><AdminDashboard user={{ ...adminUser, role: normalizedRole }} onSignOut={async () => { await signOut(); setAdminUser(null); setView('home'); }} /></div>{fontSizeControl}</>;
+    return <><RouteErrorBoundary><Suspense fallback={routeLoading}><div className="font-scaled-surface"><AdminDashboard user={{ ...adminUser, role: normalizedRole }} onSignOut={async () => { await signOut(); setAdminUser(null); navigate('home'); }} /></div></Suspense></RouteErrorBoundary>{fontSizeControl}</>;
   }
 
   if (view === 'portal') {
     if (authLoading) return <><div className="font-scaled-surface"><div className="flex min-h-screen items-center justify-center bg-[#0d4055] text-white/75">Checking your secure portal...</div></div>{fontSizeControl}</>;
-    if (!adminUser) return <><div className="font-scaled-surface"><ClientPortalSignIn /></div>{fontSizeControl}</>;
+    if (!adminUser) return <><RouteErrorBoundary><Suspense fallback={routeLoading}><div className="font-scaled-surface"><ClientPortalSignIn /></div></Suspense></RouteErrorBoundary>{fontSizeControl}</>;
     if (['hr', 'leads', 'finance', 'project_manager', 'it', 'staff'].includes(normalizedRole)) return <><div className="font-scaled-surface"><div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-[#f4f1eb] px-6 text-center text-[#123b4b]"><p className="eyebrow text-[#087f88]">Department access</p><h1 className="font-serif text-3xl">{normalizedRole === 'staff' ? 'Dashboard assignment required.' : 'Use your assigned staff dashboard.'}</h1><p className="max-w-md text-sm text-slate-600">{normalizedRole === 'staff' ? 'An Admin/Owner needs to assign this staff account to a department dashboard.' : `This account is assigned to the ${normalizedRole.replace(/_/g, ' ')} workspace and does not have client portal access.`}</p><button type="button" onClick={() => navigate('admin')} className="btn-primary">Open staff dashboard <ArrowRight size={15} /></button></div></div>{fontSizeControl}</>;
-    return <><div className="font-scaled-surface"><ClientPortal user={{ ...adminUser, role: normalizedRole }} onSignOut={async () => { await signOut(); setAdminUser(null); }} navigate={navigate} /></div>{fontSizeControl}</>;
+    return <><RouteErrorBoundary><Suspense fallback={routeLoading}><div className="font-scaled-surface"><ClientPortal user={{ ...adminUser, role: normalizedRole }} onSignOut={async () => { await signOut(); setAdminUser(null); }} navigate={navigate} /></div></Suspense></RouteErrorBoundary>{fontSizeControl}</>;
   }
 
   return (
     <div className="min-h-screen overflow-x-hidden bg-[#f4f1eb] text-[#17232b]">
       <Header view={view} navigate={navigate} mobileOpen={mobileOpen} setMobileOpen={setMobileOpen} />
         <main>
+        <RouteErrorBoundary><Suspense fallback={routeLoading}>
         {view === 'home' && <HomePage navigate={navigate} setGalleryIndex={setGalleryIndex} />}
         {view === 'residences' && <DatabaseResidencesPage navigate={navigate} setSelectedUnit={setSelectedUnit} />}
         {view === 'projects' && <DatabaseProjectsPage navigate={navigate} />}
@@ -265,6 +292,7 @@ function App() {
         {view === 'terms' && <LegalPage kind="terms" />}
         {view === 'verify' && <VerifyDocumentPage code={verificationCode ?? ''} />}
         {view === 'not-found' && <NotFoundPage navigate={navigate} />}
+        </Suspense></RouteErrorBoundary>
       </main>
       <Footer navigate={navigate} />
       <WhatsAppButton />

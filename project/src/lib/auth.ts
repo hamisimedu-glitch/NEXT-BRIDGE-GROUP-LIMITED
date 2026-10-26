@@ -45,28 +45,21 @@ export async function fetchProfile(userId: string): Promise<AdminUser | null> {
     .eq('id', userId)
     .maybeSingle();
   if (data) return { id: data.id, email: '', role: normalizeRole(data.role) };
-  if (error && error.code !== 'PGRST116') return null;
-
-  const { data: created, error: createError } = await supabase
-    .from('profiles')
-    .insert({ id: userId })
-    .select('id, role')
-    .single();
-  if (createError || !created) return null;
-  return { id: created.id, email: '', role: normalizeRole(created.role) };
+  if (error) console.error('Could not load the signed-in profile.', error);
+  return null;
 }
 
 export async function signIn(email: string, password: string) {
   return supabase.auth.signInWithPassword({ email, password });
 }
 
-export async function signUp(email: string, password: string, role: 'client' | 'staff' = 'client', profile?: { full_name: string; phone: string }) {
+export async function signUp(email: string, password: string, profile?: { full_name: string; phone: string }) {
   return supabase.auth.signUp({
     email,
     password,
     options: {
       emailRedirectTo: portalRedirectUrl(),
-      data: { role, ...profile },
+      data: { role: 'client', ...profile },
     },
   });
 }

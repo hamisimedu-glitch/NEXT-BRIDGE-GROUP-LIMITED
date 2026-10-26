@@ -1,5 +1,3 @@
-import { GState, jsPDF } from 'jspdf';
-import QRCode from 'qrcode';
 import { supabase } from '@/lib/supabase';
 
 export type VerifiedPdfRow = Record<string, string | number | null | undefined>;
@@ -22,6 +20,7 @@ async function sha256(blob: Blob) {
 }
 
 export async function createVerifiedPdf(title: string, documentType: string, rows: VerifiedPdfRow[], _dataSnapshot?: unknown, purchaseSaleId?: string, statementContext?: VerifiedPdfStatementContext) {
+  const [{ GState, jsPDF }, { default: QRCode }] = await Promise.all([import('jspdf'), import('qrcode')]);
   const { data: reservedCode, error: reserveError } = await supabase.rpc('reserve_export_verification_code');
   if (reserveError || !reservedCode) throw new Error(reserveError?.message || 'Could not reserve a verification code. Apply the verified PDF exports migration first.');
   const verificationCode = String(reservedCode);

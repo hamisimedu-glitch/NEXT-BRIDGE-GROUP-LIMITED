@@ -1,10 +1,7 @@
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertCircle, ArrowRight, Award, BarChart3, Building2, CalendarDays, Calculator, Check, ChevronDown, ChevronLeft, ChevronRight, CircleCheck, ClipboardList, Clock3, Construction, CreditCard, Download, DollarSign, Eye, EyeOff, ExternalLink, FileDown, FileText, Info, LayoutDashboard, LogOut, Mail, MapPin, Menu, MessageCircle, MoreHorizontal, MoreVertical, Pencil, Phone, Plus, RefreshCw, Search, Send, ShieldCheck, SlidersHorizontal, TrendingUp, Trash2, Upload, Users, X } from 'lucide-react';
-import { GState, jsPDF } from 'jspdf';
-import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
-import QRCode from 'qrcode';
 import { supabase } from '@/lib/supabase';
-import { resetPassword, signIn, signUp, type AdminUser } from '@/lib/auth';
+import { resetPassword, signIn, type AdminUser } from '@/lib/auth';
 import { COMMISSION_STATUS_COLORS, COMMISSION_STATUSES, INVESTMENT_STATUS_COLORS, INVESTMENT_STATUSES, LEAD_STATUSES, LEAD_STATUS_COLORS, PROJECT_STATUSES, REALTOR_STATUS_COLORS, REALTOR_STATUSES, SALE_STATUS_COLORS, SALE_STATUSES, UNIT_STATUSES, fmtKes, type AuditLog, type BuyerInstallment, type Commission, type ConstructionUpdate, type Investment, type Lead, type Project, type ProjectUnit, type Realtor, type Sale } from '@/lib/types';
 import LocationMap from '@/LocationMap';
 import { DOCUMENT_TEMPLATES, DOCUMENT_TYPE_OPTIONS, getDocumentTemplate, type DocumentField, type DocumentType } from '@/lib/document-engine';
@@ -14,7 +11,8 @@ import { formatAccountingCurrency, formatMoneyInput, parseMoney } from '@/lib/fo
 import { FinancialPrivacyToggle, useFinancialPrivacy } from '@/lib/financial-privacy';
 import DashboardInbox from '@/DashboardInbox';
 import { createVerifiedPdf, downloadPdf } from '@/lib/verified-pdf';
-import { FinanceDepartmentDashboard, HRDepartmentDashboard, ITDepartmentDashboard, ProjectManagementDashboard } from '@/DepartmentDashboards';
+import { FinanceDepartmentDashboard, ITDepartmentDashboard, ProjectManagementDashboard } from '@/DepartmentDashboards';
+import HRWorkforceDashboard from '@/HRWorkforceDashboard';
 import { canAccessDashboardTab, canManageDashboardRoles, canManageFinancialRecords, canManageProjectRecords, dashboardTabsForRole, defaultDashboardTab, type DashboardTab } from '@/lib/dashboard-access';
 
 type AdminTab = DashboardTab;
@@ -169,6 +167,7 @@ function productionDocumentBody(kind: string, details: string, amount: string) {
 }
 
 async function generateBrandedPdf(kind: string, title: string, recipient: string, details: string, amount: string, forcedDocumentRef: string, verificationCode: string) {
+  const [{ GState, jsPDF }, { default: QRCode }] = await Promise.all([import('jspdf'), import('qrcode')]);
   const pdf = new jsPDF({ unit: 'mm', format: 'a4' });
   const logo = await loadLogoDataUrl();
   const verificationUrl = `${window.location.origin}/verify/${encodeURIComponent(verificationCode)}`;
@@ -862,7 +861,8 @@ export default function AdminDashboard({ user, onSignOut }: { user: AdminUser; o
   useFinancialPrivacy();
   const allowedTabs = dashboardTabsForRole(user.role);
   const [tab, setTab] = useState<AdminTab>(() => {
-    const requested = new URLSearchParams(window.location.search).get('tab') as AdminTab | null;
+    const routeTab = window.location.pathname.match(/^\/dashboard\/([^/]+)$/)?.[1] as AdminTab | undefined;
+    const requested = (new URLSearchParams(window.location.search).get('tab') as AdminTab | null) ?? routeTab ?? null;
     return requested && canAccessDashboardTab(user.role, requested) ? requested : defaultDashboardTab(user.role) ?? 'overview';
   });
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -879,11 +879,34 @@ export default function AdminDashboard({ user, onSignOut }: { user: AdminUser; o
     if (!canAccessDashboardTab(user.role, destination)) return;
     setTab(destination);
     setSidebarOpen(false);
+    window.history.pushState({}, '', destination === 'overview' ? '/dashboard' : `/dashboard/${destination}`);
     if (destination === 'leads') {
       setLeadAlertCount(0);
       void supabase.from('client_notifications').update({ read_at: new Date().toISOString() }).eq('user_id', user.id).eq('kind', 'LEAD_SLA_ALERT').is('read_at', null);
     }
   }, [user.id, user.role]);
+
+  useEffect(() => {
+    const syncTabFromRoute = () => {
+      const routeTab = window.location.pathname.match(/^\/dashboard\/([^/]+)$/)?.[1] as AdminTab | undefined;
+      const queryTab = new URLSearchParams(window.location.search).get('tab') as AdminTab | null;
+      const requested = routeTab ?? queryTab;
+      if (requested && canAccessDashboardTab(user.role, requested)) {
+        setTab(requested);
+        return;
+      }
+      const fallback = defaultDashboardTab(user.role);
+      if (fallback) {
+        setTab(fallback);
+        if (window.location.pathname === '/dashboard' || window.location.pathname.startsWith('/dashboard/')) {
+          window.history.replaceState({}, '', fallback === 'overview' ? '/dashboard' : `/dashboard/${fallback}`);
+        }
+      }
+    };
+    syncTabFromRoute();
+    window.addEventListener('popstate', syncTabFromRoute);
+    return () => window.removeEventListener('popstate', syncTabFromRoute);
+  }, [user.role]);
 
   useEffect(() => {
     if (!allowedTabs.includes(tab)) setTab(defaultDashboardTab(user.role) ?? 'overview');
@@ -982,6 +1005,10 @@ export default function AdminDashboard({ user, onSignOut }: { user: AdminUser; o
     return <div className="flex min-h-screen items-center justify-center bg-[#f0ede6] p-6 text-center text-[#123b4b]"><section className="max-w-md border border-[#dce3e3] bg-white p-6"><ShieldCheck size={22} className="mx-auto text-[#087f88]" /><h1 className="mt-3 font-serif text-2xl">Access updated</h1><p className="mt-2 text-xs leading-5 text-slate-600">Your dashboard permissions changed. Your assigned workspace is loading.</p></section></div>;
   }
 
+  if (tab === 'hr') {
+    return <HRWorkforceDashboard canAssignRoles={isAdmin} user={user} onSignOut={onSignOut} onOpenAdminWorkspace={() => selectAdminTab('overview')} />;
+  }
+
   return (
     <div className="min-h-screen bg-[#f0ede6] font-sans">
       {/* Sidebar */}
@@ -1050,7 +1077,6 @@ export default function AdminDashboard({ user, onSignOut }: { user: AdminUser; o
 
         <div className="px-5 py-8 md:px-10 md:py-10">
           {tab === 'overview' && <OverviewTab goTo={go} />}
-          {tab === 'hr' && <HRDepartmentDashboard canAssignRoles={isAdmin} />}
           {tab === 'leads' && <LeadsTab user={user} />}
           {tab === 'finance' && <FinanceDepartmentDashboard user={user} navigate={go} />}
                     {tab === 'project_management' && <ProjectManagementDashboard navigate={go} />}
@@ -4339,6 +4365,7 @@ function DocumentForm({ clients, onDone }: { clients: DocumentClient[]; onDone: 
     setBuildingCompliancePacket(true);
     setCompliancePacketError('');
     try {
+      const { PDFDocument, StandardFonts, rgb } = await import('pdf-lib');
       const packet = await PDFDocument.create();
       const font = await packet.embedFont(StandardFonts.Helvetica);
       const boldFont = await packet.embedFont(StandardFonts.HelveticaBold);
@@ -4987,23 +5014,24 @@ export function AdminSignIn() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const [mode, setMode] = useState<'signin' | 'signup'>('signin');
   const [notice, setNotice] = useState('');
 
   const submit = async (e: FormEvent) => {
-    e.preventDefault(); setLoading(true); setError('');
-    const result = mode === 'signin' ? await signIn(email, password) : await signUp(email, password, 'staff');
-    setLoading(false);
-    if (result.error) {
-      const message = result.error.message.toLowerCase();
-      setError(message.includes('email not confirmed') ? 'Confirm your email from Supabase before signing in.' : mode === 'signin' ? 'Sign in failed. Check the email and password, or use password recovery below.' : result.error.message);
-      return;
+    e.preventDefault();
+    setLoading(true);
+    setError('');
+    setNotice('');
+    try {
+      const result = await signIn(email.trim(), password);
+      if (result.error) {
+        const message = result.error.message.toLowerCase();
+        setError(message.includes('email not confirmed') ? 'Confirm your email before signing in.' : 'Sign in failed. Check your email and password, or use password recovery.');
+      }
+    } catch {
+      setError('Sign in could not be completed. Check your connection and try again.');
+    } finally {
+      setLoading(false);
     }
-    if (mode === 'signup' && result.data?.user) {
-      setNotice(result.data.session ? 'Account created. You can now enter the dashboard.' : 'Account created. Check your email to confirm the account, then sign in.');
-      setMode('signin');
-    }
-    // signin: onAuthStateChange fires and parent updates
   };
 
   const recover = async () => {
@@ -5022,26 +5050,24 @@ export function AdminSignIn() {
           <span className="brand-mark brand-mark-inverse brand-mark-auth"><img src="/NBG_LOGO-removebg-preview.png" alt="Next Bridge Group" /></span>
           <div className="text-center">
             <p className="text-[11px] font-bold tracking-[.22em] text-white">NEXT BRIDGE</p>
-            <p className="text-[9px] tracking-[.22em] text-white/40">GROUP LIMITED · ADMIN</p>
+            <p className="text-[9px] tracking-[.22em] text-white/40">GROUP LIMITED · STAFF &amp; ADMIN</p>
           </div>
         </div>
         <div className="rounded-lg bg-[#f0ede6] p-8 shadow-2xl">
-          <h1 className="font-serif text-3xl">{mode === 'signin' ? 'Sign in' : 'Create account'}</h1>
-          <p className="mt-2 text-sm text-slate-500">Access the NBG management portal.</p>
+          <h1 className="font-serif text-3xl">Sign in</h1>
+          <p className="mt-2 text-sm text-slate-500">Sign in to open your assigned NBG workspace.</p>
           <form onSubmit={submit} className="mt-6 grid gap-4">
             <AF label="Email" type="email" value={email} onChange={setEmail} required />
             <AF label="Password" type="password" value={password} onChange={setPassword} required />
             {error && <p className="text-sm text-[#a55445]">{error}</p>}
             {notice && <p className="text-sm text-[#2e6b3e]">{notice}</p>}
-            <button disabled={loading} className="btn-primary disabled:opacity-60">{loading ? 'Please wait…' : mode === 'signin' ? 'Sign in' : 'Create account'} <ArrowRight size={15} /></button>
+            <button disabled={loading} className="btn-primary disabled:opacity-60">{loading ? 'Please wait…' : 'Sign in'} <ArrowRight size={15} /></button>
           </form>
-          {mode === 'signin' && <button onClick={recover} disabled={loading} className="mt-4 w-full text-center text-xs text-slate-500 hover:text-[#20afd1]">Forgot password? Send recovery email</button>}
-          <button onClick={() => { setMode(mode === 'signin' ? 'signup' : 'signin'); setError(''); }} className="mt-5 w-full text-center text-xs text-[#20afd1] hover:underline">
-            {mode === 'signin' ? "Don't have an account? Create one" : 'Already have an account? Sign in'}
-          </button>
+          <button onClick={recover} disabled={loading} className="mt-4 w-full text-center text-xs text-slate-500 hover:text-[#20afd1]">Forgot password? Send recovery email</button>
+          <p className="mt-5 text-center text-xs leading-5 text-slate-500">Staff access is created by an Admin/Owner invitation. Client self-registration is available through the <a href="/portal" className="font-semibold text-[#087f88] hover:underline">Client Portal</a>.</p>
         </div>
         <p className="mt-6 text-center text-[9px] uppercase tracking-[.14em] text-white/25">
-          New accounts start as staff · Contact owner to upgrade to admin
+            Staff accounts can only be created or assigned by an Admin/Owner.
         </p>
       </div>
     </div>

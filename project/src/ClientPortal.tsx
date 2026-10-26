@@ -1,5 +1,4 @@
 import { FormEvent, useCallback, useEffect, useState, type CSSProperties } from 'react';
-import Tesseract from 'tesseract.js';
 import { AlertCircle, ArrowRight, BarChart3, Bell, Building2, Calculator, CalendarDays, Check, ChevronDown, ChevronLeft, ChevronRight, CircleCheck, Clock3, CreditCard, Eye, EyeOff, FileText, FileDown, Grid2X2, Home, List, LockKeyhole, Mail, MapPin, Menu, MessageCircle, Phone, Receipt, Search, Send, Settings, ShieldCheck, Upload, UserRound, X } from 'lucide-react';
 import { sendMagicLink, sendPasswordReset, signInWithGoogle, signInWithPassword, signUp, updatePassword, type AdminUser } from '@/lib/auth';
 import AvailableHomeCard from '@/AvailableHomeCard';
@@ -68,9 +67,9 @@ function parseIdentityDocumentText(rawText: string) {
     const match = Array.from(text.matchAll(pattern))[0]?.[1];
     return match?.replace(/\s+/g, ' ').trim() || null;
   };
-  const fullName = findMatch(/(?:full\s*name|name|holder\s*name|surname\s*and\s*other\s*names)\s*[-:\n]+\s*([A-Z][A-Z'., -]{3,})/gi);
-  const identityNumber = findMatch(/(?:id\s*(?:no|number)|identity\s*(?:no|number)|national\s*id|passport\s*(?:no|number)|document\s*no|personal\s*no)\s*[-:\n]+\s*([A-Z0-9/-]{6,})/gi)?.replace(/\s+/g, '') ?? null;
-  const address = findMatch(/(?:residential\s*address|address|physical\s*address)\s*[-:\n]+\s*([A-Z0-9\s,./#-]{8,})/gi);
+  const fullName = findMatch(/(?:full\s*name|name|holder\s*name|surname\s*and\s*other\s*names)\s*(?:-|:|\n)+\s*([A-Z][A-Z'., -]{3,})/gi);
+  const identityNumber = findMatch(/(?:id\s*(?:no|number)|identity\s*(?:no|number)|national\s*id|passport\s*(?:no|number)|document\s*no|personal\s*no)\s*(?:-|:|\n)+\s*([A-Z0-9/-]{6,})/gi)?.replace(/\s+/g, '') ?? null;
+  const address = findMatch(/(?:residential\s*address|address|physical\s*address)\s*(?:-|:|\n)+\s*([A-Z0-9\s,./#-]{8,})/gi);
   const documentType = /passport/i.test(text) ? 'PASSPORT' : /national\s*id|identity\s*card|id\s*card/i.test(text) ? 'NATIONAL_ID' : null;
   return { fullName, identityNumber, address, documentType };
 }
@@ -149,7 +148,7 @@ export function ClientPortalSignIn() {
         setError('Password must be at least 8 characters long.');
         return;
       }
-      const result = await signUp(trimmedEmail, password, 'client', { full_name: fullName.trim(), phone: phone.trim() });
+      const result = await signUp(trimmedEmail, password, { full_name: fullName.trim(), phone: phone.trim() });
       setLoading(false);
 
       if (result.error) {
@@ -1122,11 +1121,13 @@ function ProfileContent({ user, recovery, profile, documents, onDocumentsUploade
   const scanIdentityDocument = async (file: File | null) => {
     if (!file) return;
     if (file.type === 'application/pdf') { setKycScanStatus('PDF saved for manual review. Enter the identity details below; OCR is available for image files.'); return; }
+    if (file.size > 10 * 1024 * 1024) { setKycScanStatus('Choose an image 10 MB or smaller to scan.'); return; }
     if (!file.type.startsWith('image/')) { setKycScanStatus('Use a PDF or a clear image of your ID or passport.'); return; }
     setKycScanStatus('Scanning identity document...');
     try {
       let scanImage: Blob = file;
       try { scanImage = await prepareIdentityImage(file); } catch { /* Use the original image when preprocessing is unavailable. */ }
+      const { default: Tesseract } = await import('tesseract.js');
       const result = await Tesseract.recognize(scanImage, 'eng', { logger: (progress: { status?: string; progress?: number }) => {
         if (progress.status === 'recognizing text') setKycScanStatus(`Scanning identity document... ${Math.round((progress.progress ?? 0) * 100)}%`);
       } });
