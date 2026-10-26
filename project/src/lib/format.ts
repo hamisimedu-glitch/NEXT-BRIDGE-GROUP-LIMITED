@@ -13,14 +13,25 @@ export function formatMoneyInput(value: string) {
   return decimalIndex < 0 ? groupedWhole : `${groupedWhole}.${fraction}`;
 }
 
-export function formatKes(amount: number | null | undefined, fractionDigits = 0) {
+export function formatAccountingCurrency(amount: number | null | undefined, currency = 'KES', fractionDigits = 0) {
   if (amount == null || !Number.isFinite(Number(amount))) return '—';
-  return new Intl.NumberFormat('en-KE', {
-    style: 'currency',
-    currency: 'KES',
-    minimumFractionDigits: fractionDigits,
-    maximumFractionDigits: Math.max(fractionDigits, 2),
-  }).format(Number(amount));
+  const numericAmount = Number(amount);
+  const absoluteAmount = Math.abs(numericAmount);
+  const compactAmount = absoluteAmount >= 1_000_000
+    ? `${(absoluteAmount / 1_000_000).toFixed(1)}M`
+    : absoluteAmount >= 10_000
+      ? `${(absoluteAmount / 1_000).toFixed(1)}K`
+      : absoluteAmount.toLocaleString('en-KE', { minimumFractionDigits: fractionDigits, maximumFractionDigits: Math.max(fractionDigits, 2) });
+  const label = currency.toUpperCase() === 'KES' ? 'KSh' : currency.toUpperCase();
+  return `${numericAmount < 0 ? `(${label} ` : `${label} `}${compactAmount}${numericAmount < 0 ? ')' : ''}`;
+}
+
+export function formatAccountingKes(amount: number | null | undefined, fractionDigits = 0) {
+  return formatAccountingCurrency(amount, 'KES', fractionDigits);
+}
+
+export function formatKes(amount: number | null | undefined, fractionDigits = 0) {
+  return formatAccountingKes(amount, fractionDigits);
 }
 
 export function formatDateTime(value: string | Date | null | undefined, options: Intl.DateTimeFormatOptions = {}) {

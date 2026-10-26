@@ -1,4 +1,5 @@
 import { maskFinancialValue } from '@/lib/financial-privacy';
+import { formatAccountingKes } from '@/lib/format';
 
 export type LeadStatus = 'NEW' | 'CONTACTED' | 'QUALIFIED' | 'VIEWING_BOOKED' | 'NEGOTIATING' | 'CONVERTED' | 'LOST';
 export type UnitStatus = 'AVAILABLE' | 'RESERVED' | 'SOLD';
@@ -239,5 +240,5 @@ export const INVESTMENT_STATUS_COLORS: Record<string, string> = {
 
 export function fmtKes(amount: number | null | undefined): string {
   if (amount == null) return '—';
-  return maskFinancialValue(`KSh ${amount.toLocaleString('en-KE', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`);
+  return maskFinancialValue(formatAccountingKes(amount));
 }

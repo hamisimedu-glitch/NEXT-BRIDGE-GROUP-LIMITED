@@ -616,6 +616,9 @@ button { cursor: pointer; }
 .section-guide:hover, .section-guide:focus { border-color: #20afd1; color: #20afd1; }
 .section-guide-popover { position: absolute; top: calc(100% + 10px); left: 0; z-index: 60; width: 280px; transform: translateY(-4px); border: 1px solid #c9c5bd; background: #fffdf8; padding: 14px; box-shadow: 0 16px 36px rgba(23,35,43,.14); opacity: 0; pointer-events: none; transition: opacity .18s ease, transform .18s ease; }
 .section-guide:hover .section-guide-popover, .section-guide:focus .section-guide-popover { transform: translateY(0); opacity: 1; pointer-events: auto; }
+@media (max-width: 640px) {
+	.section-guide-popover { position: fixed; top: 78px; left: 16px; right: 16px; width: auto; }
+}
 .text-\[\#20afd1\] { color: var(--aqua) !important; }
 .bg-\[\#20afd1\] { background-color: var(--aqua) !important; }
 .border-\[\#20afd1\] { border-color: var(--aqua) !important; }

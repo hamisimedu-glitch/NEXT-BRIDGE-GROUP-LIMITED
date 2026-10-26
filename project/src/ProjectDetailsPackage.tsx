@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Download, ExternalLink, FileText } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import { supabase } from '@/lib/supabase';
+import { formatAccountingKes } from '@/lib/format';
 
 type ProjectFile = { title: string; category: string; storage_path: string; verification_code?: string | null; document_ref?: string | null };
 export type PublicProjectDetails = {
@@ -29,7 +30,7 @@ export default function ProjectDetailsPackage({ details, trackingCode }: { detai
   const [fileUrls, setFileUrls] = useState<Record<string, string>>({});
   const place = [details.location, details.locality, details.county, details.country].filter(Boolean).join(', ');
   const price = details.price_min != null || details.price_max != null
-    ? [details.price_min, details.price_max].filter((value) => value != null).map((value) => `KES ${Number(value).toLocaleString()}`).join(' - ')
+    ? [details.price_min, details.price_max].filter((value) => value != null).map((value) => formatAccountingKes(Number(value))).join(' - ')
     : 'Contact NBG for current pricing';
   const investmentRows = Object.entries(details.investment_information ?? {}).filter(([, value]) => value != null && String(value).trim());
   const construction = details.construction_progress as { currentPhase?: string; progressNote?: string; timeline?: string; totalFloors?: number } | null;
