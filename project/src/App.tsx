@@ -231,17 +231,17 @@ function App() {
   const fontSizeControl = <div role="group" aria-label="Text size controls" className="fixed bottom-3 right-3 z-[80] flex items-center gap-1 border border-[#c9d8d8] bg-white/95 p-1.5 text-[#31546b] shadow-md backdrop-blur"><button type="button" onClick={() => setFontSizeScale((current) => FONT_SIZE_STEPS[Math.max(0, FONT_SIZE_STEPS.indexOf(current) - 1)])} disabled={fontSizeScale === FONT_SIZE_STEPS[0]} aria-label="Decrease text size" title="Decrease text size" className="grid size-8 place-items-center border border-[#e1e9e9] disabled:opacity-40"><span className="font-serif text-sm font-semibold">A</span><Minus size={10} /></button><output aria-live="polite" aria-label={`Text size ${fontSizeScale}%`} className="min-w-9 text-center text-[9px] font-semibold">{fontSizeScale}%</output><button type="button" onClick={() => setFontSizeScale((current) => FONT_SIZE_STEPS[Math.min(FONT_SIZE_STEPS.length - 1, FONT_SIZE_STEPS.indexOf(current) + 1)])} disabled={fontSizeScale === FONT_SIZE_STEPS[FONT_SIZE_STEPS.length - 1]} aria-label="Increase text size" title="Increase text size" className="grid size-8 place-items-center border border-[#e1e9e9] disabled:opacity-40"><span className="font-serif text-base font-semibold">A</span><Plus size={10} /></button></div>;
 
   if (view === 'admin') {
-    if (authLoading) return <><div className="flex min-h-screen items-center justify-center bg-[#0f8f9f] text-white/75">Loading…</div>{fontSizeControl}</>;
-    if (!adminUser) return <><AdminSignIn />{fontSizeControl}</>;
-    if (dashboardTabsForRole(normalizedRole).length === 0 || normalizedRole === 'admin' && !isAuthorizedAdmin) return <><AdminAccessDenied email={adminUser.email} role={normalizedRole} navigate={navigate} />{fontSizeControl}</>;
-    return <><AdminDashboard user={{ ...adminUser, role: normalizedRole }} onSignOut={async () => { await signOut(); setAdminUser(null); setView('home'); }} />{fontSizeControl}</>;
+    if (authLoading) return <><div className="font-scaled-surface"><div className="flex min-h-screen items-center justify-center bg-[#0f8f9f] text-white/75">Loading…</div></div>{fontSizeControl}</>;
+    if (!adminUser) return <><div className="font-scaled-surface"><AdminSignIn /></div>{fontSizeControl}</>;
+    if (dashboardTabsForRole(normalizedRole).length === 0 || normalizedRole === 'admin' && !isAuthorizedAdmin) return <><div className="font-scaled-surface"><AdminAccessDenied email={adminUser.email} role={normalizedRole} navigate={navigate} /></div>{fontSizeControl}</>;
+    return <><div className="font-scaled-surface"><AdminDashboard user={{ ...adminUser, role: normalizedRole }} onSignOut={async () => { await signOut(); setAdminUser(null); setView('home'); }} /></div>{fontSizeControl}</>;
   }
 
   if (view === 'portal') {
-    if (authLoading) return <><div className="flex min-h-screen items-center justify-center bg-[#0d4055] text-white/75">Checking your secure portal...</div>{fontSizeControl}</>;
-    if (!adminUser) return <><ClientPortalSignIn />{fontSizeControl}</>;
-    if (['hr', 'leads', 'finance', 'project_manager', 'it', 'staff'].includes(normalizedRole)) return <><div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-[#f4f1eb] px-6 text-center text-[#123b4b]"><p className="eyebrow text-[#087f88]">Department access</p><h1 className="font-serif text-3xl">{normalizedRole === 'staff' ? 'Dashboard assignment required.' : 'Use your assigned staff dashboard.'}</h1><p className="max-w-md text-sm text-slate-600">{normalizedRole === 'staff' ? 'An Admin/Owner needs to assign this staff account to a department dashboard.' : `This account is assigned to the ${normalizedRole.replace(/_/g, ' ')} workspace and does not have client portal access.`}</p><button type="button" onClick={() => navigate('admin')} className="btn-primary">Open staff dashboard <ArrowRight size={15} /></button></div>{fontSizeControl}</>;
-    return <><ClientPortal user={{ ...adminUser, role: normalizedRole }} onSignOut={async () => { await signOut(); setAdminUser(null); }} navigate={navigate} />{fontSizeControl}</>;
+    if (authLoading) return <><div className="font-scaled-surface"><div className="flex min-h-screen items-center justify-center bg-[#0d4055] text-white/75">Checking your secure portal...</div></div>{fontSizeControl}</>;
+    if (!adminUser) return <><div className="font-scaled-surface"><ClientPortalSignIn /></div>{fontSizeControl}</>;
+    if (['hr', 'leads', 'finance', 'project_manager', 'it', 'staff'].includes(normalizedRole)) return <><div className="font-scaled-surface"><div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-[#f4f1eb] px-6 text-center text-[#123b4b]"><p className="eyebrow text-[#087f88]">Department access</p><h1 className="font-serif text-3xl">{normalizedRole === 'staff' ? 'Dashboard assignment required.' : 'Use your assigned staff dashboard.'}</h1><p className="max-w-md text-sm text-slate-600">{normalizedRole === 'staff' ? 'An Admin/Owner needs to assign this staff account to a department dashboard.' : `This account is assigned to the ${normalizedRole.replace(/_/g, ' ')} workspace and does not have client portal access.`}</p><button type="button" onClick={() => navigate('admin')} className="btn-primary">Open staff dashboard <ArrowRight size={15} /></button></div></div>{fontSizeControl}</>;
+    return <><div className="font-scaled-surface"><ClientPortal user={{ ...adminUser, role: normalizedRole }} onSignOut={async () => { await signOut(); setAdminUser(null); }} navigate={navigate} /></div>{fontSizeControl}</>;
   }
 
   return (
@@ -270,7 +270,6 @@ function App() {
       <WhatsAppButton />
       {selectedUnit && <UnitModal unit={selectedUnit} close={() => setSelectedUnit(null)} navigate={navigate} />}
       {galleryIndex !== null && <Lightbox index={galleryIndex} close={() => setGalleryIndex(null)} change={setGalleryIndex} />}
-      {fontSizeControl}
     </div>
   );
 }

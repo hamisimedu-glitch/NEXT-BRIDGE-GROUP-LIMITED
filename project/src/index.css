@@ -6,7 +6,7 @@
 :root { font-family: 'DM Sans', sans-serif; color: #17232b; background: #f4f1eb; font-synthesis: none; text-rendering: optimizeLegibility; --ink: #17232b; --ivory: #f4f1eb; --teal: #087f88; --aqua: #19c6c9; --aqua-light: #8de7e2; --aqua-pale: #d9f6f3; --stone: #d9d5cc; --line: #c9c5bd; }
 * { box-sizing: border-box; }
 html { scroll-behavior: smooth; }
-#root { zoom: var(--app-font-zoom, 1); }
+.font-scaled-surface { zoom: var(--app-font-zoom, 1); }
 body { margin: 0; min-width: 320px; }
 button, input, textarea, select { font: inherit; }
 button { cursor: pointer; }
