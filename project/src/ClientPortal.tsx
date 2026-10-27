@@ -13,6 +13,7 @@ import { createVerifiedPdf, downloadPdf } from '@/lib/verified-pdf';
 import ProjectDetailsPackage, { type PublicProjectDetails } from '@/ProjectDetailsPackage';
 import ProjectProgressExperience from '@/ProjectProgressExperience';
 import type { PublishedConstructionProgress } from '@/lib/construction';
+import { NbgLoader } from '@/WorkspaceStates';
 
 type View = 'home' | 'projects' | 'units' | 'construction' | 'gallery' | 'about' | 'contact' | 'viewing' | 'faq' | 'portal' | 'admin';
 type PortalSection = 'overview' | 'progress' | 'payments' | 'investments' | 'availability' | 'resources' | 'profile';

@@ -291,8 +291,12 @@ button { cursor: pointer; }
 .portal-resource-grid p { margin-top: 10px; color: #55777d; font-size: 13px; line-height: 1.7; }
 .portal-resource-grid span, .portal-resource-grid button { display: inline-flex; margin-top: 24px; color: #087f88; font-size: 10px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; }
 .portal-profile { display: grid; grid-template-columns: repeat(2, 1fr) auto; align-items: end; gap: 24px; }
-.portal-loading { display: flex; align-items: center; gap: 12px; color: #55777d; font-size: 13px; }
-.portal-loading span { width: 10px; height: 10px; border-radius: 99px; background: #19c6c9; animation: portal-pulse 1s ease infinite; }
+.portal-loading { position: relative; display: grid; min-height: 190px; justify-items: center; align-content: center; gap: 10px; color: #55777d; font-size: 11px; text-align: center; }
+.portal-loading::before { width: 54px; height: 54px; border: 1px solid rgba(8,127,136,.18); border-top-color: #087f88; border-right-color: #19a7a7; border-radius: 50%; background: url('/NBG_LOGO-removebg-preview.png') center / 32px no-repeat; content: ''; animation: portal-loader-turn 1.15s cubic-bezier(.55,.1,.45,.9) infinite; }
+.portal-loading::after { color: #123b4b; content: 'Next Bridge'; font-family: 'DM Serif Display', Georgia, serif; font-size: 15px; }
+.portal-loading span { display: none; }
+@keyframes portal-loader-turn { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .portal-loading::before { animation: none; } }
 @keyframes portal-pulse { 50% { opacity: .3; transform: scale(.7); } }
 .portal-mobile-trigger { position: fixed; top: 16px; left: 16px; z-index: 60; width: 42px; height: 42px; border: 1px solid #a9d9d8; background: #0d4055; color: white; }
 @media (max-width: 900px) { .portal-sidebar { transform: translateX(-100%); box-shadow: 20px 0 50px rgba(3,18,26,.18); } .portal-sidebar-open { transform: translateX(0); } .portal-main { margin-left: 0; } .portal-topbar { padding-left: 78px; } .portal-stat-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }

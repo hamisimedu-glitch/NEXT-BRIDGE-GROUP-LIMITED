@@ -28,6 +28,7 @@ import {
   X,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
+import { FeatureState, NbgLoader } from '@/WorkspaceStates';
 import { fetchProfile, onAuthChange, sendMagicLink, sendPasswordReset, signInWithPassword, signOut, updatePassword, type AdminUser } from '@/lib/auth';
 import type { ConstructionUpdate, Investment, Project, ProjectUnit } from '@/lib/types';
 const AdminDashboard = lazy(() => import('@/AdminDashboard'));
@@ -80,7 +81,7 @@ class RouteErrorBoundary extends Component<{ children: ReactNode }, { hasError: 
 
   render() {
     if (this.state.hasError) {
-      return <main className="flex min-h-screen flex-col items-center justify-center gap-4 bg-[#f4f1eb] px-6 text-center text-[#123b4b]"><h1 className="font-serif text-3xl">This page could not load.</h1><p className="max-w-md text-sm text-slate-600">Your data is unchanged. Reload the page to retry the route.</p><button type="button" onClick={() => window.location.reload()} className="btn-primary">Reload page <ArrowRight size={15} /></button></main>;
+      return <main className="flex min-h-screen items-center justify-center bg-[#f4f1eb] px-5"><FeatureState kind="error" eyebrow="NBG workspace" title="This page could not load." description="Your data is unchanged. Reload the page to retry." actionLabel="Reload page" onAction={() => window.location.reload()} /></main>;
     }
     return this.props.children;
   }
@@ -253,18 +254,18 @@ function App() {
 
   const normalizedRole = String(adminUser?.role ?? '').trim().toLowerCase();
   const isAuthorizedAdmin = adminUser?.email.trim().toLowerCase() === 'hamisimedu@gmail.com';
-  const routeLoading = <div className="flex min-h-screen items-center justify-center bg-[#f4f1eb] px-6 text-sm text-[#31546b]">Opening your secure NBG workspace…</div>;
+  const routeLoading = <NbgLoader message="Opening your secure workspace" />;
   const fontSizeControl = <div role="group" aria-label="Text size controls" className="fixed bottom-3 right-3 z-[80] flex items-center gap-1 border border-[#c9d8d8] bg-white/95 p-1.5 text-[#31546b] shadow-md backdrop-blur"><button type="button" onClick={() => setFontSizeScale((current) => FONT_SIZE_STEPS[Math.max(0, FONT_SIZE_STEPS.indexOf(current) - 1)])} disabled={fontSizeScale === FONT_SIZE_STEPS[0]} aria-label="Decrease text size" title="Decrease text size" className="grid size-8 place-items-center border border-[#e1e9e9] disabled:opacity-40"><span className="font-serif text-sm font-semibold">A</span><Minus size={10} /></button><output aria-live="polite" aria-label={`Text size ${fontSizeScale}%`} className="min-w-9 text-center text-[9px] font-semibold">{fontSizeScale}%</output><button type="button" onClick={() => setFontSizeScale((current) => FONT_SIZE_STEPS[Math.min(FONT_SIZE_STEPS.length - 1, FONT_SIZE_STEPS.indexOf(current) + 1)])} disabled={fontSizeScale === FONT_SIZE_STEPS[FONT_SIZE_STEPS.length - 1]} aria-label="Increase text size" title="Increase text size" className="grid size-8 place-items-center border border-[#e1e9e9] disabled:opacity-40"><span className="font-serif text-base font-semibold">A</span><Plus size={10} /></button></div>;
 
   if (view === 'admin') {
-    if (authLoading) return <><div className="font-scaled-surface"><div className="flex min-h-screen items-center justify-center bg-[#0f8f9f] text-white/75">Loading…</div></div>{fontSizeControl}</>;
+    if (authLoading) return <><div className="font-scaled-surface"><NbgLoader message="Checking your staff access" /></div>{fontSizeControl}</>;
     if (!adminUser) return <><RouteErrorBoundary><Suspense fallback={routeLoading}><div className="font-scaled-surface"><AdminSignIn /></div></Suspense></RouteErrorBoundary>{fontSizeControl}</>;
     if (dashboardTabsForRole(normalizedRole).length === 0 || normalizedRole === 'admin' && !isAuthorizedAdmin) return <><div className="font-scaled-surface"><AdminAccessDenied email={adminUser.email} role={normalizedRole} navigate={navigate} /></div>{fontSizeControl}</>;
     return <><RouteErrorBoundary><Suspense fallback={routeLoading}><div className="font-scaled-surface"><AdminDashboard user={{ ...adminUser, role: normalizedRole }} onSignOut={async () => { await signOut(); setAdminUser(null); navigate('home'); }} /></div></Suspense></RouteErrorBoundary>{fontSizeControl}</>;
   }
 
   if (view === 'portal') {
-    if (authLoading) return <><div className="font-scaled-surface"><div className="flex min-h-screen items-center justify-center bg-[#0d4055] text-white/75">Checking your secure portal...</div></div>{fontSizeControl}</>;
+    if (authLoading) return <><div className="font-scaled-surface"><NbgLoader message="Checking your secure portal" /></div>{fontSizeControl}</>;
     if (!adminUser) return <><RouteErrorBoundary><Suspense fallback={routeLoading}><div className="font-scaled-surface"><ClientPortalSignIn /></div></Suspense></RouteErrorBoundary>{fontSizeControl}</>;
     if (['hr', 'leads', 'finance', 'project_manager', 'it', 'staff'].includes(normalizedRole)) return <><div className="font-scaled-surface"><div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-[#f4f1eb] px-6 text-center text-[#123b4b]"><p className="eyebrow text-[#087f88]">Department access</p><h1 className="font-serif text-3xl">{normalizedRole === 'staff' ? 'Dashboard assignment required.' : 'Use your assigned staff dashboard.'}</h1><p className="max-w-md text-sm text-slate-600">{normalizedRole === 'staff' ? 'An Admin/Owner needs to assign this staff account to a department dashboard.' : `This account is assigned to the ${normalizedRole.replace(/_/g, ' ')} workspace and does not have client portal access.`}</p><button type="button" onClick={() => navigate('admin')} className="btn-primary">Open staff dashboard <ArrowRight size={15} /></button></div></div>{fontSizeControl}</>;
     return <><RouteErrorBoundary><Suspense fallback={routeLoading}><div className="font-scaled-surface"><ClientPortal user={{ ...adminUser, role: normalizedRole }} onSignOut={async () => { await signOut(); setAdminUser(null); }} navigate={navigate} /></div></Suspense></RouteErrorBoundary>{fontSizeControl}</>;
@@ -307,7 +308,7 @@ function NotFoundPage({ navigate }: { navigate: (view: View) => void }) {
 }
 
 function PublicErrorState({ message, onRetry, navigate }: { message: string; onRetry: () => void; navigate: (view: View) => void }) {
-  return <div className="mt-12 border border-[#e4b8ad] bg-[#fff7f4] p-8 md:p-12"><p className="eyebrow text-[#a55445]">Something needs attention</p><h2 className="mt-4 font-serif text-4xl text-[#123b4b]">We could not load this view.</h2><p className="mt-4 max-w-xl text-sm leading-6 text-slate-600">{message}</p><div className="mt-7 flex flex-wrap gap-3"><button onClick={onRetry} className="btn-primary">Try again <ArrowRight size={16} /></button><button onClick={() => navigate('home')} className="btn-secondary">Back to home <ArrowRight size={16} /></button></div></div>;
+  return <div className="mt-12"><FeatureState kind="error" eyebrow="Public information" title="We could not load this view." description={message} actionLabel="Try again" onAction={onRetry} secondaryActionLabel="Back to home" onSecondaryAction={() => navigate('home')} /></div>;
 }
 
 function AdminAccessDenied({ email, role, navigate }: { email: string; role: string; navigate: (view: View) => void }) {
@@ -316,7 +317,7 @@ function AdminAccessDenied({ email, role, navigate }: { email: string; role: str
     : role === 'admin'
       ? 'Admin access is restricted to the authorized primary Admin account.'
       : `${email} is signed in as a client account. Use the client portal or sign in with an assigned staff account.`;
-  return <main className="flex min-h-screen items-center justify-center bg-[#f4f1eb] px-6 text-[#123b4b]"><section className="w-full max-w-lg border border-[#a9d9d8] bg-[#eefbf9] p-8 text-center md:p-12"><p className="eyebrow text-[#087f88]">Restricted workspace</p><h1 className="mt-5 font-serif text-5xl leading-none">Dashboard access<br /><em>is restricted.</em></h1><p className="mt-6 text-sm leading-6 text-slate-600">{message}</p><div className="mt-8 flex flex-col justify-center gap-3 sm:flex-row">{role === 'client' && <button onClick={() => navigate('portal')} className="btn-primary justify-center">Open client portal <ArrowRight size={16} /></button>}<button onClick={() => signOut()} className="btn-secondary justify-center">Sign out</button></div></section></main>;
+  return <main className="flex min-h-screen items-center justify-center bg-[#f4f1eb] px-5"><FeatureState kind="restricted" eyebrow="Restricted workspace" title="Dashboard access is restricted." description={message} actionLabel={role === 'client' ? 'Open client portal' : 'Sign out'} onAction={role === 'client' ? () => navigate('portal') : () => { void signOut().then(() => navigate('home')); }} secondaryActionLabel={role === 'client' ? 'Sign out' : undefined} onSecondaryAction={role === 'client' ? () => { void signOut().then(() => navigate('home')); } : undefined} /></main>;
 }
 
 function BrandMark({ inverse = false }: { inverse?: boolean }) {

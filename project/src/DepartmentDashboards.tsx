@@ -5,6 +5,7 @@ import { formatAccountingCurrency } from '@/lib/format';
 import { DEPARTMENT_ROLES, type DashboardTab, type DepartmentRole } from '@/lib/dashboard-access';
 import type { AdminUser } from '@/lib/auth';
 import type { ConstructionUpdate, Investment, Project, ProjectUnit, Sale } from '@/lib/types';
+import { FeatureState, NbgLoader } from '@/WorkspaceStates';
 
 type StaffDirectoryRow = { user_id: string; full_name: string | null; email: string; phone: string | null; role: string; created_at: string };
 type FinancePayment = { id: string; amount: number; payment_date: string; method: string; reference: string | null };
@@ -43,8 +44,8 @@ function DepartmentMetric({ label, value, detail, icon: Icon, tone = 'teal' }: {
 }
 
 function DashboardMessage({ error, loading }: { error: string; loading: boolean }) {
-  if (loading) return <p className="border border-[#dbe8e8] bg-white p-4 text-xs text-[#6f8991]">Loading live department data...</p>;
-  if (error) return <p role="alert" className="border border-[#e7c8c2] bg-[#fff7f4] p-4 text-xs text-[#8d332b]">{error}</p>;
+  if (loading) return <NbgLoader compact message="Loading live department data" />;
+  if (error) return <FeatureState kind="error" eyebrow="Department workspace" title="Department data could not be loaded." description={error} />;
   return null;
 }
 

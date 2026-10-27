@@ -14,6 +14,7 @@ import { createVerifiedPdf, downloadPdf } from '@/lib/verified-pdf';
 import { FinanceDepartmentDashboard, ITDepartmentDashboard, ProjectManagementDashboard } from '@/DepartmentDashboards';
 import HRWorkforceDashboard from '@/HRWorkforceDashboard';
 import { canAccessDashboardTab, canManageDashboardRoles, canManageFinancialRecords, canManageProjectRecords, dashboardTabsForRole, defaultDashboardTab, type DashboardTab } from '@/lib/dashboard-access';
+import { NbgLoader } from '@/WorkspaceStates';
 
 type AdminTab = DashboardTab;
 type BuyerProfileMatch = { user_id: string; full_name: string | null; phone: string | null; email: string | null };
@@ -5077,7 +5078,7 @@ export function AdminSignIn() {
 // ─── Shared UI primitives ────────────────────────────────
 
 function Spinner() {
-  return <div className="flex items-center gap-2 text-sm text-slate-400"><span className="h-4 w-4 animate-spin rounded-full border-2 border-[#20afd1] border-t-transparent" />Loading…</div>;
+  return <NbgLoader compact message="Loading workspace data" />;
 }
 
 function SectionGuide({ guide }: { guide: { purpose: string; source: string; recording: string } }) {

@@ -5,6 +5,7 @@ import { DEPARTMENT_ROLES, type DepartmentRole } from '@/lib/dashboard-access';
 import type { AdminUser } from '@/lib/auth';
 import DashboardInbox from '@/DashboardInbox';
 import { FinancialPrivacyToggle } from '@/lib/financial-privacy';
+import { FeatureState, NbgLoader } from '@/WorkspaceStates';
 
 type StaffRow = { user_id: string; full_name: string | null; email: string; phone: string | null; role: string; created_at: string };
 type WorkforceTab = 'overview' | 'directory' | 'departments' | 'access' | 'attendance' | 'leave' | 'documents' | 'performance';
@@ -304,8 +305,8 @@ function Metric({ icon: Icon, label, value, detail, tone, progress }: { icon: ty
 }
 
 function DashboardState({ loading, error, onRetry }: { loading: boolean; error: string; onRetry: () => void }) {
-  if (loading) return <div className="flex items-center gap-2 p-7 text-[10px] text-slate-500"><RefreshCw size={13} className="animate-spin" /> Loading live workforce profiles…</div>;
-  if (error) return <div role="alert" className="m-3 flex flex-wrap items-center justify-between gap-2 border border-red-200 bg-red-50 p-3 text-[10px] text-red-800"><span>{error}</span><button type="button" onClick={onRetry} className="font-semibold underline">Retry</button></div>;
+  if (loading) return <NbgLoader compact message="Loading live workforce profiles" />;
+  if (error) return <div className="m-3"><FeatureState kind="error" eyebrow="People & workforce" title="Staff profiles could not be loaded." description={error} actionLabel="Retry" onAction={onRetry} /></div>;
   return null;
 }
 
@@ -376,5 +377,5 @@ function OverviewView({ employees, departmentCounts, onNavigate, onOpenDirectory
 
 function UntrackedView({ tab }: { tab: WorkforceTab }) {
   const labels: Partial<Record<WorkforceTab, string>> = { attendance: 'Attendance', leave: 'Leave & Requests', documents: 'Employee Documents', performance: 'Performance' };
-  return <section className="flex min-h-56 flex-col items-center justify-center border border-dashed border-[#d5dfe7] bg-white p-6 text-center"><span className="grid size-10 place-items-center rounded-full bg-slate-100 text-slate-500"><FileText size={18} /></span><h2 className="mt-3 text-xs font-semibold text-[#173b59]">{labels[tab]} data is not connected</h2><p className="mt-1 max-w-md text-[9px] leading-5 text-slate-500">This platform does not currently store {labels[tab]?.toLowerCase()} records. No sample or inferred records are shown here.</p></section>;
+  return <div className="flex min-h-56 items-center justify-center"><FeatureState kind="unavailable" eyebrow="People & workforce" title={`${labels[tab]} is not connected.`} description={`This platform does not currently store ${labels[tab]?.toLowerCase()} records. No sample or inferred records are shown here.`} /></div>;
 }
