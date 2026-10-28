@@ -796,6 +796,47 @@ async function generateBrandedPdf(kind: string, title: string, recipient: string
   return { blob, documentRef, verificationCode, contentHash: await sha256Blob(blob) };
 }
 
+type PublishedPaymentReceipt = { document: { id: string; title: string; document_ref: string; verification_code: string; file_url: string; user_id: string; receipt_confirmed_at: string | null }; already_generated: boolean; message: string };
+
+async function encodeBlobBase64(blob: Blob) {
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  let binary = '';
+  for (let offset = 0; offset < bytes.length; offset += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(offset, Math.min(offset + 0x8000, bytes.length)));
+  }
+  return btoa(binary);
+}
+
+async function createAndSharePaymentReceipt(sale: Sale, payment: BuyerPaymentRecord) {
+  if (!sale.buyer_user_id) throw new Error('This sale has no linked client account. Link the buyer before sharing a receipt.');
+  const receiptDate = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+  const documentNumber = `NBG-RCP-${receiptDate}-${crypto.randomUUID().replace(/-/g, '').slice(0, 10).toUpperCase()}`;
+  const verificationCode = `NBGV-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${crypto.randomUUID().replace(/-/g, '').slice(0, 12).toUpperCase()}`;
+  const receiptData = {
+    customer_name: sale.buyer_name,
+    payment_date: payment.payment_date,
+    payment_method: payment.method,
+    transaction_reference: payment.transaction_ref,
+    payment_allocation: payment.installment_id ? 'INSTALLMENT' : 'PURCHASE_PRICE',
+    description: `Payment received for Unit ${sale.unit_number}`,
+    amount_received: Number(payment.amount),
+    currency: 'KES',
+  };
+  const details = `Verified payment receipt for Unit ${sale.unit_number}.\n\nSYSTEM SNAPSHOT\n${JSON.stringify({ payment_id: payment.id, sale_id: sale.id, document_data: receiptData })}`;
+  const generated = await generateBrandedPdf('RECEIPT', `Payment receipt · Unit ${sale.unit_number}`, sale.buyer_name, details, String(payment.amount), String(documentNumber), verificationCode);
+  const { data, error } = await supabase.functions.invoke<PublishedPaymentReceipt>('publish-payment-receipt', {
+    body: {
+      payment_id: payment.id,
+      document_number: generated.documentRef,
+      verification_code: generated.verificationCode,
+      content_hash: generated.contentHash,
+      pdf_base64: await encodeBlobBase64(generated.blob),
+    },
+  });
+  if (error || !data?.document) throw new Error(data?.message || error?.message || 'The receipt could not be shared.');
+  return data;
+}
+
 function uploadErrorMessage(error: unknown) {
   const message = error instanceof Error ? error.message : 'An unknown error occurred.';
   if (/bucket|not found/i.test(message)) return 'Private document storage is not configured. Run the client-documents bucket SQL in Supabase, then refresh this page.';
@@ -2910,6 +2951,10 @@ function InstallmentPanel({ sale, goTo, initialView = 'summary' }: { sale: Sale;
   const [realtimeNotice, setRealtimeNotice] = useState('');
   const [successNotice, setSuccessNotice] = useState('');
   const [successReference, setSuccessReference] = useState('');
+  const [receiptRetryPayment, setReceiptRetryPayment] = useState<BuyerPaymentRecord | null>(null);
+  const [receiptDocument, setReceiptDocument] = useState<PublishedPaymentReceipt['document'] | null>(null);
+  const [receiptBusy, setReceiptBusy] = useState(false);
+  const [receiptError, setReceiptError] = useState('');
   const load = useCallback(async (showLoading = true) => {
     if (showLoading) setLoading(true);
     setLoadError('');
@@ -2964,7 +3009,39 @@ function InstallmentPanel({ sale, goTo, initialView = 'summary' }: { sale: Sale;
     setPaymentTarget(target);
     setSuccessNotice('');
     setSuccessReference('');
+    setReceiptRetryPayment(null);
+    setReceiptDocument(null);
+    setReceiptError('');
     setActiveView('record');
+  };
+
+  const publishReceipt = async (payment: BuyerPaymentRecord) => {
+    setReceiptRetryPayment(payment);
+    setReceiptBusy(true);
+    setReceiptError('');
+    try {
+      const result = await createAndSharePaymentReceipt(sale, payment);
+      setReceiptDocument(result.document);
+      setReceiptRetryPayment(null);
+      setSuccessNotice(result.message || (result.already_generated ? 'This payment already has a verified receipt shared with the client.' : 'Payment recorded. The verified receipt was generated and shared with the client.'));
+    } catch (receiptFailure) {
+      setReceiptError(receiptFailure instanceof Error ? receiptFailure.message : 'Receipt generation failed. Retry it without recording the payment again.');
+      setSuccessNotice('Payment recorded. Receipt generation needs attention.');
+    } finally {
+      setReceiptBusy(false);
+    }
+  };
+
+  const handlePaymentRecorded = (payment: BuyerPaymentRecord) => {
+    setPaymentTarget(null);
+    setSuccessReference(payment.transaction_ref || '');
+    setSuccessNotice('Payment recorded. Generating the client receipt…');
+    setReceiptDocument(null);
+    setReceiptRetryPayment(payment);
+    setReceiptError('');
+    setActiveView('transactions');
+    void load(false);
+    void publishReceipt(payment);
   };
   const selectPaymentTarget = (targetId: string) => {
     if (!targetId) { setPaymentTarget(null); return; }
@@ -2993,7 +3070,8 @@ function InstallmentPanel({ sale, goTo, initialView = 'summary' }: { sale: Sale;
     </nav>
     <div className="grid gap-3">
       {realtimeNotice && <p role="status" className="border border-[#a9d9d8] bg-[#eefbf9] px-3 py-2 text-xs text-[#087f88]">{realtimeNotice}</p>}
-      {successNotice && <section key={successReference || successNotice} role="status" aria-live="polite" className="transaction-success-panel"><span className="transaction-success-icon"><CircleCheck size={22} /></span><div className="min-w-0 flex-1"><p className="text-sm font-semibold text-[#225f3b]">{successNotice}</p><p className="mt-1 text-xs text-[#52725c]">The payment has been posted to the buyer ledger.</p>{successReference && <a href={`/verify/${encodeURIComponent(successReference)}`} target="_blank" rel="noreferrer" className="mt-2 inline-block font-mono text-xs font-semibold text-[#087f88] underline">{successReference} · Verify receipt</a>}</div><span className="transaction-success-check"><Check size={15} /></span></section>}
+      {successNotice && <section key={successReference || successNotice} role="status" aria-live="polite" className="transaction-success-panel"><span className="transaction-success-icon">{receiptBusy ? <RefreshCw size={19} className="animate-spin" /> : <CircleCheck size={22} />}</span><div className="min-w-0 flex-1"><p className="text-sm font-semibold text-[#225f3b]">{successNotice}</p><p className="mt-1 text-xs text-[#52725c]">The payment is saved in the buyer ledger; receipt generation is tracked separately.</p>{successReference && <a href={`/verify/${encodeURIComponent(successReference)}`} target="_blank" rel="noreferrer" className="mt-2 inline-block font-mono text-xs font-semibold text-[#087f88] underline">{successReference} · Verify transaction</a>}{receiptDocument && <div className="mt-2 flex flex-wrap items-center gap-3"><a href={`/verify/${encodeURIComponent(receiptDocument.verification_code)}`} target="_blank" rel="noreferrer" className="font-mono text-xs font-semibold text-[#087f88] underline">{receiptDocument.document_ref} · Verify generated receipt</a><button type="button" onClick={() => goTo('documents')} className="text-xs font-semibold text-[#087f88] underline">Open documents</button></div>}</div>{!receiptBusy && <span className="transaction-success-check"><Check size={15} /></span>}</section>}
+      {receiptError && <p role="alert" className="flex flex-wrap items-center justify-between gap-3 border border-[#e4b8ad] bg-[#fff7f4] px-3 py-2 text-xs text-[#a55445]"><span>Payment is saved. Receipt was not shared: {receiptError}</span>{receiptRetryPayment && <button type="button" disabled={receiptBusy} onClick={() => void publishReceipt(receiptRetryPayment)} className="font-semibold underline disabled:opacity-50">Retry receipt generation</button>}</p>}
       {loadError && <p role="alert" className="flex flex-wrap items-center justify-between gap-3 border border-[#e4b8ad] bg-[#fff7f4] px-3 py-2 text-xs text-[#a55445]">{loadError}<button type="button" onClick={() => void load()} className="font-semibold underline">Retry</button></p>}
     </div>
 
@@ -3026,13 +3104,13 @@ function InstallmentPanel({ sale, goTo, initialView = 'summary' }: { sale: Sale;
     {activeView === 'record' && <section className="grid gap-4 border border-[#c9c5bd] bg-white p-4 sm:p-5">
       <div><p className="eyebrow text-[#087f88]">New receipt</p><h3 className="mt-2 font-serif text-2xl text-[#123b4b]">Record a transaction</h3><p className="mt-1 text-xs text-slate-500">Choose where to allocate this amount. Partial payments are supported.</p></div>
       <label className="block max-w-xl"><span className="eyebrow mb-1.5 block text-slate-500">Allocate payment to</span><select value={currentPaymentTarget?.installment?.id ?? (paymentTarget ? 'unscheduled' : '')} onChange={(event) => selectPaymentTarget(event.target.value)} className="admin-input w-full"><option value="">Choose an installment or balance</option>{installments.map((item) => { const due = Math.max(Number(item.amount) - Number(item.paid_amount), 0); return <option key={item.id} value={item.id} disabled={!due}>Installment {item.installment_number} · {fmtKes(due)} due</option>; })}<option value="unscheduled" disabled={!unscheduledBalance}>Unscheduled balance · {fmtKes(unscheduledBalance)} due</option></select></label>
-      {currentPaymentTarget && currentPaymentTarget.amountDue > 0 ? <PaymentForm key={`${currentPaymentTarget.installment?.id ?? 'unscheduled'}-${currentPaymentTarget.amountDue}`} saleId={sale.id} installment={currentPaymentTarget.installment} amountDue={currentPaymentTarget.amountDue} oneTime={sale.installment_frequency === 'ONE_TIME'} onDone={(transactionRef: string) => { setPaymentTarget(null); setSuccessReference(transactionRef); setSuccessNotice('Payment recorded successfully.'); setActiveView('transactions'); void load(false); }} /> : <div className="border border-dashed border-[#c9c5bd] bg-[#f8f7f3] p-5 text-sm text-slate-500">{paymentTarget ? 'This balance has been settled. Select another allocation to record a payment.' : 'Select an open installment or balance to begin.'}</div>}
+      {currentPaymentTarget && currentPaymentTarget.amountDue > 0 ? <PaymentForm key={`${currentPaymentTarget.installment?.id ?? 'unscheduled'}-${currentPaymentTarget.amountDue}`} sale={sale} installment={currentPaymentTarget.installment} amountDue={currentPaymentTarget.amountDue} oneTime={sale.installment_frequency === 'ONE_TIME'} onDone={handlePaymentRecorded} /> : <div className="border border-dashed border-[#c9c5bd] bg-[#f8f7f3] p-5 text-sm text-slate-500">{paymentTarget ? 'This balance has been settled. Select another allocation to record a payment.' : 'Select an open installment or balance to begin.'}</div>}
       <div className="flex flex-wrap gap-2 border-t border-[#e6e2da] pt-4"><button type="button" onClick={() => goTo('documents')} className="btn-secondary !px-3 !py-2"><FileText size={14} /> Receipt documents</button>{sale.buyer_email && <a href={`mailto:${sale.buyer_email}?subject=${encodeURIComponent(`Payment received for Unit ${sale.unit_number}`)}`} className="btn-secondary !px-3 !py-2"><Mail size={14} /> Email buyer</a>}{sale.buyer_phone && <a href={`https://wa.me/${sale.buyer_phone.replace(/\D/g, '')}?text=${whatsappMessage}`} target="_blank" rel="noreferrer" className="btn-secondary !px-3 !py-2"><MessageCircle size={14} /> WhatsApp</a>}</div>
     </section>}
   </div>;
 }
 
-function PaymentForm({ saleId, installment, amountDue, oneTime, onDone }: { saleId: string; installment: BuyerInstallment | null; amountDue: number; oneTime: boolean; onDone: (transactionRef: string) => void }) {
+function PaymentForm({ sale, installment, amountDue, oneTime, onDone }: { sale: Sale; installment: BuyerInstallment | null; amountDue: number; oneTime: boolean; onDone: (payment: BuyerPaymentRecord) => void }) {
   const [amount, setAmount] = useState(String(amountDue));
   const [method, setMethod] = useState('BANK_TRANSFER');
   const [reference, setReference] = useState('');
@@ -3049,18 +3127,24 @@ function PaymentForm({ saleId, installment, amountDue, oneTime, onDone }: { sale
     if (!paymentDate) { setError('Select the date the payment was received.'); return; }
     setSaving(true);
     setError('');
-    const { data, error: paymentError } = await supabase.from('buyer_payments').insert({
-      sale_id: saleId,
-      installment_id: installment?.id ?? null,
-      amount: parsedAmount,
-      payment_date: paymentDate,
-      method,
-      reference: reference.trim() || null,
-      notes: notes.trim() || null,
-    }).select('transaction_ref').single();
-    setSaving(false);
-    if (paymentError || !data?.transaction_ref) { setError(paymentError?.message || 'Payment was recorded, but its transaction reference could not be loaded. Refresh the ledger before recording another payment.'); return; }
-    onDone(data.transaction_ref);
+    try {
+      const { data, error: paymentError } = await supabase.from('buyer_payments').insert({
+        sale_id: sale.id,
+        installment_id: installment?.id ?? null,
+        amount: parsedAmount,
+        payment_date: paymentDate,
+        method,
+        reference: reference.trim() || null,
+        notes: notes.trim() || null,
+      }).select('id,sale_id,installment_id,amount,payment_date,method,reference,transaction_ref,created_at,notes').single();
+      if (paymentError || !data?.transaction_ref) { setError(paymentError?.message || 'The payment may be saved, but its transaction reference could not be loaded. Refresh the ledger before retrying.'); return; }
+      setSaving(false);
+      onDone(data as BuyerPaymentRecord);
+    } catch (paymentFailure) {
+      setError(paymentFailure instanceof Error ? paymentFailure.message : 'Payment recording failed. Refresh the ledger before retrying.');
+    } finally {
+      setSaving(false);
+    }
   };
   return <form onSubmit={submit} className="grid gap-4 border border-[#a9d9d8] bg-[#f8fdfc] p-4">
     <div><p className="eyebrow text-[#087f88]">Record payment</p><p className="mt-1 text-xs text-slate-500">{oneTime ? 'Full balance · one-time payment' : installment ? `Installment ${installment.installment_number}` : 'Unscheduled sale balance'} · {fmtKes(amountDue)} remaining</p></div>
@@ -3901,7 +3985,7 @@ function CommissionForm({ realtors, sales, onDone }: { realtors: Realtor[]; sale
   );
 }
 
-type AdminDocument = { id: string; user_id: string | null; title: string; category: string; file_url: string; created_at: string; is_global?: boolean; recipient_name?: string | null; recipient_email?: string | null; source_record_id?: string | null; document_ref?: string | null; verification_code?: string | null; content_hash?: string | null; content_summary?: string | null; source_type?: string; vendor_name?: string | null; purchase_order_number?: string | null; tax_invoice_number?: string | null; payment_terms?: string | null; bank_name?: string | null; bank_account_reference?: string | null; amount?: number | null; currency?: string | null; due_date?: string | null };
+type AdminDocument = { id: string; user_id: string | null; title: string; category: string; file_url: string; created_at: string; is_global?: boolean; recipient_name?: string | null; recipient_email?: string | null; source_record_id?: string | null; source_payment_id?: string | null; document_ref?: string | null; verification_code?: string | null; content_hash?: string | null; content_summary?: string | null; source_type?: string; approval_status?: string | null; receipt_confirmed_at?: string | null; vendor_name?: string | null; purchase_order_number?: string | null; tax_invoice_number?: string | null; payment_terms?: string | null; bank_name?: string | null; bank_account_reference?: string | null; amount?: number | null; currency?: string | null; due_date?: string | null };
 type DocumentClient = { id: string; full_name: string | null; phone: string | null; email: string | null; identity_document_type: string | null; identity_document_number: string | null; residential_address: string | null; preferred_location: string | null };
 type ClientKycRequest = { id: string; user_id: string; status: 'PENDING' | 'COMPLETED'; requested_fields: string[]; requested_at: string; completed_at: string | null };
 
@@ -4054,6 +4138,7 @@ function DocumentsTab() {
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [previewDocument, setPreviewDocument] = useState<AdminDocument | null>(null);
+  const [confirmingReceiptId, setConfirmingReceiptId] = useState('');
   const load = useCallback(async () => {
     const [{ data: documentRows, error: documentError }, { data: clientRows, error: clientError }] = await Promise.all([
       supabase.from('client_documents').select('*').order('created_at', { ascending: false }),
@@ -4078,8 +4163,38 @@ function DocumentsTab() {
     setDocuments((items) => items.filter((item) => item.id !== document.id));
     notifyAdmin('Document removed.');
   };
+  const confirmReceipt = async (document: AdminDocument) => {
+    if (!document.source_payment_id || document.receipt_confirmed_at) return;
+    setConfirmingReceiptId(document.id);
+    const { data, error } = await supabase.rpc('confirm_payment_receipt', { p_document_id: document.id });
+    setConfirmingReceiptId('');
+    if (error || !data) {
+      notifyAdmin(`Receipt confirmation failed: ${error?.message || 'No confirmation timestamp was returned.'}`, 'error');
+      return;
+    }
+    const confirmedAt = String(data);
+    setDocuments((current) => current.map((item) => item.id === document.id ? { ...item, receipt_confirmed_at: confirmedAt, approval_status: 'APPROVED' } : item));
+    setPreviewDocument((current) => current?.id === document.id ? { ...current, receipt_confirmed_at: confirmedAt, approval_status: 'APPROVED' } : current);
+    notifyAdmin(`Receipt ${document.document_ref || ''} confirmed. It is already available in the linked client’s Documents.`);
+  };
   if (loading) return <Spinner />;
-  return <div><div className="mb-6 flex items-end justify-between gap-4"><div><p className="eyebrow text-[#20afd1]">Verified document studio</p><h2 className="mt-2 font-serif text-4xl">Generate and share</h2><p className="mt-3 max-w-xl text-sm leading-6 text-slate-500">Create NBG-branded agreements, receipts, brochures, and floor plans with an identity reference and SHA-256 content hash.</p></div><button onClick={() => setShowForm(true)} className="admin-add-btn flex items-center gap-2"><FileText size={15} /> Generate document</button></div><div className="overflow-x-auto rounded-lg border border-[#c9c5bd] bg-white shadow-sm"><table className="w-full text-left text-sm"><thead className="border-b border-[#c9c5bd] bg-[#f0ede6] text-[10px] uppercase tracking-[.12em] text-slate-400"><tr>{['Document', 'Recipient', 'Source', 'Category', 'Authenticity', 'Added', ''].map((heading) => <th key={heading} className="px-4 py-3">{heading}</th>)}</tr></thead><tbody>{documents.map((document) => <tr key={document.id} className="border-b border-[#e6e2da]"><td className="px-4 py-3 font-medium"><p>{document.title}</p><p className="mt-1 text-[10px] text-slate-400">{document.document_ref || 'Uploaded file'}</p></td><td className="px-4 py-3 text-xs text-slate-500">{document.is_global ? <span className="font-semibold text-[#087f88]">All clients</span> : <>{document.recipient_name || clients.find((client) => client.id === document.user_id)?.full_name || document.user_id?.slice(0, 8) || '—'}{document.recipient_email && <span className="mt-1 block text-[10px] text-slate-400">{document.recipient_email}</span>}</>}</td><td className="px-4 py-3 text-xs text-slate-500">{document.source_type === 'GENERATED' ? 'Generated record' : 'Uploaded file'}</td><td className="px-4 py-3 text-xs text-slate-500">{document.category}</td><td className="px-4 py-3 text-xs text-[#087f88]">{document.verification_code ? `Verified · ${document.verification_code}` : 'Legacy upload'}</td><td className="px-4 py-3 text-xs text-slate-400">{fmt(document.created_at)}</td><td className="px-4 py-3 text-right"><div className="flex justify-end gap-3"><button onClick={() => setPreviewDocument(document)} className="text-xs text-[#087f88] hover:underline">View</button><button onClick={() => void remove(document)} className="text-xs text-[#a55445] hover:underline">Remove</button></div></td></tr>)}{documents.length === 0 && <EmptyRow cols={7} text="No generated documents have been shared yet." />}</tbody></table></div>{showForm && <Modal title="Generate NBG document" onClose={() => setShowForm(false)}><DocumentForm clients={clients} onDone={(document) => { setDocuments((items) => [document, ...items]); setShowForm(false); notifyAdmin('Verified document generated and shared.'); }} /></Modal>}{previewDocument && <DocumentPreview document={previewDocument} onClose={() => setPreviewDocument(null)} />}</div>;
+  return <div>
+    <div className="mb-6 flex items-end justify-between gap-4"><div><p className="eyebrow text-[#20afd1]">Verified document studio</p><h2 className="mt-2 font-serif text-4xl">Generate and share</h2><p className="mt-3 max-w-xl text-sm leading-6 text-slate-500">Create NBG-branded agreements, receipts, brochures, and floor plans with an identity reference and SHA-256 content hash.</p></div><button onClick={() => setShowForm(true)} className="admin-add-btn flex items-center gap-2"><FileText size={15} /> Generate document</button></div>
+    <div className="overflow-x-auto rounded-lg border border-[#c9c5bd] bg-white shadow-sm"><table className="w-full text-left text-sm"><thead className="border-b border-[#c9c5bd] bg-[#f0ede6] text-[10px] uppercase tracking-[.12em] text-slate-400"><tr>{['Document', 'Recipient', 'Source', 'Category', 'Authenticity', 'Added', ''].map((heading) => <th key={heading} className="px-4 py-3">{heading}</th>)}</tr></thead><tbody>
+      {documents.map((document) => <tr key={document.id} className="border-b border-[#e6e2da]">
+        <td className="px-4 py-3 font-medium"><p>{document.title}</p><p className="mt-1 text-[10px] text-slate-400">{document.document_ref || 'Uploaded file'}</p></td>
+        <td className="px-4 py-3 text-xs text-slate-500">{document.is_global ? <span className="font-semibold text-[#087f88]">All clients</span> : <>{document.recipient_name || clients.find((client) => client.id === document.user_id)?.full_name || document.user_id?.slice(0, 8) || '—'}{document.recipient_email && <span className="mt-1 block text-[10px] text-slate-400">{document.recipient_email}</span>}</>}</td>
+        <td className="px-4 py-3 text-xs text-slate-500">{document.source_type === 'GENERATED' ? 'Generated record' : 'Uploaded file'}</td>
+        <td className="px-4 py-3 text-xs text-slate-500">{document.category}{document.source_payment_id && <p className="mt-1 font-semibold text-[#087f88]">{document.receipt_confirmed_at ? 'Admin confirmed' : 'Issued · shared with client'}</p>}</td>
+        <td className="px-4 py-3 text-xs text-[#087f88]">{document.verification_code ? `Verified · ${document.verification_code}` : 'Legacy upload'}</td>
+        <td className="px-4 py-3 text-xs text-slate-400">{fmt(document.created_at)}</td>
+        <td className="px-4 py-3 text-right"><div className="flex flex-wrap justify-end gap-3"><button type="button" onClick={() => setPreviewDocument(document)} className="text-xs text-[#087f88] hover:underline">View</button>{document.source_payment_id && !document.receipt_confirmed_at && <button type="button" disabled={confirmingReceiptId === document.id} onClick={() => void confirmReceipt(document)} className="text-xs font-semibold text-[#2e6b3e] underline disabled:opacity-50">{confirmingReceiptId === document.id ? 'Confirming…' : 'Confirm receipt'}</button>}<button type="button" onClick={() => void remove(document)} className="text-xs text-[#a55445] hover:underline">Remove</button></div></td>
+      </tr>)}
+      {documents.length === 0 && <EmptyRow cols={7} text="No generated documents have been shared yet." />}
+    </tbody></table></div>
+    {showForm && <Modal title="Generate NBG document" onClose={() => setShowForm(false)}><DocumentForm clients={clients} onDone={(document) => { setDocuments((items) => [document, ...items]); setShowForm(false); notifyAdmin('Verified document generated and shared.'); }} /></Modal>}
+    {previewDocument && <DocumentPreview document={previewDocument} onClose={() => setPreviewDocument(null)} />}
+  </div>;
 }
 
 function DocumentPreview({ document, onClose }: { document: AdminDocument; onClose: () => void }) {
@@ -4537,7 +4652,7 @@ function DocumentForm({ clients, onDone }: { clients: DocumentClient[]; onDone: 
       {step === 'source' && <div className="grid gap-4 lg:grid-cols-2">
         <section className="grid content-start gap-4 border border-[#d9d5cc] bg-white p-4 sm:p-5">
           <DocumentSelect label="Document type" value={category} onChange={(value) => { setCategory(value as DocumentType); setStep('source'); setProjectId(''); setClientId(''); setClientSearch(''); setUnitId(''); setSaleId(''); setPaymentId(''); setShareWithAllClients(false); setManualData({}); setInvoiceItems([{ description: '', quantity: 1, unit_price: 0 }]); setError(''); setInviteNotice(''); }} required>
-            {DOCUMENT_TYPE_OPTIONS.map((option) => <option key={option.type} value={option.type}>{option.label}</option>)}
+            {DOCUMENT_TYPE_OPTIONS.filter((option) => option.type !== 'RECEIPT').map((option) => <option key={option.type} value={option.type}>{option.label}</option>)}
           </DocumentSelect>
           {requiresClient && <section className="grid gap-3 border border-[#d9d5cc] bg-white p-3">
             <label className="block"><span className="eyebrow mb-1.5 block text-slate-400">Search all registered clients</span><input type="search" value={clientSearch} onChange={(event) => setClientSearch(event.target.value)} className="admin-input w-full" placeholder="Name, email, or phone" autoComplete="off" /></label>
@@ -4623,7 +4738,7 @@ function LegacySmartDocumentForm({ clients, onDone }: { clients: { id: string; f
     finally { setSaving(false); }
   };
 
-  return <form onSubmit={submit} className="grid gap-4"><DocumentSelect label="Document type" value={category} onChange={(value) => { setCategory(value as DocumentType); setData({}); setError(''); }}>{DOCUMENT_TYPE_OPTIONS.map((option) => <option key={option.type} value={option.type}>{option.label}</option>)}</DocumentSelect><DocumentSelect label="Project / development" value={String(data.project_id || '')} onChange={(value) => setData({ ...data, project_id: value })} required={template.fields.some((field) => field.key === 'project_id')}><option value="">Select project...</option>{projects.map((project) => <option key={project.id} value={project.id}>{project.name} · {project.location || 'Location pending'}</option>)}</DocumentSelect>{category === 'RECEIPT' && <DocumentSelect label="Verified recorded payment" value={String(data.payment_id || '')} onChange={(value) => setData({ ...data, payment_id: value })} required><option value="">Select recorded payment...</option>{payments.map((payment) => <option key={payment.id} value={payment.id}>{payment.method} · {payment.reference || 'No reference'} · {fmtKes(Number(payment.amount))} · {new Date(payment.payment_date).toLocaleDateString()}</option>)}</DocumentSelect>}{!['BROCHURE', 'FLOOR_PLAN'].includes(category) && <DocumentSelect label="Client / customer" value={clientId} onChange={setClientId} required><option value="">Select client...</option>{clients.map((client) => <option key={client.id} value={client.id}>{client.full_name || client.id}</option>)}</DocumentSelect>}<DocumentEngineFields template={template} value={data} onChange={setData} />{error && <p className="text-sm text-[#a55445]">{error}</p>}<button disabled={saving} className="btn-primary disabled:opacity-60">{saving ? 'Generating and recording...' : `Generate ${template.label}`} <FileDown size={15} /></button></form>;
+  return <form onSubmit={submit} className="grid gap-4"><DocumentSelect label="Document type" value={category} onChange={(value) => { setCategory(value as DocumentType); setData({}); setError(''); }}>{DOCUMENT_TYPE_OPTIONS.filter((option) => option.type !== 'RECEIPT').map((option) => <option key={option.type} value={option.type}>{option.label}</option>)}</DocumentSelect>{DOCUMENT_TYPE_OPTIONS.some((option) => option.type === category && option.type === 'RECEIPT') && <p className="border border-[#a9d9a8] bg-[#eefbf9] p-3 text-xs leading-5 text-[#315a62]">Payment receipts are generated automatically when a transaction is recorded. Open the payment ledger to retry or confirm receipt generation.</p>}<DocumentSelect label="Project / development" value={String(data.project_id || '')} onChange={(value) => setData({ ...data, project_id: value })} required={template.fields.some((field) => field.key === 'project_id')}><option value="">Select project...</option>{projects.map((project) => <option key={project.id} value={project.id}>{project.name} · {project.location || 'Location pending'}</option>)}</DocumentSelect>{category === 'RECEIPT' && <DocumentSelect label="Verified recorded payment" value={String(data.payment_id || '')} onChange={(value) => setData({ ...data, payment_id: value })} required><option value="">Select recorded payment...</option>{payments.map((payment) => <option key={payment.id} value={payment.id}>{payment.method} · {payment.reference || 'No reference'} · {fmtKes(Number(payment.amount))} · {new Date(payment.payment_date).toLocaleDateString()}</option>)}</DocumentSelect>}{!['BROCHURE', 'FLOOR_PLAN'].includes(category) && <DocumentSelect label="Client / customer" value={clientId} onChange={setClientId} required><option value="">Select client...</option>{clients.map((client) => <option key={client.id} value={client.id}>{client.full_name || client.id}</option>)}</DocumentSelect>}<DocumentEngineFields template={template} value={data} onChange={setData} />{error && <p className="text-sm text-[#a55445]">{error}</p>}<button disabled={saving} className="btn-primary disabled:opacity-60">{saving ? 'Generating and recording...' : `Generate ${template.label}`} <FileDown size={15} /></button></form>;
 }
 
 // Retained temporarily for backward compatibility with existing saved dashboard state.

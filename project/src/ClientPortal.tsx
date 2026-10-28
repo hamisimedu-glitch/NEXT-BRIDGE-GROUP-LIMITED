@@ -53,6 +53,7 @@ function kenyaGreeting() {
 
 function notificationPortalSection(kind: string): PortalSection | null {
   const normalized = kind.toUpperCase();
+  if (normalized === 'PAYMENT_RECEIPT') return 'resources';
   if (normalized.includes('KYC')) return 'profile';
   if (normalized.includes('PAYMENT')) return 'payments';
   if (normalized.includes('INVESTMENT') || normalized.includes('APPLICATION')) return 'investments';
