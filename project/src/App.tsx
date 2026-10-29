@@ -1,4 +1,4 @@
-import { Component, FormEvent, forwardRef, lazy, startTransition, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { Component, FormEvent, forwardRef, lazy, startTransition, Suspense, useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import {
   ArrowDown,
   ArrowRight,
@@ -15,6 +15,7 @@ import {
   Instagram,
   Layers3,
   MapPin,
+  Move,
   Minus,
   Menu,
   MessageCircle,
@@ -132,6 +133,8 @@ const moreLinks: NavigationLink[] = [
 const FONT_SIZE_STEPS = [100, 110, 120, 130, 140, 150, 175, 200] as const;
 type FontSizeScale = typeof FONT_SIZE_STEPS[number];
 const FONT_SIZE_STORAGE_KEY = 'nbg-font-size-scale';
+const FONT_SIZE_POSITION_KEY = 'nbg-font-size-position';
+type FontSizePosition = { left: number; top: number };
 
 function readFontSizeScale(): FontSizeScale {
   try {
@@ -140,6 +143,79 @@ function readFontSizeScale(): FontSizeScale {
   } catch {
     return 100;
   }
+}
+
+function readFontSizePosition(): FontSizePosition | null {
+  try {
+    const saved = JSON.parse(window.localStorage.getItem(FONT_SIZE_POSITION_KEY) || 'null') as FontSizePosition | null;
+    return saved && Number.isFinite(saved.left) && Number.isFinite(saved.top) ? saved : null;
+  } catch {
+    return null;
+  }
+}
+
+function FontSizeControl({ fontSizeScale, onScaleChange }: { fontSizeScale: FontSizeScale; onScaleChange: (scale: FontSizeScale) => void }) {
+  const [expanded, setExpanded] = useState(false);
+  const [position, setPosition] = useState<FontSizePosition | null>(readFontSizePosition);
+  const controlRef = useRef<HTMLDivElement>(null);
+  const dragOffset = useRef({ left: 0, top: 0 });
+  const isDragging = useRef(false);
+
+  useEffect(() => {
+    const keepInViewport = () => {
+      const bounds = controlRef.current?.getBoundingClientRect();
+      if (!bounds) return;
+      setPosition((current) => {
+        if (!current) return current;
+        const left = Math.max(8, Math.min(current.left, window.innerWidth - bounds.width - 8));
+        const top = Math.max(8, Math.min(current.top, window.innerHeight - bounds.height - 8));
+        return left === current.left && top === current.top ? current : { left, top };
+      });
+    };
+    keepInViewport();
+    window.addEventListener('resize', keepInViewport);
+    return () => window.removeEventListener('resize', keepInViewport);
+  }, [expanded]);
+
+  const startDrag = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    const bounds = controlRef.current?.getBoundingClientRect();
+    if (!bounds) return;
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    dragOffset.current = { left: event.clientX - bounds.left, top: event.clientY - bounds.top };
+    isDragging.current = true;
+    setPosition({ left: bounds.left, top: bounds.top });
+  };
+
+  const moveControl = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    if (!isDragging.current) return;
+    const bounds = controlRef.current?.getBoundingClientRect();
+    if (!bounds) return;
+    const left = Math.max(8, Math.min(event.clientX - dragOffset.current.left, window.innerWidth - bounds.width - 8));
+    const top = Math.max(8, Math.min(event.clientY - dragOffset.current.top, window.innerHeight - bounds.height - 8));
+    setPosition({ left, top });
+  };
+
+  const finishDrag = () => {
+    if (!isDragging.current) return;
+    isDragging.current = false;
+    const bounds = controlRef.current?.getBoundingClientRect();
+    if (!bounds) return;
+    const nextPosition = { left: bounds.left, top: bounds.top };
+    setPosition(nextPosition);
+    try { window.localStorage.setItem(FONT_SIZE_POSITION_KEY, JSON.stringify(nextPosition)); } catch { return; }
+  };
+
+  const positionStyle = position ? { left: position.left, top: position.top, right: 'auto', bottom: 'auto' } : undefined;
+  return <div ref={controlRef} role="group" aria-label="Text size controls" aria-expanded={expanded} className={`font-size-control fixed bottom-3 right-3 z-[80] flex items-center gap-1 border border-[#c9d8d8] bg-white/95 p-1.5 text-[#31546b] shadow-md backdrop-blur ${expanded ? 'font-size-control-expanded' : ''}`} style={positionStyle}>
+    <button type="button" className="font-size-control-grip touch-none" aria-label="Move text size control" title="Drag to move" onPointerDown={startDrag} onPointerMove={moveControl} onPointerUp={finishDrag} onPointerCancel={finishDrag}><Move size={13} /></button>
+    {expanded ? <>
+      <button type="button" onClick={() => onScaleChange(FONT_SIZE_STEPS[Math.max(0, FONT_SIZE_STEPS.indexOf(fontSizeScale) - 1)])} disabled={fontSizeScale === FONT_SIZE_STEPS[0]} aria-label="Decrease text size" title="Decrease text size" className="grid size-8 place-items-center border border-[#e1e9e9] disabled:opacity-40"><span className="font-serif text-sm font-semibold">A</span><Minus size={10} /></button>
+      <output aria-live="polite" aria-label={`Text size ${fontSizeScale}%`} className="min-w-9 text-center text-[9px] font-semibold">{fontSizeScale}%</output>
+      <button type="button" onClick={() => onScaleChange(FONT_SIZE_STEPS[Math.min(FONT_SIZE_STEPS.length - 1, FONT_SIZE_STEPS.indexOf(fontSizeScale) + 1)])} disabled={fontSizeScale === FONT_SIZE_STEPS[FONT_SIZE_STEPS.length - 1]} aria-label="Increase text size" title="Increase text size" className="grid size-8 place-items-center border border-[#e1e9e9] disabled:opacity-40"><span className="font-serif text-base font-semibold">A</span><Plus size={10} /></button>
+      <button type="button" onClick={() => setExpanded(false)} aria-label="Close text size controls" className="grid size-7 place-items-center text-[#587783]"><X size={14} /></button>
+    </> : <button type="button" onClick={() => setExpanded(true)} aria-label={`Text size ${fontSizeScale} percent. Open controls`} className="flex h-8 items-center gap-1 px-2 text-xs font-semibold"><span className="font-serif text-base">A</span><Plus size={10} /></button>}
+  </div>;
 }
 
 function trackContactEvent(channel: 'whatsapp' | 'phone', context: string) {
@@ -255,7 +331,7 @@ function App() {
   const normalizedRole = String(adminUser?.role ?? '').trim().toLowerCase();
   const isAuthorizedAdmin = adminUser?.email.trim().toLowerCase() === 'hamisimedu@gmail.com';
   const routeLoading = <NbgLoader message="Opening your secure workspace" />;
-  const fontSizeControl = <div role="group" aria-label="Text size controls" className="fixed bottom-3 right-3 z-[80] flex items-center gap-1 border border-[#c9d8d8] bg-white/95 p-1.5 text-[#31546b] shadow-md backdrop-blur"><button type="button" onClick={() => setFontSizeScale((current) => FONT_SIZE_STEPS[Math.max(0, FONT_SIZE_STEPS.indexOf(current) - 1)])} disabled={fontSizeScale === FONT_SIZE_STEPS[0]} aria-label="Decrease text size" title="Decrease text size" className="grid size-8 place-items-center border border-[#e1e9e9] disabled:opacity-40"><span className="font-serif text-sm font-semibold">A</span><Minus size={10} /></button><output aria-live="polite" aria-label={`Text size ${fontSizeScale}%`} className="min-w-9 text-center text-[9px] font-semibold">{fontSizeScale}%</output><button type="button" onClick={() => setFontSizeScale((current) => FONT_SIZE_STEPS[Math.min(FONT_SIZE_STEPS.length - 1, FONT_SIZE_STEPS.indexOf(current) + 1)])} disabled={fontSizeScale === FONT_SIZE_STEPS[FONT_SIZE_STEPS.length - 1]} aria-label="Increase text size" title="Increase text size" className="grid size-8 place-items-center border border-[#e1e9e9] disabled:opacity-40"><span className="font-serif text-base font-semibold">A</span><Plus size={10} /></button></div>;
+  const fontSizeControl = <FontSizeControl fontSizeScale={fontSizeScale} onScaleChange={setFontSizeScale} />;
 
   if (view === 'admin') {
     if (authLoading) return <><div className="font-scaled-surface"><NbgLoader message="Checking your staff access" /></div>{fontSizeControl}</>;

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
-import { ArrowLeft, ArrowRight, BadgeCheck, Building2, CalendarDays, Check, Circle, CircleCheck, Download, FileText, Image as ImageIcon, MapPin, MessageSquareText, Ruler, Search, Send, ShieldCheck, Star, X } from 'lucide-react';
+import { ArrowLeft, ArrowRight, BadgeCheck, Bike, Building2, CalendarDays, Car, Check, ChevronLeft, ChevronRight, Circle, CircleCheck, Coffee, Download, Dumbbell, FileText, Flower2, Image as ImageIcon, MapPin, MessageSquareText, RefreshCw, Ruler, Search, Send, ShieldCheck, Sofa, Sparkles, Star, Sun, Trees, Waves, Wifi, X } from 'lucide-react';
 import type { ConstructionUpdate, Project, ProjectUnit } from '@/lib/types';
 import type { PublishedConstructionProgress } from '@/lib/construction';
 import { calculateConstructionProgress } from '@/lib/construction';
@@ -46,11 +46,12 @@ type ProjectProgressExperienceProps = {
   onSelectUnit: (unit: ProjectUnit) => void;
   onBack?: () => void;
   onContact?: () => void;
+  onRefresh?: () => void;
   onSignIn?: () => void;
   clientMode?: boolean;
 };
 
-export default function ProjectProgressExperience({ project, units, updates, construction, onSelectUnit, onBack, onContact, onSignIn, clientMode = false }: ProjectProgressExperienceProps) {
+export default function ProjectProgressExperience({ project, units, updates, construction, onSelectUnit, onBack, onContact, onRefresh, onSignIn, clientMode = false }: ProjectProgressExperienceProps) {
   const [activeTab, setActiveTab] = useState<ProjectTab>('Construction Progress');
   const plan = construction?.data;
   const progress = plan ? calculateConstructionProgress(plan) : null;
@@ -94,12 +95,12 @@ export default function ProjectProgressExperience({ project, units, updates, con
         {projectTabs.map((tab) => { const Icon = projectTabIcons[tab]; return <button key={tab} type="button" aria-current={activeTab === tab ? 'page' : undefined} onClick={() => setActiveTab(tab)} className={activeTab === tab ? 'is-active' : ''}><Icon size={13} />{tab}</button>; })}
       </nav>
 
-      {activeTab === 'Construction Progress' && <ConstructionProgressView project={project} plan={plan} progress={progress} latestUpdate={latestUpdate} latestMedia={latestMedia} galleryItems={galleryItems} onContact={onContact} />}
+      {activeTab === 'Construction Progress' && <ConstructionProgressView project={project} plan={plan} progress={progress} latestUpdate={latestUpdate} latestMedia={latestMedia} galleryItems={galleryItems} onContact={onContact} onRefresh={onRefresh} onViewGallery={() => setActiveTab('Gallery')} />}
       {activeTab === 'Overview' && <section className="project-tab-layout"><div className="project-information-panel"><p className="eyebrow text-[#087f88]">About this project</p><h2>{project.name}</h2><p>{project.description || 'Project information will be published here as it is verified by the NBG team.'}</p><div className="project-information-stats"><span><strong>{availableUnits.length}</strong>Available homes</span><span><strong>{floorCount || '—'}</strong>Floors</span><span><strong>{project.status}</strong>Project status</span></div>{onContact && <button type="button" onClick={onContact} className="project-contact-button">Contact the team <ArrowRight size={15} /></button>}</div><LatestUpdateCard update={latestUpdate} media={latestMedia} projectName={project.name} /></section>}
       {activeTab === 'Units' && <section className="project-tab-section"><div className="project-tab-heading"><div><p className="eyebrow text-[#087f88]">Published inventory</p><h2>Homes in this project</h2></div><span>{availableUnits.length} available</span></div><AvailableHomesCatalog units={publishedUnits} projects={[project]} onSelectUnit={onSelectUnit} /></section>}
       {activeTab === 'Gallery' && <ProjectGallery items={galleryItems} />}
       {activeTab === 'Location' && <LocationMap title={`${project.name}, on the map`} projects={[{ ...project, availableUnits: availableUnits.length }]} />}
-      {activeTab === 'Amenities' && <section className="project-tab-section"><p className="eyebrow text-[#087f88]">Considered for daily life</p><h2 className="project-tab-title">Amenities</h2>{project.amenities?.length ? <div className="project-amenities-grid">{project.amenities.map((amenity) => <article key={amenity}><ShieldCheck size={17} /><span>{amenity}</span></article>)}</div> : <p className="project-empty-note">Amenities will be listed when project details are confirmed.</p>}</section>}
+      {activeTab === 'Amenities' && <section className="project-amenities-view"><div className="project-amenities-heading"><div><p className="eyebrow text-[#087f88]">Considered for daily life</p><h2>Spaces for the way you live.</h2><p>Explore the amenities published for {project.name}.</p></div><span className="project-amenities-count"><strong>{project.amenities?.length ?? 0}</strong><small>Published amenities</small></span></div>{project.amenities?.length ? <div className="project-amenities-grid">{project.amenities.map((amenity, index) => { const { Icon, category } = amenityPresentation(amenity); return <article key={`${amenity}-${index}`}><span className="project-amenity-icon"><Icon size={20} strokeWidth={1.7} /></span><span className="project-amenity-category">{category}</span><strong>{amenity}</strong><span className="project-amenity-number">{String(index + 1).padStart(2, '0')}</span></article>; })}</div> : <p className="project-empty-note">Amenities will be listed when project details are confirmed.</p>}</section>}
       {activeTab === 'Documents' && <section className="project-tab-section"><p className="eyebrow text-[#087f88]">Project documents</p><h2 className="project-tab-title">Plans and information</h2><div className="project-document-list">{project.brochure_url && <a href={project.brochure_url} target="_blank" rel="noreferrer"><FileText size={17} /><span><strong>Project brochure</strong><small>Published project information</small></span><Download size={15} /></a>}{project.floor_plan_url && <a href={project.floor_plan_url} target="_blank" rel="noreferrer"><FileText size={17} /><span><strong>Floor plans</strong><small>Project layouts</small></span><Download size={15} /></a>}{!project.brochure_url && !project.floor_plan_url && <p className="project-empty-note">Project documents will appear here when published.</p>}</div></section>}
       {activeTab === 'Reviews' && <ProjectReviewsView projectId={project.id} onSignIn={onSignIn} />}
     </div>
@@ -197,7 +198,7 @@ export function ProjectReviewsView({ projectId, onSignIn }: { projectId: string;
   </section>;
 }
 
-function ConstructionProgressView({ project, plan, progress, latestUpdate, latestMedia, galleryItems, onContact }: {
+function ConstructionProgressView({ project, plan, progress, latestUpdate, latestMedia, galleryItems, onContact, onRefresh, onViewGallery }: {
   project: Project;
   plan: PublishedConstructionProgress['data'] | undefined;
   progress: number | null;
@@ -205,29 +206,40 @@ function ConstructionProgressView({ project, plan, progress, latestUpdate, lates
   latestMedia: PublishedConstructionProgress['data']['media'][number] | undefined;
   galleryItems: { url: string; caption: string; type: 'image' | 'video' }[];
   onContact?: () => void;
+  onRefresh?: () => void;
+  onViewGallery: () => void;
 }) {
   const activeMilestone = plan?.milestones.find((milestone) => milestone.status === 'IN_PROGRESS') || plan?.milestones.find((milestone) => milestone.status === 'PENDING');
   const currentFloor = plan?.floors.find((floor) => floor.status === 'IN_PROGRESS');
   const currentPhase = plan?.currentPhase || activeMilestone?.title || 'Progress update';
+  const [showAllMilestones, setShowAllMilestones] = useState(false);
+  const [galleryStart, setGalleryStart] = useState(0);
+  const milestones = plan?.milestones ?? [];
+  const visibleMilestones = showAllMilestones ? milestones : milestones.slice(0, 5);
+  const visibleGalleryItems = galleryItems.length > 5
+    ? Array.from({ length: 5 }, (_, index) => galleryItems[(galleryStart + index) % galleryItems.length])
+    : galleryItems;
+  const overviewImage = project.image_url || latestMedia?.url || latestUpdate?.image_url;
   return <>
     <section className="project-progress-grid">
-      <article className="project-progress-panel project-completion-panel"><div><p className="eyebrow text-[#087f88]">Construction progress</p><h2>Building your future,<br />step by step.</h2><p className="project-panel-copy">{plan?.progressNote || 'Verified construction updates will appear here as the project team publishes them.'}</p></div><div className="project-completion-summary"><span className="project-progress-ring project-progress-ring-large" style={{ background: `conic-gradient(#16aeb4 ${progress ?? 0}%, #d9f6f3 0)` }}><span>{progress === null ? '—' : `${progress}%`}</span></span><div><p className="project-completion-label">Overall completion</p><div className="project-progress-track"><span style={{ width: `${progress ?? 0}%` }} /></div><p className="project-phase-line"><Building2 size={14} />Current phase <strong>{currentPhase}</strong></p><p className="project-phase-line"><CalendarDays size={14} />Expected completion <strong>{plan?.timeline || project.expected_completion || 'To be confirmed'}</strong></p></div></div></article>
+      <article className="project-progress-panel project-progress-intro"><div><p className="eyebrow text-[#087f88]">Construction progress</p><h2>Building your future,<br />step by step.</h2><p className="project-panel-copy">{plan?.progressNote || 'Verified construction updates will appear here as the project team publishes them.'}</p></div><div className="project-progress-intro-image" aria-hidden="true">{overviewImage ? <img src={overviewImage} alt="" /> : <span><Building2 size={26} />Site photography pending</span>}</div></article>
 
-      <article className="project-progress-panel project-timeline-panel"><div className="project-panel-heading"><div><p className="eyebrow text-[#087f88]">Project timeline</p><h2>Key milestones</h2></div><span>{plan?.milestones.filter((milestone) => milestone.status === 'COMPLETED').length ?? 0}/{plan?.milestones.length ?? 0}</span></div>{plan?.milestones.length ? <ol className="project-milestone-list">{plan.milestones.map((milestone) => <li key={milestone.id} className={`project-milestone project-milestone-${milestone.status.toLowerCase()}`}><span className="project-milestone-marker">{milestone.status === 'COMPLETED' ? <Check size={13} /> : milestone.status === 'IN_PROGRESS' ? <CircleCheck size={13} /> : <Circle size={13} />}</span><span><strong>{milestone.title}</strong><small>{milestone.status === 'COMPLETED' ? 'Completed' : milestone.status === 'IN_PROGRESS' ? 'In progress' : 'Upcoming'}</small></span></li>)}</ol> : <p className="project-empty-note">The project team has not published a construction timeline yet.</p>}</article>
+      <article className="project-progress-panel project-timeline-panel"><div className="project-panel-heading"><div><p className="eyebrow text-[#087f88]">Project timeline</p><h2>Key milestones</h2></div><span>{plan ? `${milestones.filter((milestone) => milestone.status === 'COMPLETED').length}/${milestones.length}` : '0/0'}</span></div>{milestones.length ? <><ol className="project-milestone-list">{visibleMilestones.map((milestone) => <li key={milestone.id} className={`project-milestone project-milestone-${milestone.status.toLowerCase()}`}><span className="project-milestone-marker">{milestone.status === 'COMPLETED' ? <Check size={13} /> : milestone.status === 'IN_PROGRESS' ? <CircleCheck size={13} /> : <Circle size={13} />}</span><span><strong>{milestone.title}</strong><small>{milestone.status === 'COMPLETED' ? 'Completed' : milestone.status === 'IN_PROGRESS' ? 'In progress' : 'In progress'}</small></span></li>)}</ol>{milestones.length > 5 && <button type="button" className="project-timeline-toggle" onClick={() => setShowAllMilestones((current) => !current)}>{showAllMilestones ? 'Show fewer milestones' : 'View full timeline'} <ArrowRight size={13} /></button>}</> : <p className="project-empty-note">The project team has not published a construction timeline yet.</p>}</article>
 
-      <LatestUpdateCard update={latestUpdate} media={latestMedia} projectName={project.name} />
+      <LatestUpdateCard update={latestUpdate} media={latestMedia} projectName={project.name} hideMedia onRefresh={onRefresh} />
     </section>
 
-    {currentFloor && <p className="project-current-floor"><CircleCheck size={15} />Currently underway: <strong>{currentFloor.label}</strong></p>}
-    <ProjectGallery items={galleryItems} compact />
+    <section className="project-progress-overview project-progress-panel"><div className="project-progress-overview-heading"><p className="eyebrow text-[#087f88]">Project progress overview</p><h2 className="sr-only">Project progress overview</h2></div><div className="project-progress-overview-body"><div className="project-overview-completion"><span className="project-progress-ring project-progress-ring-large" style={{ background: `conic-gradient(#16aeb4 ${progress ?? 0}%, #d9f6f3 0)` }}><span>{progress === null ? '—' : `${progress}%`}</span></span><strong>Overall completion</strong></div><div className="project-overview-details"><p><Building2 size={16} /><span>Current phase<strong>{currentPhase}</strong></span></p><p><CalendarDays size={16} /><span>Expected completion<strong>{plan?.timeline || project.expected_completion || 'To be confirmed'}</strong></span></p><p><CircleCheck size={16} /><span>{currentFloor ? 'Current floor' : 'Current milestone'}<strong>{currentFloor?.label || activeMilestone?.title || 'Not yet published'}</strong></span></p></div><div className="project-overview-image">{overviewImage ? <img src={overviewImage} alt={`${project.name} project progress`} /> : <div><Building2 size={24} /><span>Project photography will appear here when published.</span></div>}<button type="button" onClick={onViewGallery}><ImageIcon size={14} />View gallery <ArrowRight size={13} /></button></div></div></section>
+
+    <section className="project-gallery-section project-gallery-compact"><div className="project-panel-heading"><div><p className="eyebrow text-[#087f88]">Construction gallery</p><h2>Latest site photos</h2></div><button type="button" className="project-gallery-view-all" onClick={onViewGallery}>View all photos <ArrowRight size={13} /></button></div>{visibleGalleryItems.length ? <div className="project-gallery-carousel"><button type="button" aria-label="Previous construction photos" disabled={galleryItems.length <= 5} onClick={() => setGalleryStart((current) => (current - 1 + galleryItems.length) % galleryItems.length)}><ChevronLeft size={16} /></button><div className="project-gallery-track">{visibleGalleryItems.map((item, index) => <article key={`${item.url}-${galleryStart}-${index}`}>{item.type === 'video' ? <video src={item.url} controls /> : <img src={item.url} alt={item.caption || `${project.name} construction update`} />}<p>{item.caption || 'Project update'}</p></article>)}</div><button type="button" aria-label="Next construction photos" disabled={galleryItems.length <= 5} onClick={() => setGalleryStart((current) => (current + 1) % galleryItems.length)}><ChevronRight size={16} /></button></div> : <p className="project-empty-note">Approved project and site images will appear here when published.</p>}</section>
     {onContact && <section className="project-contact-strip"><span><span className="project-contact-icon"><ImageIcon size={17} /></span><span><strong>Questions about construction progress?</strong><small>Our team is here to keep you informed. Get in touch anytime.</small></span></span><button type="button" onClick={onContact}>Contact the team <ArrowRight size={14} /></button></section>}
   </>;
 }
 
-function LatestUpdateCard({ update, media, projectName }: { update?: ConstructionUpdate; media?: PublishedConstructionProgress['data']['media'][number]; projectName: string }) {
-  const title = update?.title || media?.caption || 'Construction progress update';
+function LatestUpdateCard({ update, media, projectName, hideMedia = false, onRefresh }: { update?: ConstructionUpdate; media?: PublishedConstructionProgress['data']['media'][number]; projectName: string; hideMedia?: boolean; onRefresh?: () => void }) {
+  const title = update?.title || media?.caption || (hideMedia ? 'Awaiting update' : 'Construction progress update');
   const imageUrl = media?.url || update?.image_url;
-  return <article className="project-progress-panel project-latest-update"><div><p className="eyebrow text-[#087f88]">Latest site update</p><p className="project-update-date"><CalendarDays size={13} />{update ? new Date(update.posted_at).toLocaleDateString() : 'Awaiting update'}</p><h2>{title}</h2><p className="project-panel-copy">{update?.body || media?.caption || `The latest published update for ${projectName}.`}</p></div>{imageUrl ? media?.type === 'video' ? <video src={imageUrl} controls className="project-latest-update-media" /> : <img src={imageUrl} alt={title} /> : <div className="project-update-placeholder"><Building2 size={24} /><span>Site photos will appear here</span></div>}</article>;
+  return <article className="project-progress-panel project-latest-update"><div><p className="eyebrow text-[#087f88]">Latest site update</p><p className="project-update-date"><CalendarDays size={13} />{update ? new Date(update.posted_at).toLocaleDateString() : 'Awaiting update'}</p><h2>{title}</h2><p className="project-panel-copy">{update?.body || media?.caption || `The latest published update for ${projectName} will appear here.`}</p></div>{!hideMedia && (imageUrl ? media?.type === 'video' ? <video src={imageUrl} controls className="project-latest-update-media" /> : <img src={imageUrl} alt={title} /> : <div className="project-update-placeholder"><Building2 size={24} /><span>Site photos will appear here</span></div>)}{onRefresh && <button type="button" className="project-refresh-button" onClick={onRefresh}><RefreshCw size={13} />Check for updates</button>}</article>;
 }
 
 function ProjectGallery({ items, compact = false }: { items: { url: string; caption: string; type: 'image' | 'video' }[]; compact?: boolean }) {
@@ -235,3 +247,20 @@ function ProjectGallery({ items, compact = false }: { items: { url: string; capt
 }
 
 function Layers3Icon() { return <Building2 size={15} />; }
+
+function amenityPresentation(amenity: string) {
+  const value = amenity.toLowerCase();
+  if (/security|cctv|surveillance|access control/.test(value)) return { Icon: ShieldCheck, category: 'Security' };
+  if (/pool|swim|waterfront/.test(value)) return { Icon: Waves, category: 'Leisure' };
+  if (/gym|fitness|workout/.test(value)) return { Icon: Dumbbell, category: 'Wellness' };
+  if (/parking|garage|car park/.test(value)) return { Icon: Car, category: 'Convenience' };
+  if (/garden|landscap|green|courtyard/.test(value)) return { Icon: Trees, category: 'Outdoors' };
+  if (/wifi|internet|connectivity/.test(value)) return { Icon: Wifi, category: 'Connectivity' };
+  if (/lounge|resident|clubhouse/.test(value)) return { Icon: Sofa, category: 'Resident life' };
+  if (/cafe|coffee|restaurant|dining/.test(value)) return { Icon: Coffee, category: 'Dining' };
+  if (/bike|cycling|bicycle/.test(value)) return { Icon: Bike, category: 'Mobility' };
+  if (/sun|terrace|rooftop|view/.test(value)) return { Icon: Sun, category: 'Outdoor living' };
+  if (/spa|beauty|salon/.test(value)) return { Icon: Flower2, category: 'Wellness' };
+  if (/smart|home automation|lighting/.test(value)) return { Icon: Sparkles, category: 'Home features' };
+  return { Icon: Building2, category: 'Residence' };
+}
