@@ -47,7 +47,7 @@
 }
 
 .nbg-loader-copy strong {
-  font-family: 'DM Serif Display', Georgia, serif;
+  font-family: var(--font-display, 'DM Serif Display', Georgia, serif);
   font-size: 17px;
   font-weight: 400;
 }

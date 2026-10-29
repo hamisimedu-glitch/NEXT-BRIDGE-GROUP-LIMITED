@@ -8,10 +8,13 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  Circle,
+  CircleCheck,
   Compass,
   Download,
   ExternalLink,
   Filter,
+  Image as ImageIcon,
   Instagram,
   Layers3,
   MapPin,
@@ -44,7 +47,7 @@ const ProjectReviewsView = lazy(() => import('@/ProjectProgressExperience').then
 const ProjectInvestmentPage = lazy(() => import('@/ProjectInvestmentPage'));
 const ProjectDetailsPackage = lazy(() => import('@/ProjectDetailsPackage'));
 import type { PublicProjectDetails } from '@/ProjectDetailsPackage';
-import { calculateConstructionProgress, type PublishedConstructionProgress } from '@/lib/construction';
+import { calculateConstructionProgress, type ConstructionStatus, type PublishedConstructionProgress } from '@/lib/construction';
 import { formatAccountingCurrency, formatAccountingKes } from '@/lib/format';
 import { dashboardTabsForRole } from '@/lib/dashboard-access';
 
@@ -334,21 +337,21 @@ function App() {
   const fontSizeControl = <FontSizeControl fontSizeScale={fontSizeScale} onScaleChange={setFontSizeScale} />;
 
   if (view === 'admin') {
-    if (authLoading) return <><div className="font-scaled-surface"><NbgLoader message="Checking your staff access" /></div>{fontSizeControl}</>;
-    if (!adminUser) return <><RouteErrorBoundary><Suspense fallback={routeLoading}><div className="font-scaled-surface"><AdminSignIn /></div></Suspense></RouteErrorBoundary>{fontSizeControl}</>;
-    if (dashboardTabsForRole(normalizedRole).length === 0 || normalizedRole === 'admin' && !isAuthorizedAdmin) return <><div className="font-scaled-surface"><AdminAccessDenied email={adminUser.email} role={normalizedRole} navigate={navigate} /></div>{fontSizeControl}</>;
-    return <><RouteErrorBoundary><Suspense fallback={routeLoading}><div className="font-scaled-surface"><AdminDashboard user={{ ...adminUser, role: normalizedRole }} onSignOut={async () => { await signOut(); setAdminUser(null); navigate('home'); }} /></div></Suspense></RouteErrorBoundary>{fontSizeControl}</>;
+    if (authLoading) return <><div className="font-scaled-surface font-scaled-admin"><NbgLoader message="Checking your staff access" /></div>{fontSizeControl}</>;
+    if (!adminUser) return <><RouteErrorBoundary><Suspense fallback={routeLoading}><div className="font-scaled-surface font-scaled-admin"><AdminSignIn /></div></Suspense></RouteErrorBoundary>{fontSizeControl}</>;
+    if (dashboardTabsForRole(normalizedRole).length === 0 || normalizedRole === 'admin' && !isAuthorizedAdmin) return <><div className="font-scaled-surface font-scaled-admin"><AdminAccessDenied email={adminUser.email} role={normalizedRole} navigate={navigate} /></div>{fontSizeControl}</>;
+    return <><RouteErrorBoundary><Suspense fallback={routeLoading}><div className="font-scaled-surface font-scaled-admin"><AdminDashboard user={{ ...adminUser, role: normalizedRole }} onSignOut={async () => { await signOut(); setAdminUser(null); navigate('home'); }} /></div></Suspense></RouteErrorBoundary>{fontSizeControl}</>;
   }
 
   if (view === 'portal') {
-    if (authLoading) return <><div className="font-scaled-surface"><NbgLoader message="Checking your secure portal" /></div>{fontSizeControl}</>;
-    if (!adminUser) return <><RouteErrorBoundary><Suspense fallback={routeLoading}><div className="font-scaled-surface"><ClientPortalSignIn /></div></Suspense></RouteErrorBoundary>{fontSizeControl}</>;
-    if (['hr', 'leads', 'finance', 'project_manager', 'it', 'staff'].includes(normalizedRole)) return <><div className="font-scaled-surface"><div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-[#f4f1eb] px-6 text-center text-[#123b4b]"><p className="eyebrow text-[#087f88]">Department access</p><h1 className="font-serif text-3xl">{normalizedRole === 'staff' ? 'Dashboard assignment required.' : 'Use your assigned staff dashboard.'}</h1><p className="max-w-md text-sm text-slate-600">{normalizedRole === 'staff' ? 'An Admin/Owner needs to assign this staff account to a department dashboard.' : `This account is assigned to the ${normalizedRole.replace(/_/g, ' ')} workspace and does not have client portal access.`}</p><button type="button" onClick={() => navigate('admin')} className="btn-primary">Open staff dashboard <ArrowRight size={15} /></button></div></div>{fontSizeControl}</>;
-    return <><RouteErrorBoundary><Suspense fallback={routeLoading}><div className="font-scaled-surface"><ClientPortal user={{ ...adminUser, role: normalizedRole }} onSignOut={async () => { await signOut(); setAdminUser(null); }} navigate={navigate} /></div></Suspense></RouteErrorBoundary>{fontSizeControl}</>;
+    if (authLoading) return <><div className="font-scaled-surface font-scaled-client"><NbgLoader message="Checking your secure portal" /></div>{fontSizeControl}</>;
+    if (!adminUser) return <><RouteErrorBoundary><Suspense fallback={routeLoading}><div className="font-scaled-surface font-scaled-client"><ClientPortalSignIn /></div></Suspense></RouteErrorBoundary>{fontSizeControl}</>;
+    if (['hr', 'leads', 'finance', 'project_manager', 'it', 'staff'].includes(normalizedRole)) return <><div className="font-scaled-surface font-scaled-admin"><div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-[#f4f1eb] px-6 text-center text-[#123b4b]"><p className="eyebrow text-[#087f88]">Department access</p><h1 className="font-serif text-3xl">{normalizedRole === 'staff' ? 'Dashboard assignment required.' : 'Use your assigned staff dashboard.'}</h1><p className="max-w-md text-sm text-slate-600">{normalizedRole === 'staff' ? 'An Admin/Owner needs to assign this staff account to a department dashboard.' : `This account is assigned to the ${normalizedRole.replace(/_/g, ' ')} workspace and does not have client portal access.`}</p><button type="button" onClick={() => navigate('admin')} className="btn-primary">Open staff dashboard <ArrowRight size={15} /></button></div></div>{fontSizeControl}</>;
+    return <><RouteErrorBoundary><Suspense fallback={routeLoading}><div className="font-scaled-surface font-scaled-client"><ClientPortal user={{ ...adminUser, role: normalizedRole }} onSignOut={async () => { await signOut(); setAdminUser(null); }} navigate={navigate} /></div></Suspense></RouteErrorBoundary>{fontSizeControl}</>;
   }
 
   return (
-    <div className="min-h-screen overflow-x-hidden bg-[#f4f1eb] text-[#17232b]">
+    <div className="public-site-shell min-h-screen overflow-x-hidden bg-[#f4f1eb] text-[#17232b]">
       <Header view={view} navigate={navigate} mobileOpen={mobileOpen} setMobileOpen={setMobileOpen} />
         <main>
         <RouteErrorBoundary><Suspense fallback={routeLoading}>
@@ -588,6 +591,64 @@ function MobileNavGroup({ label, links, view, navigate }: { label: string; links
 }
 
 function HomePage({ navigate, setGalleryIndex }: { navigate: (view: View) => void; setGalleryIndex: (index: number) => void }) {
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [units, setUnits] = useState<ProjectUnit[]>([]);
+  const [updates, setUpdates] = useState<ConstructionUpdate[]>([]);
+  const [constructionRows, setConstructionRows] = useState<PublishedConstructionProgress[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
+  const [activePhoto, setActivePhoto] = useState(0);
+  const [galleryOpen, setGalleryOpen] = useState(false);
+
+  const loadFeaturedData = useCallback(async () => {
+    setLoadError('');
+    const [projectResult, unitResult, updateResult, progressResult] = await Promise.all([
+      supabase.from('projects').select('*').eq('is_published', true).order('created_at', { ascending: false }),
+      supabase.from('project_units').select('*').eq('is_published', true).order('unit_number'),
+      supabase.from('construction_updates').select('*').eq('is_published', true).order('posted_at', { ascending: false }).limit(100),
+      supabase.from('published_construction_progress').select('*').order('published_at', { ascending: false }),
+    ]);
+    if (projectResult.error || unitResult.error || updateResult.error || progressResult.error) setLoadError('Featured development details are temporarily unavailable.');
+    setProjects((projectResult.data ?? []) as Project[]);
+    setUnits((unitResult.data ?? []) as ProjectUnit[]);
+    setUpdates((updateResult.data ?? []) as ConstructionUpdate[]);
+    setConstructionRows((progressResult.data ?? []) as PublishedConstructionProgress[]);
+    setLoading(false);
+  }, []);
+
+  useEffect(() => {
+    void loadFeaturedData();
+    const channel = supabase.channel('public-featured-development')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'projects' }, () => { void loadFeaturedData(); })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'project_units' }, () => { void loadFeaturedData(); })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'construction_updates' }, () => { void loadFeaturedData(); })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'published_construction_progress' }, () => { void loadFeaturedData(); })
+      .subscribe();
+    return () => { void supabase.removeChannel(channel); };
+  }, [loadFeaturedData]);
+
+  const featuredProject = projects.find((project) => project.status.toUpperCase() === 'UNDER CONSTRUCTION') || projects[0] || null;
+  const featuredUnits = featuredProject ? units.filter((unit) => unit.project_id === featuredProject.id) : [];
+  const featuredUpdates = featuredProject ? updates.filter((update) => update.project_id === featuredProject.id) : [];
+  const construction = featuredProject ? constructionRows.find((row) => row.project_id === featuredProject.id) : null;
+  const progress = construction ? calculateConstructionProgress(construction.data) : null;
+  const unitTypes = [...new Set(featuredUnits.map((unit) => unit.type).filter((type): type is string => Boolean(type)))];
+  const floorCount = construction?.data.totalFloors || featuredProject?.total_floors || new Set(featuredUnits.map((unit) => unit.floor).filter(Boolean)).size;
+  const photos = [
+    ...(construction?.data.media.filter((media) => media.type === 'image').slice().reverse().map((media) => ({ url: media.url, caption: media.caption || featuredProject?.name || 'Project photo' })) ?? []),
+    ...featuredUpdates.filter((update) => update.image_url).map((update) => ({ url: update.image_url!, caption: update.title })),
+    ...featuredUnits.filter((unit) => unit.image_url).map((unit) => ({ url: unit.image_url!, caption: `${unit.unit_number} · ${unit.type || 'Published home'}` })),
+    ...(featuredProject?.image_url ? [{ url: featuredProject.image_url, caption: `${featuredProject.name} cover image` }] : []),
+  ].filter((photo, index, galleryItems) => galleryItems.findIndex((item) => item.url === photo.url) === index);
+  const selectedPhoto = photos[activePhoto] ?? photos[0];
+  const location = featuredProject ? [featuredProject.locality, featuredProject.location, featuredProject.county].filter(Boolean).join(', ') : '';
+  const featureFacts = featuredProject ? [
+    { icon: Building2, label: `${featuredUnits.length} published homes`, detail: unitTypes.slice(0, 3).join(', ') || 'Home types being published' },
+    { icon: MapPin, label: 'Project location', detail: location || 'Location to be announced' },
+    { icon: ShieldCheck, label: 'Project status', detail: featuredProject.status || 'Status pending' },
+    { icon: Star, label: 'Published amenities', detail: featuredProject.amenities?.slice(0, 3).join(', ') || 'Amenities to be announced' },
+  ] : [];
+
   return <>
     <section className="hero-reference relative overflow-hidden bg-[#0a4061] pb-0 pt-0" style={{ backgroundImage: `url(${images.hero})` }}>
       <div className="absolute inset-0 bg-[linear-gradient(90deg,rgba(5,28,40,0.4)_0%,rgba(6,38,54,0.18)_39%,rgba(6,38,54,0.02)_72%,rgba(3,18,26,0.04)_100%)]" />
@@ -633,23 +694,35 @@ function HomePage({ navigate, setGalleryIndex }: { navigate: (view: View) => voi
       </div>
     </section>
     <section className="hero-feature-section">
-      <div className="hero-feature-band relative z-10 mx-auto grid max-w-[1500px] gap-4 rounded-[28px] bg-[#fffdf8] px-5 py-5 shadow-[0_18px_45px_rgba(7,18,22,0.1)] md:grid-cols-[1fr_1fr_1fr_1fr_auto] md:items-center md:px-8 md:py-6">
-        {[
-          ['Luxury residences', 'Spacious 1, 2 & 3 bedroom apartments with modern designs.', Building2],
-          ['Oceanfront living', 'Wake up to breathtaking views of the Indian Ocean.', Compass],
-          ['24/7 security', 'Your safety and peace of mind are our priority.', ShieldCheck],
-          ['World-class amenities', 'Infinity pool, gym, lounge, and more.', Star],
-        ].map(([title, text, Icon], index) => {
-          const FeatureIcon = Icon as typeof Building2;
-          return <div key={title as string} className={`flex items-center gap-3 border-b border-[#d9d3ca] pb-4 md:border-b-0 md:border-r md:pb-0 md:pr-5 ${index === 3 ? 'md:border-r-0' : ''}`}><FeatureIcon size={25} strokeWidth={1.5} className="shrink-0 text-[#08a4b1]" /><div><h3 className="text-[10px] font-semibold uppercase tracking-[0.15em] text-[#0d5268]">{title as string}</h3><p className="mt-1 max-w-[180px] text-[10px] leading-4 text-slate-600">{text as string}</p></div></div>;
-        })}
+      <div className="hero-feature-band home-feature-facts relative z-10 mx-auto grid max-w-[1500px] gap-4 rounded-[8px] bg-[#fffdf8] px-5 py-5 shadow-[0_12px_36px_rgba(7,18,22,0.08)] md:grid-cols-4 md:items-center md:px-8 md:py-5">
+        {loading ? <p className="text-xs text-slate-500">Loading published development details...</p> : featureFacts.length ? featureFacts.map(({ icon: Icon, label, detail }, index) => <div key={label} className={`flex items-center gap-3 border-b border-[#d9d3ca] pb-4 md:border-b-0 md:border-r md:pb-0 md:pr-5 ${index === 3 ? 'md:border-r-0' : ''}`}><span className="home-feature-fact-icon"><Icon size={20} strokeWidth={1.6} /></span><div><h3>{label}</h3><p>{detail}</p></div></div>) : <div className="col-span-full flex items-center justify-between gap-4"><p className="text-sm text-slate-600">No published development is available yet.</p><button type="button" onClick={() => navigate('projects')} className="link-arrow">Browse projects <ArrowRight size={14} /></button></div>}
       </div>
     </section>
-    <section className="section-pad bg-[#f4f1eb]"><div className="mx-auto max-w-[1440px]">
-      <SectionIntro eyebrow="Featured development" title={<>The address<br /><em>of what’s next.</em></>} copy="A limited collection of contemporary residences in Nyali, created around the way coastal life is lived today." action="View project" onAction={() => navigate('projects')} />
-      <div className="mt-14 grid gap-8 lg:grid-cols-[1.45fr_1fr] lg:items-end"><div className="group relative min-h-[440px] overflow-hidden md:min-h-[590px]"><img src={images.exterior} alt="Contemporary apartment architecture concept image" className="absolute inset-0 h-full w-full object-cover transition duration-700 group-hover:scale-105" /><div className="absolute inset-0 bg-gradient-to-t from-[#17232b]/80 via-transparent to-transparent" /><div className="absolute bottom-7 left-7 text-white md:bottom-10 md:left-10"><p className="eyebrow text-[#9edfeb]">Demo development · replace with verified details</p><h3 className="mt-3 font-serif text-4xl md:text-6xl">Next Bridge<br /><em>Residences</em></h3><p className="mt-5 flex items-center gap-2 text-xs tracking-wide"><MapPin size={14} className="text-[#20afd1]" /> Nyali, Mombasa</p></div><span className="absolute right-6 top-6 border border-white/40 px-3 py-2 text-[9px] uppercase tracking-[.18em] text-white">Now presenting</span></div><div className="flex flex-col justify-between border-t border-[#c9c5bd] pt-6 lg:min-h-[590px]"><div><div className="flex items-center justify-between"><p className="eyebrow text-[#20afd1]">Project snapshot</p><span className="rounded-full bg-[#dceeea] px-3 py-1.5 text-[9px] uppercase tracking-[.15em] text-[#3a6f69]">Data preview</span></div><p className="mt-6 max-w-md text-2xl leading-snug text-[#17232b]">A calm, considered response to the energy of the coast.</p><div className="mt-10 grid grid-cols-2 gap-y-7 border-y border-[#c9c5bd] py-7">{[['Status', 'Information pending'], ['Apartment types', 'To be confirmed'], ['Progress', 'Not yet published'], ['Completion', 'To be confirmed']].map(([label, value]) => <div key={label}><p className="eyebrow text-slate-500">{label}</p><p className="mt-2 text-sm">{value}</p></div>)}</div></div><button onClick={() => navigate('projects')} className="link-arrow mt-10 self-start">Explore the development <ArrowRight size={16} /></button></div></div>
-    </div></section>
-    <section className="section-pad approach-section"><div className="mx-auto max-w-[1440px]"><div className="grid gap-14 lg:grid-cols-[1fr_1.2fr]"><div><p className="eyebrow text-[#087f88]">The NBG approach</p><h2 className="mt-6 font-serif text-5xl leading-[.96] tracking-[-.04em] md:text-7xl">A home.<br /><em>An investment.<br />A legacy.</em></h2></div><div className="lg:pt-24"><p className="max-w-xl text-xl leading-relaxed approach-copy">We are creating more than addresses. We are shaping places with a sense of permanence — where thoughtful architecture, honest progress and the rhythms of coastal living come together.</p><div className="mt-14 grid gap-0 border-t approach-rule sm:grid-cols-3">{[['01', 'Designed with intent'], ['02', 'Built with discipline'], ['03', 'Held for generations']].map(([no, text]) => <div key={no} className="approach-item border-b py-6 sm:border-r sm:border-b-0 sm:pr-6 sm:last:border-r-0 sm:last:pl-6"><span className="text-xs text-[#087f88]">{no}</span><p className="mt-8 max-w-[150px] text-sm leading-6">{text}</p></div>)}</div></div></div></div></section>
+    <section className="home-featured-section">
+      <div className="home-featured-shell">
+        <div className="home-featured-main">
+          <div className={`home-featured-gallery ${selectedPhoto ? '' : 'is-empty'}`}>
+            {selectedPhoto ? <img key={selectedPhoto.url} src={selectedPhoto.url} alt={selectedPhoto.caption} /> : <div className="home-featured-no-image"><Building2 size={32} /><span>{loading ? 'Loading project imagery...' : 'No project imagery has been published.'}</span></div>}
+            {selectedPhoto && <><div className="home-featured-image-shade" /><span className="home-featured-status">{featuredProject?.status || 'Published project'}</span><div className="home-featured-location"><MapPin size={16} /><span><strong>{location || 'Location to be announced'}</strong><small>{featuredProject?.name}</small></span></div>{photos.length > 1 && <><button type="button" className="home-featured-arrow is-previous" aria-label="Previous project image" onClick={() => setActivePhoto((current) => (current - 1 + photos.length) % photos.length)}><ChevronLeft size={18} /></button><button type="button" className="home-featured-arrow is-next" aria-label="Next project image" onClick={() => setActivePhoto((current) => (current + 1) % photos.length)}><ChevronRight size={18} /></button><div className="home-featured-thumbnails">{photos.slice(0, 4).map((photo, index) => <button key={photo.url} type="button" onClick={() => setActivePhoto(index)} aria-label={`Show project photo ${index + 1}`} aria-pressed={activePhoto === index} className={activePhoto === index ? 'is-active' : ''}><img src={photo.url} alt="" /></button>)}{photos.length > 4 && <button type="button" className="home-featured-more-photos" onClick={() => setGalleryOpen(true)}>+{photos.length - 4}<small>More photos</small></button>}</div></>}</>}
+          </div>
+          <article className="home-featured-details">
+            {loading ? <p className="eyebrow text-[#087f88]">Loading featured development</p> : loadError ? <><p className="eyebrow text-[#087f88]">Featured development</p><h2>Project details are temporarily unavailable.</h2><button type="button" onClick={() => void loadFeaturedData()} className="link-arrow">Retry <ArrowRight size={14} /></button></> : featuredProject ? <>
+              <p className="eyebrow text-[#087f88]">Featured development</p>
+              <h2>{featuredProject.name}</h2>
+              <p className="home-featured-description">{featuredProject.description || 'Published project details will be updated here as verified information is released.'}</p>
+              <div className="home-featured-specs"><div><Building2 size={17} /><span><strong>{unitTypes.length ? unitTypes.join(', ') : `${featuredUnits.length} published homes`}</strong><small>Home types</small></span></div><div><Layers3 size={17} /><span><strong>{floorCount || '—'}</strong><small>Floors</small></span></div><div><MapPin size={17} /><span><strong>{featuredProject.locality || featuredProject.location || 'To be announced'}</strong><small>{featuredProject.county || 'Location'}</small></span></div></div>
+              <div className="home-featured-status-row"><div><small>Project status</small><strong className="home-status-pill">{featuredProject.status}</strong></div><div><small>Completion</small><strong>{featuredProject.expected_completion || construction?.data.timeline || 'To be confirmed'}</strong></div><div><small>Construction progress</small><strong>{progress === null ? 'Not published' : `${progress}%`}</strong></div></div>
+              <div className="home-featured-actions"><button type="button" onClick={() => navigateToPublicProject(featuredProject.id)} className="home-featured-primary">Explore the development <ArrowRight size={15} /></button><button type="button" onClick={() => navigateToProjectInvestment(featuredProject.id)} className="home-featured-secondary">Investment details <ArrowRight size={14} /></button></div>
+            </> : <><p className="eyebrow text-[#087f88]">Featured development</p><h2>No published development yet</h2><p className="home-featured-description">The featured project will appear here when the NBG team publishes its project profile.</p><button type="button" onClick={() => navigate('projects')} className="home-featured-primary">Browse projects <ArrowRight size={15} /></button></>}
+          </article>
+        </div>
+        {featuredProject && <><section className="home-featured-highlights"><div className="home-featured-story"><p className="eyebrow">A closer look at {featuredProject.name}</p><h3>More than a home,<br /><em>made for living.</em></h3><p>{featuredProject.description || 'Explore published homes, progress, and project details.'}</p></div><div className="home-featured-metrics"><div><TrendingUp size={19} /><small>Available homes</small><strong>{featuredUnits.filter((unit) => unit.status === 'AVAILABLE').length}</strong></div><div><Compass size={19} /><small>Current phase</small><strong>{construction?.data.currentPhase || 'Not published'}</strong></div><div><ShieldCheck size={19} /><small>Verified progress</small><strong>{progress === null ? 'Not published' : `${progress}%`}</strong></div><div><Star size={19} /><small>Listed amenities</small><strong>{featuredProject.amenities?.length ?? 0}</strong></div></div><button type="button" className="home-featured-gallery-link" onClick={() => setGalleryOpen(true)} disabled={!photos.length}><ImageIcon size={22} /><span>View full gallery <ArrowRight size={14} /></span></button></section>
+          <div className="home-featured-photo-strip">{photos.slice(0, 5).map((photo, index) => <button type="button" key={photo.url} onClick={() => setActivePhoto(index)} aria-label={`Show ${photo.caption}`} className={activePhoto === index ? 'is-active' : ''}><img src={photo.url} alt={photo.caption} /><span>{photo.caption}</span></button>)}</div>
+        </>}
+      </div>
+      {galleryOpen && photos.length > 0 && <div className="home-gallery-modal" role="dialog" aria-modal="true" aria-label={`${featuredProject?.name || 'Project'} gallery`}><button type="button" aria-label="Close gallery" onClick={() => setGalleryOpen(false)}><X size={20} /></button><div><p className="eyebrow">Project gallery</p><h2>{featuredProject?.name}</h2><div className="home-gallery-modal-grid">{photos.map((photo, index) => <button type="button" key={photo.url} onClick={() => { setActivePhoto(index); setGalleryOpen(false); }}><img src={photo.url} alt={photo.caption} /><span>{photo.caption}</span></button>)}</div></div></div>}
+    </section>
+    <ApproachExperience project={featuredProject} units={featuredUnits} construction={construction ?? null} photos={photos} navigate={navigate} />
     <Highlights navigate={navigate} />
     <section className="section-pad bg-[#e9e5dc]"><div className="mx-auto max-w-[1440px]"><SectionIntro eyebrow="Life at NBG" title={<>Spaces that make<br /><em>room for living.</em></>} copy="From the first light of morning to slow evenings by the water, every detail is considered around daily life." action="View the gallery" onAction={() => navigate('gallery')} /><div className="mt-14 grid gap-4 md:grid-cols-12 md:grid-rows-2"><GalleryTile item={gallery[1]} className="md:col-span-7 md:row-span-2" onClick={() => setGalleryIndex(1)} /><GalleryTile item={gallery[2]} className="md:col-span-5" onClick={() => setGalleryIndex(2)} /><GalleryTile item={gallery[3]} className="md:col-span-5" onClick={() => setGalleryIndex(3)} /></div></div></section>
     <ConstructionStrip navigate={navigate} />
@@ -659,36 +732,137 @@ function HomePage({ navigate, setGalleryIndex }: { navigate: (view: View) => voi
   </>;
 }
 
+function ApproachExperience({ project, units, construction, photos, navigate }: { project: Project | null; units: ProjectUnit[]; construction: PublishedConstructionProgress | null; photos: { url: string; caption: string }[]; navigate: (view: View) => void }) {
+  const [activePillar, setActivePillar] = useState(0);
+  const plan = construction?.data;
+  const progress = plan ? calculateConstructionProgress(plan) : null;
+  const availableHomes = units.filter((unit) => unit.status === 'AVAILABLE').length;
+  const activeFloor = plan?.floors.find((floor) => floor.status === 'IN_PROGRESS');
+  const completionLabel = project?.expected_completion || plan?.timeline || 'To be confirmed';
+  const pillars = [
+    {
+      eyebrow: '01 / place & purpose',
+      title: 'Designed with intent.',
+      copy: project?.description || 'Considered homes and published amenities, shaped around the way people want to live on the coast.',
+      icon: Compass,
+      metric: project?.locality || project?.location || 'Coastal living',
+      metricLabel: 'A considered address',
+      action: 'Explore the project',
+      onAction: () => project ? navigateToPublicProject(project.id) : navigate('projects'),
+    },
+    {
+      eyebrow: '02 / visible delivery',
+      title: 'Built with discipline.',
+      copy: plan?.progressNote || 'Follow the construction journey through progress and milestones published by the NBG project team.',
+      icon: Layers3,
+      metric: progress === null ? 'Awaiting publication' : `${progress}% complete`,
+      metricLabel: activeFloor?.label || plan?.currentPhase || 'Construction progress',
+      action: 'Follow construction',
+      onAction: () => navigate('construction'),
+    },
+    {
+      eyebrow: '03 / long-term living',
+      title: 'Held for generations.',
+      copy: `${project?.name || 'NBG residences'} brings together enduring coastal living and a clear path to ownership.`,
+      icon: Building2,
+      metric: `${availableHomes} available`,
+      metricLabel: `Expected completion · ${completionLabel}`,
+      action: 'Explore available homes',
+      onAction: () => navigate('residences'),
+    },
+  ];
+  const active = pillars[activePillar];
+  const ActiveIcon = active.icon;
+  const activePhoto = photos[activePillar] || photos[0];
+
+  return <section className="approach-experience">
+    <div className="approach-experience-inner">
+      <header className="approach-experience-heading"><div><p className="eyebrow">The NBG approach</p><h2>A home.<br /><em>An investment.<br />A legacy.</em></h2></div><p>Places shaped with permanence, clear progress, and the rhythms of coastal living.</p></header>
+      <div className="approach-experience-stage">
+        <div className="approach-experience-image">
+          {activePhoto ? <img key={activePhoto.url} src={activePhoto.url} alt={activePhoto.caption} /> : <div className="approach-image-empty"><Building2 size={30} /><span>Published project photography will appear here.</span></div>}
+          <div className="approach-image-shade" />
+          <span className="approach-image-caption">{activePhoto?.caption || project?.name || 'Next Bridge Group'}</span>
+          <div className="approach-image-status"><span className="approach-status-dot" /><span><small>Featured development</small><strong>{project?.name || 'NBG residences'}</strong></span></div>
+        </div>
+        <article className="approach-experience-copy" key={activePillar}>
+          <p className="eyebrow">{active.eyebrow}</p>
+          <span className="approach-active-icon"><ActiveIcon size={22} strokeWidth={1.5} /></span>
+          <h3>{active.title}</h3>
+          <p className="approach-active-copy">{active.copy}</p>
+          <div className="approach-live-metric"><strong>{active.metric}</strong><span>{active.metricLabel}</span></div>
+          <button type="button" className="approach-action" onClick={active.onAction}>{active.action}<ArrowRight size={15} /></button>
+        </article>
+      </div>
+      <nav className="approach-pillar-nav" aria-label="NBG approach">
+        {pillars.map(({ eyebrow, title, icon: Icon }, index) => <button key={title} type="button" aria-pressed={activePillar === index} className={activePillar === index ? 'is-active' : ''} onClick={() => setActivePillar(index)}><span className="approach-pillar-top"><span>{String(index + 1).padStart(2, '0')}</span><Icon size={20} strokeWidth={1.5} /></span><span className="approach-pillar-label"><small>{eyebrow.split(' / ')[1]}</small><strong>{title}</strong></span><span className="approach-pillar-indicator" /></button>)}
+      </nav>
+    </div>
+  </section>;
+}
+
 function Highlights({ navigate }: { navigate: (view: View) => void }) { const cards = [{ icon: Building2, title: 'A considered address', text: 'Coastal living in one of Mombasa’s most established neighbourhoods.' }, { icon: Layers3, title: 'Designed for real life', text: 'Homes with space, light and a natural relationship to the outdoors.' }, { icon: ShieldCheck, title: 'Progress you can see', text: 'A transparent construction journey, shared as the work moves forward.' }]; return <section className="section-pad bg-[#f4f1eb]"><div className="mx-auto max-w-[1440px]"><div className="mb-12 flex flex-col justify-between gap-5 md:flex-row md:items-end"><div><p className="eyebrow text-[#20afd1]">The NBG difference</p><h2 className="mt-4 font-serif text-4xl tracking-[-.04em] md:text-6xl">Made for <em>the long view.</em></h2></div><button onClick={() => navigate('about')} className="link-arrow self-start">Why NBG <ArrowRight size={16} /></button></div><div className="grid border-t border-[#c9c5bd] md:grid-cols-3">{cards.map(({ icon: Icon, title, text }, index) => <div key={title} className={`border-b border-[#c9c5bd] py-8 md:border-b-0 md:pr-10 ${index > 0 ? 'md:border-l md:pl-10' : ''}`}><Icon size={24} strokeWidth={1.2} className="text-[#20afd1]" /><h3 className="mt-10 text-xl">{title}</h3><p className="mt-3 max-w-xs text-sm leading-6 text-slate-600">{text}</p></div>)}</div></div></section> }
 
 function ConstructionStrip({ navigate }: { navigate: (view: View) => void }) {
   const [published, setPublished] = useState<PublishedConstructionProgress | null>(null);
   const [project, setProject] = useState<Project | null>(null);
+  const [latestUpdate, setLatestUpdate] = useState<ConstructionUpdate | null>(null);
   const [loading, setLoading] = useState(true);
   const [offline, setOffline] = useState(false);
   const load = useCallback(async () => {
-    const { data, error: progressError } = await supabase.from('published_construction_progress').select('*').order('published_at', { ascending: false }).limit(1).maybeSingle();
-    if (progressError) setOffline(true);
-    else {
-      setOffline(false);
-      const row = data as PublishedConstructionProgress | null;
-      setPublished(row);
-      if (row) {
-        const { data: projectRow } = await supabase.from('projects').select('*').eq('id', row.project_id).eq('is_published', true).maybeSingle();
-        setProject((projectRow ?? null) as Project | null);
-      } else setProject(null);
-    }
+    const [projectsResult, progressResult] = await Promise.all([
+      supabase.from('projects').select('*').eq('is_published', true).order('created_at', { ascending: false }),
+      supabase.from('published_construction_progress').select('*').order('published_at', { ascending: false }),
+    ]);
+    const projects = (projectsResult.data ?? []) as Project[];
+    const progressRows = (progressResult.data ?? []) as PublishedConstructionProgress[];
+    const activeProject = projects.find((item) => item.status.toUpperCase() === 'UNDER CONSTRUCTION' && progressRows.some((row) => row.project_id === item.id))
+      || projects.find((item) => progressRows.some((row) => row.project_id === item.id))
+      || projects.find((item) => item.status.toUpperCase() === 'UNDER CONSTRUCTION')
+      || projects[0]
+      || null;
+    const progressRow = activeProject ? progressRows.find((row) => row.project_id === activeProject.id) ?? null : null;
+    const updateResult = activeProject
+      ? await supabase.from('construction_updates').select('*').eq('project_id', activeProject.id).eq('is_published', true).order('posted_at', { ascending: false }).limit(1).maybeSingle()
+      : { data: null, error: null };
+    setOffline(Boolean(projectsResult.error || progressResult.error || updateResult.error));
+    setProject(activeProject);
+    setPublished(progressRow);
+    setLatestUpdate((updateResult.data ?? null) as ConstructionUpdate | null);
     setLoading(false);
   }, []);
   useEffect(() => {
     void load();
     const channel = supabase.channel('home-construction-progress')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'projects' }, () => { void load(); })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'published_construction_progress' }, () => { void load(); })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'construction_updates' }, () => { void load(); })
       .subscribe();
     return () => { void supabase.removeChannel(channel); };
   }, [load]);
   const progress = published ? calculateConstructionProgress(published.data) : null;
-  return <section className="section-pad bg-[#d9d5cc]"><div className="mx-auto max-w-[1440px]"><div className="grid gap-12 lg:grid-cols-[.8fr_1.2fr] lg:items-center"><div><p className="eyebrow text-[#247b85]">Construction journey</p><h2 className="mt-5 font-serif text-5xl leading-[.96] tracking-[-.04em] md:text-7xl">Built in the<br /><em>open.</em></h2><p className="mt-7 max-w-sm text-sm leading-6 text-slate-600">Verified progress, published by the project team and updated as work moves forward.</p><button onClick={() => navigate('construction')} className="link-arrow mt-8">Follow the journey <ArrowRight size={16} /></button></div><div className="border-y border-[#aaa69d] py-7"><div className="flex items-end justify-between gap-4"><div><p className="eyebrow text-slate-500">{project?.name || 'Current progress'}</p><p className="mt-3 font-serif text-7xl text-[#17232b]">{loading ? '…' : progress === null ? '—' : progress}<span className="ml-2 text-2xl">%</span></p></div><p className="max-w-[190px] text-right text-xs leading-5 text-slate-500">{offline ? 'Construction progress is temporarily unavailable.' : published ? `${published.total_floors} floors · ${published.data.currentPhase || 'Verified project progress'}` : 'No project progress has been published yet.'}</p></div><div className="mt-8 h-1 bg-[#b9b5ac]"><div className="h-full bg-[#20afd1] transition-all" style={{ width: `${progress ?? 0}%` }} /></div><div className="mt-5 flex justify-between text-[9px] uppercase tracking-[.14em] text-slate-500"><span>Project start</span><span>{published?.data.timeline || project?.expected_completion || 'Handover'}</span></div></div></div></div></section>;
+  const plan = published?.data;
+  const timeline = plan?.milestones ?? [];
+  const activeIndex = timeline.findIndex((milestone) => milestone.status === 'IN_PROGRESS');
+  const pendingIndex = timeline.findIndex((milestone) => milestone.status === 'PENDING');
+  const milestoneCenter = activeIndex >= 0 ? activeIndex : pendingIndex >= 0 ? pendingIndex : timeline.length - 1;
+  const milestoneStart = Math.max(0, Math.min(milestoneCenter - 2, timeline.length - 5));
+  const keyMilestones = timeline.slice(milestoneStart, milestoneStart + 5);
+  const milestoneCount = timeline.filter((milestone) => milestone.status === 'COMPLETED').length;
+  const latestMedia = plan?.media.slice().reverse().find((media) => media.type === 'image');
+  const siteImage = latestMedia?.url || latestUpdate?.image_url || project?.image_url;
+  const expectedCompletion = plan?.timeline || project?.expected_completion;
+  const projectDetails = () => project ? navigateToPublicProject(project.id) : navigate('construction');
+  return <section className="construction-journey-section">
+    <div className="construction-journey-inner">
+      <div className="construction-journey-main">
+        <div className="construction-journey-intro"><p className="eyebrow">Construction journey</p><h2>Built in the<br /><em>open.</em></h2><p>We keep you informed with verified progress updates, so you can see your investment come to life, every step of the way.</p><button type="button" onClick={projectDetails}>View project details <ArrowRight size={15} /></button></div>
+        <article className="construction-progress-card"><p className="eyebrow">Project progress</p><div className="construction-progress-summary"><span className="construction-progress-ring" style={{ background: `conic-gradient(#2bb7a6 ${progress ?? 0}%, #e8eeea 0)` }}><span>{loading ? '…' : progress === null ? '—' : `${progress}%`}<small>{progress === null ? 'awaiting' : 'complete'}</small></span></span><div><h3>Construction progress</h3><p>{offline ? 'Verified construction information is temporarily unavailable.' : plan?.progressNote || (progress === null ? 'The project team has not published verified progress yet.' : `${plan?.currentPhase || 'Construction work'} is underway at ${progress}% completion.`)}</p><span className="construction-progress-track"><span style={{ width: `${progress ?? 0}%` }} /></span></div></div><div className="construction-progress-dates"><div><small>Latest plan published</small><strong>{published ? new Date(published.published_at).toLocaleDateString() : 'Awaiting publication'}</strong></div><div><small>Expected completion</small><strong>{expectedCompletion || 'To be confirmed'}</strong></div></div></article>
+        <aside className="construction-update-card">{siteImage ? <div className="construction-update-image"><img src={siteImage} alt={latestMedia?.caption || latestUpdate?.title || `${project?.name || 'Project'} construction site`} /><span><i />{project?.status === 'UNDER CONSTRUCTION' ? 'On site' : project?.status || 'Project update'}</span></div> : <div className="construction-update-image is-empty"><Building2 size={26} /><span>Construction photography will appear when published.</span></div>}<div className="construction-update-copy"><div><p className="eyebrow">Latest verified update</p><small>{latestUpdate ? new Date(latestUpdate.posted_at).toLocaleDateString() : 'Awaiting update'}</small><h3>{latestUpdate?.title || latestMedia?.caption || 'Construction update pending'}</h3><p>{latestUpdate?.body || (latestMedia ? latestMedia.caption : `A published update for ${project?.name || 'this project'} will appear here.`)}</p></div><button type="button" aria-label="View construction details" onClick={projectDetails}><ArrowRight size={15} /></button></div></aside>
+      </div>
+      <section className="construction-milestones-card"><div className="construction-milestones-intro"><p className="eyebrow">Construction journey</p><h3>Key milestones</h3><p>{timeline.length ? `${milestoneCount} of ${timeline.length} milestones completed.` : 'Project milestones will appear once the verified plan is published.'}</p></div>{keyMilestones.length ? <div className="construction-milestones-list">{keyMilestones.map((milestone) => <div key={milestone.id} className={`construction-milestone construction-milestone-${milestone.status.toLowerCase()}`}><span className="construction-milestone-icon">{milestone.status === 'COMPLETED' ? <Check size={16} /> : milestone.status === 'IN_PROGRESS' ? <CircleCheck size={16} /> : <Circle size={16} />}</span><strong>{milestone.title}</strong><small>{milestone.status === 'COMPLETED' ? 'Completed' : milestone.status === 'IN_PROGRESS' ? 'In progress' : 'Upcoming'}</small></div>)}</div> : <div className="construction-milestones-empty">No verified milestones have been published yet.</div>}<button type="button" className="construction-timeline-link" onClick={() => navigate('construction')}>View full construction timeline <ArrowRight size={15} /></button></section>
+    </div>
+  </section>;
 }
 
 function SectionIntro({ eyebrow, title, copy, action, onAction }: { eyebrow: string; title: React.ReactNode; copy: string; action?: string; onAction?: () => void }) { return <div className="grid gap-6 md:grid-cols-[1fr_1fr] md:items-end"><div><p className="eyebrow text-[#20afd1]">{eyebrow}</p><h2 className="mt-5 font-serif text-5xl leading-[.95] tracking-[-.05em] md:text-7xl">{title}</h2></div><div className="md:pb-1"><p className="max-w-md text-base leading-7 text-slate-600">{copy}</p>{action && onAction && <button onClick={onAction} className="link-arrow mt-7">{action} <ArrowRight size={16} /></button>}</div></div> }
@@ -958,15 +1132,30 @@ function ConstructionPage({ navigate }: { navigate: (view: View) => void }) {
         return <article key={project.id} className="border-t border-[#a9d9d8] pt-7">
           <div className="grid gap-10 lg:grid-cols-[1fr_.55fr] lg:items-end"><div><p className="eyebrow text-[#087f88]">{project.status}</p><h2 className="mt-3 font-serif text-4xl text-[#123b4b] md:text-6xl">{project.name}</h2><p className="mt-2 flex items-center gap-2 text-sm text-slate-500"><MapPin size={14} className="text-[#087f88]" />{project.location || 'Location to be announced'}</p></div><div><div className="flex items-end justify-between"><span className="eyebrow text-slate-500">Project completion</span><span className="font-serif text-6xl text-[#087f88]">{progress === null ? '—' : `${progress}%`}</span></div><div className="mt-3 h-2 overflow-hidden bg-[#d9f6f3]"><div className="h-full bg-[#19c6c9] transition-all" style={{ width: `${progress ?? 0}%` }} /></div><p className="mt-3 text-right text-xs text-slate-500">{plan ? `${plan.totalFloors} floors` : 'Construction plan not yet published'}</p></div></div>
           {plan ? <><div className="mt-8 grid gap-8 border-y border-[#c9c5bd] py-7 lg:grid-cols-[1fr_1fr]"><div>{latestMedia?.type === 'video' ? <video src={latestMedia.url} controls className="aspect-[16/10] w-full bg-black object-cover" /> : latestMedia ? <img src={latestMedia.url} alt={latestMedia.caption || `${project.name} construction site`} className="aspect-[16/10] w-full object-cover" /> : latestUpdate?.image_url ? <img src={latestUpdate.image_url} alt={latestUpdate.title} className="aspect-[16/10] w-full object-cover" /> : <div className="flex aspect-[16/10] items-center justify-center bg-[#e9e5dc] text-sm text-slate-500">No construction media has been published.</div>}<p className="mt-2 text-xs text-slate-500">{latestMedia?.caption || latestUpdate?.title || 'Latest approved site media'}</p></div><div><p className="eyebrow text-[#087f88]">Current activity</p><h3 className="mt-3 font-serif text-3xl text-[#123b4b]">{plan.currentPhase || activeMilestone?.title || 'Progress update'}</h3><p className="mt-4 text-sm leading-6 text-slate-600">{plan.progressNote || latestUpdate?.body || 'The project team has not added a site note to this update.'}</p><p className="mt-5 text-xs text-slate-500">Published {new Date(published!.published_at).toLocaleString()}</p><p className="mt-2 text-xs text-slate-500">Timeline: {plan.timeline || project.expected_completion || 'To be confirmed'}</p><p className="mt-5 border-l-2 border-[#19c6c9] pl-3 text-sm text-[#315a62]">{currentFloor ? `${currentFloor.label} is currently under construction.` : activeMilestone ? `Next milestone: ${activeMilestone.title}.` : 'All published milestones are complete.'}</p><button onClick={() => navigateToPublicProject(project.id)} className="link-arrow mt-6">Explore this project <ArrowRight size={16} /></button><button onClick={() => navigateToProjectInvestment(project.id)} className="btn-primary mt-5">Invest in This Project <TrendingUp size={16} /></button></div></div>
-            <div className="mt-8 grid gap-10 lg:grid-cols-[1fr_1fr]"><section><p className="eyebrow text-[#087f88]">Floor-by-floor progress</p><div className="mt-4 grid gap-x-6 sm:grid-cols-2">{plan.floors.map((floor) => <div key={floor.number} className="flex items-center justify-between gap-3 border-b border-[#e6e2da] py-3"><span className="text-sm text-[#123b4b]">{floor.label}</span><span className={`text-xs ${floor.status === 'COMPLETED' ? 'text-[#2e6b3e]' : floor.status === 'IN_PROGRESS' ? 'text-[#2e5f7a]' : 'text-slate-400'}`}>{floor.status === 'COMPLETED' ? 'Complete' : floor.status === 'IN_PROGRESS' ? 'In progress' : 'Pending'}</span></div>)}</div></section><section><p className="eyebrow text-[#087f88]">Construction timeline</p><div className="mt-4">{plan.milestones.map((milestone) => <div key={milestone.id} className="flex items-center justify-between gap-4 border-b border-[#e6e2da] py-3"><span className="text-sm text-[#123b4b]">{milestone.title}</span><span className={`text-xs ${milestone.status === 'COMPLETED' ? 'text-[#2e6b3e]' : milestone.status === 'IN_PROGRESS' ? 'text-[#2e5f7a]' : 'text-slate-400'}`}>{milestone.status === 'COMPLETED' ? 'Complete' : milestone.status === 'IN_PROGRESS' ? 'In progress' : 'Upcoming'}</span></div>)}</div></section></div>
+            <div className="construction-register-grid"><ConstructionStatusRegister title="Floor-by-floor progress" eyebrow="Building status" items={plan.floors.map((floor) => ({ id: String(floor.number), label: floor.label, status: floor.status }))} /><ConstructionStatusRegister title="Construction timeline" eyebrow="Project milestones" items={plan.milestones.map((milestone) => ({ id: milestone.id, label: milestone.title, status: milestone.status }))} /> </div>
           </> : <div className="mt-8 border-y border-[#c9c5bd] py-8"><p className="font-serif text-2xl text-[#123b4b]">Progress is not yet published</p><p className="mt-2 max-w-xl text-sm leading-6 text-slate-500">The project team has not published a verified floor and milestone plan. We will show progress here as soon as it is available.</p><button onClick={() => navigateToPublicProject(project.id)} className="link-arrow mt-5">View project profile <ArrowRight size={16} /></button></div>}
-          {projectUpdates.length > 0 && <div className="mt-8 border-t border-[#c9c5bd] pt-6"><p className="eyebrow text-[#087f88]">Published site notes</p><div className="mt-4 grid gap-4 md:grid-cols-2">{projectUpdates.map((update) => <article key={update.id} className="border-b border-[#e2eeec] pb-4"><p className="text-sm font-semibold text-[#123b4b]">{update.title}</p><p className="mt-1 text-xs text-slate-500">{new Date(update.posted_at).toLocaleDateString()}</p>{update.body && <p className="mt-2 text-sm leading-6 text-slate-600">{update.body}</p>}</article>)}</div></div>}
+          {projectUpdates.length > 0 && <ConstructionUpdatesRegister updates={projectUpdates} />}
         </article>;
       })}
     </div>}
   </PageFrame>;
 }
 
+
+type ConstructionRegisterItem = { id: string; label: string; status: ConstructionStatus };
+
+function ConstructionStatusRegister({ title, eyebrow, items }: { title: string; eyebrow: string; items: ConstructionRegisterItem[] }) {
+  const [expanded, setExpanded] = useState(false);
+  const visibleItems = expanded ? items : items.slice(0, 6);
+  const completedCount = items.filter((item) => item.status === 'COMPLETED').length;
+  return <section className="construction-register"><div className="construction-register-heading"><div><p className="eyebrow">{eyebrow}</p><h3>{title}</h3></div><span className="construction-register-count">{completedCount}<small>/{items.length}</small></span></div><div className={`construction-register-list ${expanded ? 'is-expanded' : ''}`}>{visibleItems.map((item, index) => <article key={item.id} className={`construction-register-row construction-register-row-${item.status.toLowerCase()}`}><span className="construction-register-number">{String(index + 1).padStart(2, '0')}</span><span className="construction-register-marker">{item.status === 'COMPLETED' ? <Check size={12} /> : item.status === 'IN_PROGRESS' ? <CircleCheck size={12} /> : <Circle size={12} />}</span><strong>{item.label}</strong><small>{item.status === 'COMPLETED' ? 'Complete' : item.status === 'IN_PROGRESS' ? 'In progress' : 'Upcoming'}</small></article>)}</div>{items.length > 6 && <button type="button" className="construction-register-toggle" aria-expanded={expanded} onClick={() => setExpanded((current) => !current)}>{expanded ? 'Show fewer' : `View all ${items.length}`}<ChevronDown size={13} className={expanded ? 'is-open' : ''} /></button>}</section>;
+}
+
+function ConstructionUpdatesRegister({ updates }: { updates: ConstructionUpdate[] }) {
+  const [expanded, setExpanded] = useState(false);
+  const visibleUpdates = expanded ? updates : updates.slice(0, 3);
+  return <section className="construction-updates-register"><div className="construction-register-heading"><div><p className="eyebrow">Published site notes</p><h3>Project updates</h3></div><span className="construction-register-count">{updates.length}<small> updates</small></span></div><div className={`construction-update-list ${expanded ? 'is-expanded' : ''}`}>{visibleUpdates.map((update) => <article key={update.id}><span className="construction-update-date">{new Date(update.posted_at).toLocaleDateString()}</span><div><h4>{update.title}</h4>{update.body && <p>{update.body}</p>}</div>{update.progress_pct > 0 && <strong>{update.progress_pct}%</strong>}</article>)}</div>{updates.length > 3 && <button type="button" className="construction-register-toggle" aria-expanded={expanded} onClick={() => setExpanded((current) => !current)}>{expanded ? 'Show fewer updates' : `View all ${updates.length} updates`}<ChevronDown size={13} className={expanded ? 'is-open' : ''} /></button>}</section>;
+}
 function GalleryPage({ setGalleryIndex }: { setGalleryIndex: (index: number) => void }) { const [filter, setFilter] = useState('All'); const categories = ['All', 'Architecture', 'Interiors', 'Location']; const filtered = gallery.filter((item) => filter === 'All' || item.label === filter); return <PageFrame eyebrow="The journal of place" title={<>A visual language<br /><em>of coastal living.</em></>} intro="A curated reference gallery for the NBG world. These concept images are placeholders and will be replaced with official project photography."><div className="mt-12 flex flex-wrap gap-2">{categories.map((item) => <button key={item} onClick={() => setFilter(item)} className={`px-4 py-2 text-[10px] uppercase tracking-[.14em] ${filter === item ? 'bg-[#17232b] text-white' : 'bg-[#e6e2da] text-slate-600'}`}>{item}</button>)}</div><div className="mt-8 columns-1 gap-4 sm:columns-2 lg:columns-3">{filtered.map((item) => { const index = gallery.indexOf(item); return <button key={item.title} onClick={() => setGalleryIndex(index)} className="group relative mb-4 block w-full overflow-hidden text-left"><img src={item.image} alt={item.title} className="block w-full transition duration-700 group-hover:scale-105" /><div className="absolute inset-0 bg-gradient-to-t from-[#17232b]/80 via-transparent opacity-0 transition group-hover:opacity-100" /><div className="absolute bottom-5 left-5 translate-y-3 text-white opacity-0 transition group-hover:translate-y-0 group-hover:opacity-100"><p className="eyebrow text-[#9edfeb]">{item.label}</p><p className="mt-2 text-lg">{item.title}</p></div></button> })}</div></PageFrame> }
 
 function AboutPage({ navigate }: { navigate: (view: View) => void }) {
