@@ -1,5 +1,5 @@
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AlertCircle, ArrowRight, Award, BarChart3, Building2, CalendarDays, Calculator, Check, ChevronDown, ChevronLeft, ChevronRight, CircleCheck, ClipboardList, Clock3, Construction, CreditCard, Download, DollarSign, Eye, EyeOff, ExternalLink, FileDown, FileText, Info, LayoutDashboard, LogOut, Mail, MapPin, Menu, MessageCircle, MoreHorizontal, MoreVertical, Pencil, Phone, Plus, RefreshCw, Search, Send, ShieldCheck, SlidersHorizontal, TrendingUp, Trash2, Upload, Users, X } from 'lucide-react';
+import { AlertCircle, ArrowLeft, ArrowRight, ArrowUpDown, Award, BarChart3, Building2, CalendarDays, Calculator, Check, ChevronDown, ChevronLeft, ChevronRight, CircleCheck, ClipboardList, Clock3, Construction, CreditCard, Download, DollarSign, Eye, EyeOff, ExternalLink, FileDown, FileText, Globe2, Info, Landmark, LayoutDashboard, Lightbulb, LogOut, Mail, MapPin, Menu, MessageCircle, MoreHorizontal, MoreVertical, Pencil, Phone, Plus, RefreshCw, Search, Send, ShieldCheck, SlidersHorizontal, TrendingUp, Trash2, Upload, UserRound, Users, X } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { resetPassword, signIn, type AdminUser } from '@/lib/auth';
 import { COMMISSION_STATUS_COLORS, COMMISSION_STATUSES, INVESTMENT_STATUS_COLORS, INVESTMENT_STATUSES, LEAD_STATUSES, LEAD_STATUS_COLORS, PROJECT_STATUSES, REALTOR_STATUS_COLORS, REALTOR_STATUSES, SALE_STATUS_COLORS, SALE_STATUSES, UNIT_STATUSES, fmtKes, type AuditLog, type BuyerInstallment, type Commission, type ConstructionUpdate, type Investment, type Lead, type Project, type ProjectUnit, type Realtor, type Sale } from '@/lib/types';
@@ -1157,10 +1157,10 @@ type VaultSale = Pick<Sale, 'id' | 'unit_id' | 'unit_number' | 'sale_price' | 's
 type VaultCommission = Pick<Commission, 'sale_id' | 'amount' | 'status'>;
 type VaultPayment = { sale_id: string; amount: number };
 type VaultDraft = { recorded_price: string; construction_cost: string; additional_costs: string; notes: string };
-type PurchasePaymentInstructions = { id: string; bank_name: string; bank_branch: string; account_name: string; account_number: string; swift_code: string; payment_instructions: string; is_published: boolean; is_quotation_default: boolean; display_order: number };
-const EMPTY_PAYMENT_ACCOUNT: PurchasePaymentInstructions = { id: '', bank_name: '', bank_branch: '', account_name: '', account_number: '', swift_code: '', payment_instructions: '', is_published: false, is_quotation_default: false, display_order: 0 };
+type PurchasePaymentInstructions = { id: string; bank_name: string; bank_branch: string; account_name: string; account_number: string; swift_code: string; payment_instructions: string; logo_url?: string | null; is_published: boolean; is_quotation_default: boolean; display_order: number };
+const EMPTY_PAYMENT_ACCOUNT: PurchasePaymentInstructions = { id: '', bank_name: '', bank_branch: '', account_name: '', account_number: '', swift_code: '', payment_instructions: '', logo_url: null, is_published: false, is_quotation_default: false, display_order: 0 };
 
-function PurchasePaymentInstructionsPanel({ user }: { user: AdminUser }) {
+function PurchasePaymentInstructionsPanel({ user, accountEditorOpen, setAccountEditorOpen }: { user: AdminUser; accountEditorOpen: boolean; setAccountEditorOpen: (open: boolean) => void }) {
   const [accounts, setAccounts] = useState<PurchasePaymentInstructions[]>([]);
   const [details, setDetails] = useState<PurchasePaymentInstructions>(EMPTY_PAYMENT_ACCOUNT);
   const [editingId, setEditingId] = useState('');
@@ -1168,22 +1168,52 @@ function PurchasePaymentInstructionsPanel({ user }: { user: AdminUser }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [saved, setSaved] = useState('');
+  const creatingNewAccount = useRef(false);
+  const [logoFile, setLogoFile] = useState<File | null>(null);
+  const [logoPreview, setLogoPreview] = useState('');
 
-  const load = useCallback(async (preferredId = editingId) => {
+  useEffect(() => {
+    if (!logoFile) {
+      setLogoPreview(details.logo_url || '');
+      return;
+    }
+    const previewUrl = URL.createObjectURL(logoFile);
+    setLogoPreview(previewUrl);
+    return () => URL.revokeObjectURL(previewUrl);
+  }, [details.logo_url, logoFile]);
+
+  const load = useCallback(async (preferredId = '') => {
     setLoading(true);
     const { data, error: loadError } = await supabase.from('purchase_payment_accounts').select('*').order('display_order').order('created_at');
     if (loadError) setError(`Payment accounts could not be loaded. Apply the multi-bank payment migration: ${loadError.message}`);
     else {
       const rows = (data ?? []) as PurchasePaymentInstructions[];
       setAccounts(rows);
-      const current = rows.find((account) => account.id === preferredId) ?? rows[0];
-      setEditingId(current?.id ?? '');
-      setDetails(current ?? EMPTY_PAYMENT_ACCOUNT);
+      if (!creatingNewAccount.current || preferredId) {
+        const current = rows.find((account) => account.id === preferredId) ?? rows[0];
+        setEditingId(current?.id ?? '');
+        setDetails(current ?? EMPTY_PAYMENT_ACCOUNT);
+      }
     }
     setLoading(false);
-  }, [editingId]);
+  }, []);
 
   useEffect(() => { void load(); }, [load]);
+
+  useEffect(() => {
+    if (!accountEditorOpen) {
+      creatingNewAccount.current = false;
+      return;
+    }
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        creatingNewAccount.current = false;
+        setAccountEditorOpen(false);
+      }
+    };
+    window.addEventListener('keydown', closeOnEscape);
+    return () => window.removeEventListener('keydown', closeOnEscape);
+  }, [accountEditorOpen]);
 
   const save = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -1200,36 +1230,101 @@ function PurchasePaymentInstructionsPanel({ user }: { user: AdminUser }) {
       setSaving(false);
       return;
     }
-    const values = { bank_name: details.bank_name.trim(), bank_branch: details.bank_branch.trim(), account_name: details.account_name.trim(), account_number: details.account_number.trim(), swift_code: details.swift_code.trim(), payment_instructions: details.payment_instructions.trim(), is_published: details.is_published, is_quotation_default: details.is_quotation_default, display_order: details.display_order, updated_by: user.id, updated_at: new Date().toISOString() };
+    let logoUrl = details.logo_url || null;
+    let uploadedLogoPath: string | null = null;
+    if (logoFile) {
+      if (!['image/png', 'image/jpeg', 'image/webp'].includes(logoFile.type) || logoFile.size > 5 * 1024 * 1024) {
+        setError('Choose a PNG, JPEG, or WebP logo smaller than 5 MB.');
+        setSaving(false);
+        return;
+      }
+      try {
+        const extension = logoFile.type === 'image/png' ? 'png' : logoFile.type === 'image/webp' ? 'webp' : 'jpg';
+        const path = `bank-logos/${crypto.randomUUID()}.${extension}`;
+        const { error: uploadError } = await supabase.storage.from('public-media').upload(path, logoFile, { upsert: false, contentType: logoFile.type });
+        if (uploadError) throw new Error(uploadError.message || 'Storage upload failed.');
+        logoUrl = supabase.storage.from('public-media').getPublicUrl(path).data.publicUrl;
+        uploadedLogoPath = path;
+      } catch (uploadError) {
+        setError(uploadError instanceof Error ? `Bank logo upload failed: ${uploadError.message}` : 'Bank logo upload failed. Try another image.');
+        setSaving(false);
+        return;
+      }
+    }
+    const values = { bank_name: details.bank_name.trim(), bank_branch: details.bank_branch.trim(), account_name: details.account_name.trim(), account_number: details.account_number.trim(), swift_code: details.swift_code.trim(), payment_instructions: details.payment_instructions.trim(), logo_url: logoUrl, is_published: details.is_published, is_quotation_default: details.is_quotation_default, display_order: details.display_order, updated_by: user.id, updated_at: new Date().toISOString() };
     const { data: savedAccount, error: saveError } = editingId
       ? await supabase.from('purchase_payment_accounts').update(values).eq('id', editingId).select().single()
       : await supabase.from('purchase_payment_accounts').insert(values).select().single();
     setSaving(false);
-    if (saveError) { setError(`Payment instructions were not saved: ${saveError.message}`); return; }
+    if (saveError) {
+      if (uploadedLogoPath) await supabase.storage.from('public-media').remove([uploadedLogoPath]);
+      setError(`Payment instructions were not saved: ${saveError.message}`);
+      return;
+    }
+    creatingNewAccount.current = false;
+    setLogoFile(null);
+    setAccountEditorOpen(false);
     setSaved(details.is_published ? 'Bank account saved and published to client payment instructions.' : 'Bank account saved as a draft and hidden from clients.');
     if (savedAccount) { setEditingId(savedAccount.id); setDetails(savedAccount as PurchasePaymentInstructions); }
     await load(savedAccount?.id);
   };
 
-  const startNewAccount = () => { setEditingId(''); setDetails({ ...EMPTY_PAYMENT_ACCOUNT, display_order: accounts.length }); setSaved(''); setError(''); };
+  const startNewAccount = () => {
+    if (accountEditorOpen && !editingId) {
+      creatingNewAccount.current = false;
+      setAccountEditorOpen(false);
+      return;
+    }
+    creatingNewAccount.current = true;
+    setLogoFile(null);
+    setEditingId('');
+    setDetails({ ...EMPTY_PAYMENT_ACCOUNT, display_order: accounts.length });
+    setSaved('');
+    setError('');
+    setAccountEditorOpen(true);
+  };
   const removeAccount = async () => {
     if (!editingId || !window.confirm(`Remove ${details.bank_name || 'this bank account'}?`)) return;
     const { error: deleteError } = await supabase.from('purchase_payment_accounts').delete().eq('id', editingId);
     if (deleteError) { setError(`Bank account could not be removed: ${deleteError.message}`); return; }
     const remaining = accounts.filter((account) => account.id !== editingId);
+    creatingNewAccount.current = false;
+    setLogoFile(null);
+    setAccountEditorOpen(false);
     setAccounts(remaining);
     setEditingId(remaining[0]?.id || '');
     setDetails(remaining[0] || EMPTY_PAYMENT_ACCOUNT);
     setSaved('Bank account removed.');
   };
 
-  const update = (key: keyof PurchasePaymentInstructions, value: string | boolean | number) => setDetails((current) => ({ ...current, [key]: value, ...(key === 'is_published' && value === false ? { is_quotation_default: false } : {}) }));
+  const update = (key: keyof PurchasePaymentInstructions, value: string | boolean | number | null) => setDetails((current) => ({ ...current, [key]: value, ...(key === 'is_published' && value === false ? { is_quotation_default: false } : {}) }));
+  const selectedAccount = accounts.find((account) => account.id === editingId) ?? accounts[0] ?? null;
+  if (accountEditorOpen) return <PurchasePaymentAccountEditor details={details} editingId={editingId} saving={saving} error={error} logoFile={logoFile} logoPreview={logoPreview} onUpdate={update} onLogoFileChange={setLogoFile} onClearLogo={() => { setLogoFile(null); update('logo_url', null); }} onSave={save} onClose={() => { creatingNewAccount.current = false; setLogoFile(null); setDetails(selectedAccount ?? EMPTY_PAYMENT_ACCOUNT); setAccountEditorOpen(false); }} onRemove={() => void removeAccount()} />;
+  if (!accountEditorOpen) return <section className="financial-account-panel">
+    <header className="financial-account-header"><div><p className="eyebrow">Treasury setup</p><h2>Client payment setup</h2><p>Manage verified bank instructions and the quotation default.</p></div><button type="button" className="financial-account-add" onClick={startNewAccount}><Plus size={15} />Add bank account</button></header>
+    {loading ? <p className="financial-account-empty">Loading verified payment accounts...</p> : accounts.length ? <div className="financial-account-overview">
+      <nav aria-label="Bank accounts" className="financial-account-list">{accounts.map((account) => <button key={account.id} type="button" onClick={() => { creatingNewAccount.current = false; setLogoFile(null); setEditingId(account.id); setDetails(account); setError(''); setSaved(''); }} aria-current={selectedAccount?.id === account.id ? 'true' : undefined}><span className="financial-account-list-logo">{account.logo_url ? <img src={account.logo_url} alt="" /> : <Building2 size={18} />}</span><span className="financial-account-list-copy"><span className="financial-account-bank">{account.bank_name || 'Unnamed bank'}</span><span className="financial-account-status">{account.is_published ? 'Published' : 'Draft'}{account.is_quotation_default ? ' · Quotation default' : ''}</span></span></button>)}</nav>
+      {selectedAccount && <article className="financial-account-summary"><div><span className="financial-account-mark">{selectedAccount.logo_url ? <img src={selectedAccount.logo_url} alt={`${selectedAccount.bank_name} logo`} /> : <Building2 size={18} />}</span><span className={`financial-account-badge ${selectedAccount.is_published ? 'is-published' : ''}`}>{selectedAccount.is_published ? 'Client visible' : 'Draft'}</span></div><p className="eyebrow">Selected account</p><h3>{selectedAccount.bank_name}</h3><p>{selectedAccount.account_name}</p><dl><div><dt>Account number</dt><dd>•••• {selectedAccount.account_number.slice(-4) || '—'}</dd></div><div><dt>Branch</dt><dd>{selectedAccount.bank_branch || 'Not specified'}</dd></div><div><dt>Quotation default</dt><dd>{selectedAccount.is_quotation_default ? 'Yes' : 'No'}</dd></div></dl><button type="button" onClick={() => { creatingNewAccount.current = false; setLogoFile(null); setDetails(selectedAccount); setEditingId(selectedAccount.id); setAccountEditorOpen(true); }}>Edit selected account <Pencil size={14} /></button></article>}
+    </div> : <div className="financial-account-empty"><Building2 size={20} /><span>No bank accounts have been added.</span><button type="button" onClick={startNewAccount}>Add the first account <ArrowRight size={14} /></button></div>}
+    {error && <p role="alert" className="financial-account-message is-error">{error}</p>}{saved && <p role="status" className="financial-account-message is-success">{saved}</p>}
+  </section>;
   return <section className="border border-[#a9d9a8] bg-white p-5 md:p-7"><div className="flex flex-wrap items-start justify-between gap-4"><div className="flex items-start gap-3"><Building2 className="mt-1 text-[#087f88]" /><div><p className="eyebrow text-[#087f88]">Client payment setup</p><h2 className="mt-2 font-serif text-2xl text-[#123b4b]">Official bank instructions</h2><p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500">Choose which verified accounts clients can see and exactly one account for purchase quotations.</p></div></div><button type="button" onClick={startNewAccount} className="btn-secondary"><Plus size={14} />Add bank account</button></div>{loading ? <p className="mt-5 text-sm text-slate-500">Loading payment accounts...</p> : <div className="mt-5 grid gap-5 lg:grid-cols-[260px_minmax(0,1fr)]"><nav aria-label="Bank accounts" className="grid content-start gap-2">{accounts.map((account) => <button key={account.id} type="button" onClick={() => { setEditingId(account.id); setDetails(account); setError(''); setSaved(''); }} aria-current={editingId === account.id ? 'true' : undefined} className={`border p-3 text-left ${editingId === account.id ? 'border-[#087f88] bg-[#eefbf9]' : 'border-[#e2ded5] bg-white'}`}><span className="block text-xs font-semibold text-[#123b4b]">{account.bank_name}</span><span className="mt-1 block text-[10px] text-slate-500">{account.account_name} · {account.is_published ? 'Published' : 'Draft'}{account.is_quotation_default ? ' · Quotation default' : ''}</span></button>)}{accounts.length === 0 && <p className="border border-dashed border-[#c9c5bd] p-4 text-xs text-slate-500">No bank accounts yet. Add a verified account to show payment instructions to clients.</p>}</nav><form onSubmit={save} className="grid content-start gap-4"><div className="grid gap-4 sm:grid-cols-2"><label className="grid gap-1.5 text-xs text-slate-500"><span className="eyebrow">Bank name *</span><input required value={details.bank_name} onChange={(event) => update('bank_name', event.target.value)} className="admin-input" placeholder="Enter verified bank name" /></label><label className="grid gap-1.5 text-xs text-slate-500"><span className="eyebrow">Branch</span><input value={details.bank_branch} onChange={(event) => update('bank_branch', event.target.value)} className="admin-input" placeholder="Branch name or location" /></label><label className="grid gap-1.5 text-xs text-slate-500"><span className="eyebrow">Account name *</span><input required value={details.account_name} onChange={(event) => update('account_name', event.target.value)} className="admin-input" placeholder="Verified beneficiary name" /></label><label className="grid gap-1.5 text-xs text-slate-500"><span className="eyebrow">Account number *</span><input required value={details.account_number} onChange={(event) => update('account_number', event.target.value)} className="admin-input font-mono" placeholder="Verified account number" /></label><label className="grid gap-1.5 text-xs text-slate-500"><span className="eyebrow">SWIFT / BIC</span><input value={details.swift_code} onChange={(event) => update('swift_code', event.target.value)} className="admin-input font-mono" placeholder="For international transfers" /></label><label className="grid gap-1.5 text-xs text-slate-500"><span className="eyebrow">Display order</span><input type="number" min="0" value={details.display_order} onChange={(event) => update('display_order', Number(event.target.value) || 0)} className="admin-input" /></label></div><label className="grid gap-1.5 text-xs text-slate-500"><span className="eyebrow">Payment instructions</span><textarea value={details.payment_instructions} onChange={(event) => update('payment_instructions', event.target.value)} rows={3} className="admin-input resize-y" placeholder="Transfer notes, accepted currency, or proof-of-payment directions" /></label><div className="flex flex-wrap gap-4 border-t border-[#e2eeec] pt-4"><label className="flex items-start gap-3 text-sm text-[#123b4b]"><input type="checkbox" checked={details.is_published} onChange={(event) => update('is_published', event.target.checked)} className="mt-1 size-4 accent-[#087f88]" /><span><strong className="block">Publish this account to clients</strong><small className="text-xs text-slate-500">Only published verified accounts appear in the portal.</small></span></label><label className="flex items-start gap-3 text-sm text-[#123b4b]"><input type="checkbox" checked={details.is_quotation_default} disabled={!details.is_published} onChange={(event) => update('is_quotation_default', event.target.checked)} className="mt-1 size-4 accent-[#087f88] disabled:opacity-50" /><span><strong className="block">Use for purchase quotations</strong><small className="text-xs text-slate-500">Only one published account can be selected. Saving this replaces the current quotation account.</small></span></label></div><div className="flex flex-wrap items-center justify-end gap-2 border-t border-[#e2eeec] pt-4"><button type="submit" disabled={saving} className="btn-primary disabled:opacity-60">{saving ? 'Saving...' : editingId ? 'Save account changes' : 'Add account'} <Check size={15} /></button>{editingId && <button type="button" onClick={() => void removeAccount()} className="btn-secondary text-[#a55445]">Remove account</button>}</div>{error && <p role="alert" className="text-sm text-[#a55445]">{error}</p>}{saved && <p role="status" className="text-sm text-[#2e6b3e]">{saved}</p>}</form></div>}</section>;
 
   return <section className="border border-[#a9d9d8] bg-white p-5 md:p-7"><div className="flex flex-wrap items-start justify-between gap-4"><div className="flex items-start gap-3"><Building2 className="mt-1 text-[#087f88]" /><div><p className="eyebrow text-[#087f88]">Client payment setup</p><h2 className="mt-2 font-serif text-2xl text-[#123b4b]">Official bank instructions</h2><p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500">Manage verified accounts separately. Only published accounts appear to clients.</p></div></div><button type="button" onClick={startNewAccount} className="btn-secondary"><Plus size={14} />Add bank account</button></div>{loading ? <p className="mt-5 text-sm text-slate-500">Loading payment accounts...</p> : <div className="mt-5 grid gap-5 lg:grid-cols-[260px_minmax(0,1fr)]"><nav aria-label="Bank accounts" className="grid content-start gap-2">{accounts.map((account) => <button key={account.id} type="button" onClick={() => { setEditingId(account.id); setDetails(account); setError(''); setSaved(''); }} aria-current={editingId === account.id ? 'true' : undefined} className={`border p-3 text-left ${editingId === account.id ? 'border-[#087f88] bg-[#eefbf9]' : 'border-[#e2ded5] bg-white'}`}><span className="block text-xs font-semibold text-[#123b4b]">{account.bank_name}</span><span className="mt-1 block text-[10px] text-slate-500">{account.account_name} · {account.is_published ? 'Published' : 'Draft'}</span></button>)}{accounts.length === 0 && <p className="border border-dashed border-[#c9c5bd] p-4 text-xs text-slate-500">No bank accounts yet. Add a verified account to show payment instructions to clients.</p>}</nav><form onSubmit={save} className="grid content-start gap-4"><div className="grid gap-4 sm:grid-cols-2"><label className="grid gap-1.5 text-xs text-slate-500"><span className="eyebrow">Bank name *</span><input required value={details.bank_name} onChange={(event) => update('bank_name', event.target.value)} className="admin-input" placeholder="Enter verified bank name" /></label><label className="grid gap-1.5 text-xs text-slate-500"><span className="eyebrow">Branch</span><input value={details.bank_branch} onChange={(event) => update('bank_branch', event.target.value)} className="admin-input" placeholder="Branch name or location" /></label><label className="grid gap-1.5 text-xs text-slate-500"><span className="eyebrow">Account name *</span><input required value={details.account_name} onChange={(event) => update('account_name', event.target.value)} className="admin-input" placeholder="Verified beneficiary name" /></label><label className="grid gap-1.5 text-xs text-slate-500"><span className="eyebrow">Account number *</span><input required value={details.account_number} onChange={(event) => update('account_number', event.target.value)} className="admin-input font-mono" placeholder="Verified account number" /></label><label className="grid gap-1.5 text-xs text-slate-500"><span className="eyebrow">SWIFT / BIC</span><input value={details.swift_code} onChange={(event) => update('swift_code', event.target.value)} className="admin-input font-mono" placeholder="For international transfers" /></label><label className="grid gap-1.5 text-xs text-slate-500"><span className="eyebrow">Display order</span><input type="number" min="0" value={details.display_order} onChange={(event) => update('display_order', Number(event.target.value) || 0)} className="admin-input" /></label></div><label className="grid gap-1.5 text-xs text-slate-500"><span className="eyebrow">Payment instructions</span><textarea value={details.payment_instructions} onChange={(event) => update('payment_instructions', event.target.value)} rows={3} className="admin-input resize-y" placeholder="Transfer notes, accepted currency, or proof-of-payment directions" /></label><div className="flex flex-wrap items-center justify-between gap-3 border-t border-[#e2eeec] pt-4"><label className="flex items-center gap-3 text-sm text-[#123b4b]"><input type="checkbox" checked={details.is_published} onChange={(event) => update('is_published', event.target.checked)} className="size-4 accent-[#087f88]" /><span>Publish this account to clients</span></label><div className="flex flex-wrap gap-2"><button type="submit" disabled={saving} className="btn-primary disabled:opacity-60">{saving ? 'Saving...' : editingId ? 'Save account changes' : 'Add account'} <Check size={15} /></button>{editingId && <button type="button" onClick={() => void removeAccount()} className="btn-secondary text-[#a55445]">Remove account</button>}</div></div>{error && <p role="alert" className="text-sm text-[#a55445]">{error}</p>}{saved && <p role="status" className="text-sm text-[#2e6b3e]">{saved}</p>}</form></div>}</section>;
 }
 
+function PurchasePaymentAccountEditor({ details, editingId, saving, error, logoFile, logoPreview, onUpdate, onSave, onClose, onRemove, onLogoFileChange, onClearLogo }: { details: PurchasePaymentInstructions; editingId: string; saving: boolean; error: string; logoFile: File | null; logoPreview: string; onUpdate: (key: keyof PurchasePaymentInstructions, value: string | boolean | number | null) => void; onSave: (event: FormEvent<HTMLFormElement>) => Promise<void>; onClose: () => void; onRemove: () => void; onLogoFileChange: (file: File | null) => void; onClearLogo: () => void }) {
+  return <section className="treasury-account-editor">
+    <header className="treasury-account-editor-header"><button type="button" onClick={onClose}><ArrowLeft size={14} />Client Payment Setup</button><div><p className="eyebrow">Treasury Setup</p><h2>Official Bank Instructions</h2><p>Choose which verified accounts clients can see and exactly one account for purchase quotations.</p></div><span className="treasury-editor-hero-icon"><Landmark size={42} strokeWidth={1.5} /></span></header>
+    <div className="treasury-account-editor-grid">
+      <aside className="treasury-editor-aside"><article><span className="treasury-editor-aside-icon"><Info size={17} /></span><h3>Bank Details</h3><p>Add the bank account details that clients will use for payments and purchase quotations.</p><span className="treasury-aside-decoration" /></article><article><span className="treasury-editor-aside-icon"><ShieldCheck size={17} /></span><h3>Security &amp; Verification</h3><p>Only verified accounts can be seen in the portal. This helps ensure secure and accurate transactions.</p></article><article className="treasury-editor-tips"><span className="treasury-editor-aside-icon"><Lightbulb size={17} /></span><h3>Quick Tips</h3><ul><li><Check size={12} />Ensure account details are correct and up to date.</li><li><Check size={12} />Use the same account for international transfers if required.</li><li><Check size={12} />Contact support if you need assistance.</li></ul></article></aside>
+      <form onSubmit={onSave} className="treasury-account-form"><header><span><Landmark size={20} /></span><div><h3>Bank Account Details</h3><p>Provide the bank information below for client payments.</p></div></header><div className="treasury-account-fields"><label><span>Bank Name *</span><div><Landmark size={14} /><input required value={details.bank_name} onChange={(event) => onUpdate('bank_name', event.target.value)} placeholder="Enter verified bank name" /></div></label><label><span>Branch</span><div><MapPin size={14} /><input value={details.bank_branch} onChange={(event) => onUpdate('bank_branch', event.target.value)} placeholder="Branch name or location" /></div></label><label><span>Account Name *</span><div><UserRound size={14} /><input required value={details.account_name} onChange={(event) => onUpdate('account_name', event.target.value)} placeholder="Verified beneficiary name" /></div></label><label><span>Account Number *</span><div><CreditCard size={14} /><input required value={details.account_number} onChange={(event) => onUpdate('account_number', event.target.value)} placeholder="Verified account number" /></div></label><label><span>Swift / BIC</span><div><Globe2 size={14} /><input value={details.swift_code} onChange={(event) => onUpdate('swift_code', event.target.value)} placeholder="For international transfers" /></div></label><label><span>Display Order</span><div><ArrowUpDown size={14} /><input type="number" min="0" value={details.display_order} onChange={(event) => onUpdate('display_order', Number(event.target.value) || 0)} /></div></label></div><div className="treasury-logo-field"><div><span>Bank Logo</span><small>PNG, JPEG, or WebP · Max 5 MB</small></div><div className="treasury-logo-control"><span className="treasury-logo-preview">{logoPreview ? <img src={logoPreview} alt={`${details.bank_name || 'Bank'} logo preview`} /> : <Building2 size={20} />}</span><label className="treasury-logo-picker"><Upload size={13} />{logoFile ? 'Replace logo' : logoPreview ? 'Change logo' : 'Upload logo'}<input type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => onLogoFileChange(event.target.files?.[0] ?? null)} /></label>{logoPreview && <button type="button" onClick={onClearLogo}>Remove logo</button>}</div></div><label className="treasury-payment-instructions"><span>Payment Instructions</span><div><FileText size={14} /><textarea rows={3} value={details.payment_instructions} onChange={(event) => onUpdate('payment_instructions', event.target.value)} placeholder="Transfer notes, accepted currency, or proof-of-payment directions" /></div></label><div className="treasury-account-options"><label><input type="checkbox" checked={details.is_published} onChange={(event) => onUpdate('is_published', event.target.checked)} /><span><strong>Publish this account to clients</strong><small>Only published verified accounts appear in the portal.</small></span></label><label><input type="checkbox" checked={details.is_quotation_default} disabled={!details.is_published} onChange={(event) => onUpdate('is_quotation_default', event.target.checked)} /><span><strong>Use for purchase quotations</strong><small>Only one published account can be selected. Saving replaces the current quotation default.</small></span></label></div>{error && <p className="treasury-account-message is-error" role="alert">{error}</p>}<footer>{editingId && <button type="button" className="treasury-remove-account" onClick={onRemove}><Trash2 size={14} />Remove account</button>}<button type="submit" className="treasury-save-account" disabled={saving}>{saving ? 'Saving...' : editingId ? 'Save Changes' : 'Add Account'}<Check size={15} /></button></footer></form>
+    </div>
+  </section>;
+}
+
 function FinancialVaultTab({ user, goTo }: { user: AdminUser; goTo?: (tab: AdminTab) => void }) {
+  const [accountEditorOpen, setAccountEditorOpen] = useState(false);
   const [units, setUnits] = useState<ProjectUnit[]>([]);
   const [financials, setFinancials] = useState<VaultFinancial[]>([]);
   const [sales, setSales] = useState<VaultSale[]>([]);
@@ -1345,8 +1440,13 @@ function FinancialVaultTab({ user, goTo }: { user: AdminUser; goTo?: (tab: Admin
   if (completedRevenue && marginRate < 20) advice.push({ message: `Estimated completed-sale margin is ${marginRate.toFixed(1)}%. Compare unit pricing with recorded construction costs.`, action: 'Review cost book', target: 'vault-unit-cost-book' });
   if (!advice.length) advice.push({ message: 'Recorded costs, receivables, and completed-sale margin show no immediate flags. Review the latest sales and keep monthly records current.', action: 'Review recent sales', tab: 'sales' });
 
-  return <div className="grid gap-7">
-    <PurchasePaymentInstructionsPanel user={user} />
+  return <div className="financial-vault grid gap-6">
+    <header className="financial-vault-header"><div><p className="eyebrow">Treasury · Owner workspace</p><h2>Financial Vault</h2><p>Review recorded sales, collections, commissions, and unit costs from one place.</p></div><div className="financial-vault-header-actions"><span><ShieldCheck size={14} />Restricted access</span><button type="button" onClick={() => void load()}><RefreshCw size={14} />Refresh vault</button></div></header>
+    <section className="financial-vault-metrics" aria-label="Vault financial summary"><article><span>Completed sale value</span><strong>{fmtKes(completedRevenue)}</strong><small>{completedSales.length} completed sales</small></article><article><span>Estimated realized profit</span><strong className={estimatedProfit >= 0 ? 'is-positive' : 'is-negative'}>{fmtKes(estimatedProfit)}</strong><small>Recorded costs and commissions deducted</small></article><article><span>Buyer receivables</span><strong>{fmtKes(receivables)}</strong><small>{receivables ? 'Requires reconciliation' : 'No outstanding balance'}</small></article><article><span>Commission pending</span><strong>{fmtKes(Math.max(0, commissionEarned - commissionPaid))}</strong><small>Earned less recorded payouts</small></article></section>
+    <div className={`financial-account-region ${accountEditorOpen ? 'is-editing' : ''}`}>
+      <PurchasePaymentInstructionsPanel user={user} accountEditorOpen={accountEditorOpen} setAccountEditorOpen={setAccountEditorOpen} />
+      {accountEditorOpen && <button type="button" className="financial-account-close" aria-label="Close bank account editor without saving" onClick={() => setAccountEditorOpen(false)}><X size={14} />Close</button>}
+    </div>
     <section className="rounded-xl border border-[#a9d9d8] bg-[#eefbf9] p-5">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
         <div>
@@ -1377,13 +1477,6 @@ function FinancialVaultTab({ user, goTo }: { user: AdminUser; goTo?: (tab: Admin
           <p className="mt-1 text-xs text-slate-500">Review pending agent payout status before closeout.</p>
         </div>
       </div>
-    </section>
-
-    <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-      <StatMini label="Estimated realized profit" value={fmtKes(estimatedProfit)} color={estimatedProfit >= 0 ? 'text-[#2e6b3e]' : 'text-[#a55445]'} />
-      <StatMini label="Completed sale value" value={fmtKes(completedRevenue)} color="text-[#2e5f7a]" />
-      <StatMini label="Commissions earned / paid" value={`${fmtKes(commissionEarned)} / ${fmtKes(commissionPaid)}`} color="text-[#856b2e]" />
-      <StatMini label="Buyer receivables" value={fmtKes(receivables)} color={receivables ? 'text-[#a55445]' : 'text-[#2e6b3e]'} />
     </section>
 
     <section className="grid gap-6 xl:grid-cols-[1.3fr_.7fr]">
